@@ -197,36 +197,36 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 | Field   | Required | Type                          | Description                    |
 | :------ | :------- | :---------------------------- | :----------------------------- |
-| vcpu    | No       | [Vcpu](#vm-vcpu-object)       | Virtual CPU configuration      |
-| memory  | No       | [Memory](#vm-memory-object)   | Memory configuration           |
-| storage | No       | [Storage](#vm-storage-object) | Storage configuration          |
+| vcpu    | Yes      | [Vcpu](#vm-vcpu-object)       | Virtual CPU configuration      |
+| memory  | Yes      | [Memory](#vm-memory-object)   | Memory configuration           |
+| storage | Yes      | [Storage](#vm-storage-object) | Storage configuration          |
 | guestOS | Yes      | [GuestOS](#vm-guestos-object) | Operating system specification |
-| access  | No       | [Access](#vm-access-object)   | VM access configuration        |
+| access  | Yes      | [Access](#vm-access-object)   | VM access configuration        |
 
 #### VM vcpu Object
 
 | Field | Required | Type    | Description            |
 | :---- | :------- | :------ | :--------------------- |
-| count | No       | integer | Number of virtual CPUs |
+| count | Yes      | integer | Number of virtual CPUs |
 
 #### VM memory Object
 
 | Field | Required | Type   | Description                                 |
 | :---- | :------- | :----- | :------------------------------------------ |
-| size  | No       | string | Memory size with unit (e.g., _8GB_, _16GB_) |
+| size  | Yes      | string | Memory size with unit (e.g., _8GB_, _16GB_) |
 
 #### VM storage Object
 
 | Field | Required | Type                           | Description                 |
 | :---- | :------- | :----------------------------- | :-------------------------- |
-| disks | No       | array[[Disk](#vm-disk-object)] | List of disk specifications |
+| disks | Yes      | array[[Disk](#vm-disk-object)] | List of disk specifications |
 
 #### VM disk Object
 
 | Field    | Required | Type   | Description                                    |
 | :------- | :------- | :----- | :--------------------------------------------- |
-| name     | No       | string | Disk identifier (e.g., _boot_, _data_)         |
-| capacity | No       | string | Disk capacity with unit (e.g., _100GB_, _2TB_) |
+| name     | Yes      | string | Disk identifier (e.g., _boot_, _data_)         |
+| capacity | Yes      | string | Disk capacity with unit (e.g., _100GB_, _2TB_) |
 
 #### VM guestOS Object
 
@@ -238,7 +238,7 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 | Field        | Required | Type   | Description                  |
 | :----------- | :------- | :----- | :--------------------------- |
-| sshPublicKey | No       | string | SSH public key for VM access |
+| sshPublicKey | Yes      | string | SSH public key for VM access |
 
 ### Containers
 
@@ -254,9 +254,9 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 | Field     | Required | Type                                     | Description                   |
 | :-------- | :------- | :--------------------------------------- | :---------------------------- |
 | image     | Yes      | [Image](#container-image-object)         | Container image specification |
-| resources | No       | [Resources](#container-resources-object) | CPU and memory limits         |
-| process   | No       | [Process](#container-process-object)     | Process configuration         |
-| network   | No       | [Network](#container-network-object)     | Network configuration         |
+| resources | Yes      | [Resources](#container-resources-object) | CPU and memory limits         |
+| process   | Yes      | [Process](#container-process-object)     | Process configuration         |
+| network   | Yes      | [Network](#container-network-object)     | Network configuration         |
 
 #### Container image Object
 
@@ -268,47 +268,47 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 | Field  | Required | Type                                         | Description                 |
 | :----- | :------- | :------------------------------------------- | :-------------------------- |
-| cpu    | No       | [Cpu](#container-resources-cpu-object)       | CPU resource constraints    |
-| memory | No       | [Memory](#container-resources-memory-object) | Memory resource constraints |
+| cpu    | Yes      | [Cpu](#container-resources-cpu-object)       | CPU resource constraints    |
+| memory | Yes      | [Memory](#container-resources-memory-object) | Memory resource constraints |
 
 #### Container resources.cpu Object
 
 | Field | Required | Type    | Description                  |
 | :---- | :------- | :------ | :--------------------------- |
-| min   | No       | integer | Minimum guaranteed CPU cores |
-| max   | No       | integer | Maximum allowed CPU cores    |
+| min   | Yes      | integer | Minimum guaranteed CPU cores |
+| max   | Yes      | integer | Maximum allowed CPU cores    |
 
 #### Container resources.memory Object
 
 | Field | Required | Type   | Description                                              |
 | :---- | :------- | :----- | :------------------------------------------------------- |
-| min   | No       | string | Minimum guaranteed memory with unit (e.g., _1GB_, _2GB_) |
-| max   | No       | string | Maximum allowed memory with unit (e.g., _2GB_, _4GB_)    |
+| min   | Yes      | string | Minimum guaranteed memory with unit (e.g., _1GB_, _2GB_) |
+| max   | Yes      | string | Maximum allowed memory with unit (e.g., _2GB_, _4GB_)    |
 
 #### Container process Object
 
 | Field | Required | Type                                   | Description           |
 | :---- | :------- | :------------------------------------- | :-------------------- |
-| env   | No       | array[[EnvVar](#container-env-object)] | Environment variables |
+| env   | Yes      | array[[EnvVar](#container-env-object)] | Environment variables |
 
 #### Container env Object
 
 | Field | Required | Type   | Description                |
 | :---- | :------- | :----- | :------------------------- |
-| name  | No       | string | Environment variable name  |
-| value | No       | string | Environment variable value |
+| name  | Yes      | string | Environment variable name  |
+| value | Yes      | string | Environment variable value |
 
 #### Container network Object
 
 | Field | Required | Type                                  | Description     |
 | :---- | :------- | :------------------------------------ | :-------------- |
-| ports | No       | array[[Port](#container-port-object)] | Ports to expose |
+| ports | Yes      | array[[Port](#container-port-object)] | Ports to expose |
 
 #### Container port Object
 
 | Field         | Required | Type    | Description                                 |
 | :------------ | :------- | :------ | :------------------------------------------ |
-| containerPort | No       | integer | Port number to expose (e.g., _8080_, _443_) |
+| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_) |
 
 ### Database
 
@@ -324,16 +324,16 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 | Field     | Required | Type                                    | Description                                                                    |
 | :-------- | :------- | :-------------------------------------- | :----------------------------------------------------------------------------- |
 | engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _elasticsearch_, _mongodb_) |
-| version   | No       | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                                     |
-| resources | No       | [Resources](#database-resources-object) | Compute and storage resources                                                  |
+| version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                                     |
+| resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                                  |
 
 #### Database resources Object
 
 | Field   | Required | Type    | Description                                   |
 | :------ | :------- | :------ | :-------------------------------------------- |
-| cpu     | No       | integer | Number of CPU cores                           |
-| memory  | No       | string  | Memory size with unit (e.g., _8GB_, _16GB_)   |
-| storage | No       | string  | Storage size with unit (e.g., _100GB_, _2TB_) |
+| cpu     | Yes      | integer | Number of CPU cores                           |
+| memory  | Yes      | string  | Memory size with unit (e.g., _8GB_, _16GB_)   |
+| storage | Yes      | string  | Storage size with unit (e.g., _100GB_, _2TB_) |
 
 ### Kubernetes Cluster
 
@@ -350,32 +350,32 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 | Field   | Required | Type                           | Description                               |
 | :------ | :------- | :----------------------------- | :---------------------------------------- |
 | version | Yes      | string                         | Kubernetes version (e.g., _1.29_, _1.30_) |
-| nodes   | No       | [Nodes](#cluster-nodes-object) | Node pool configuration                   |
+| nodes   | Yes      | [Nodes](#cluster-nodes-object) | Node pool configuration                   |
 
 #### Cluster nodes Object
 
 | Field        | Required | Type                                         | Description                      |
 | :----------- | :------- | :------------------------------------------- | :------------------------------- |
-| controlPlane | No       | [ControlPlane](#cluster-controlplane-object) | Control plane node configuration |
-| worker       | No       | [Worker](#cluster-worker-object)             | Worker node configuration        |
+| controlPlane | Yes      | [ControlPlane](#cluster-controlplane-object) | Control plane node configuration |
+| worker       | Yes      | [Worker](#cluster-worker-object)             | Worker node configuration        |
 
 #### Cluster controlPlane Object
 
 | Field   | Required | Type    | Description                                         |
 | :------ | :------- | :------ | :-------------------------------------------------- |
-| count   | No       | integer | Number of control plane nodes                       |
-| cpu     | No       | integer | Number of CPUs per node                             |
-| memory  | No       | string  | Memory per node with unit (e.g., _16GB_, _32GB_)    |
-| storage | No       | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+| count   | Yes      | integer | Number of control plane nodes                       |
+| cpu     | Yes      | integer | Number of CPUs per node                             |
+| memory  | Yes      | string  | Memory per node with unit (e.g., _16GB_, _32GB_)    |
+| storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
 
 #### Cluster worker Object
 
 | Field   | Required | Type    | Description                                         |
 | :------ | :------- | :------ | :-------------------------------------------------- |
-| count   | No       | integer | Number of worker nodes                              |
-| cpu     | No       | integer | Number of CPUs per node                             |
-| memory  | No       | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
-| storage | No       | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+| count   | Yes      | integer | Number of worker nodes                              |
+| cpu     | Yes      | integer | Number of CPUs per node                             |
+| memory  | Yes      | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
+| storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
 
 ### Upgrade / Downgrade Strategy
 
