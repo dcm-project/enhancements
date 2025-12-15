@@ -1,11 +1,15 @@
 ---
 title: service-type-definition
 authors:
-  - "@github-handle"
+  - "@gciavarrini"
 reviewers:
-  - TBD
-approvers:
-  - TBD
+  - machacekondra
+  - ygalblum
+  - jubah
+  - croadfel
+  - flocati
+  - pkliczewski
+  - gabriel-farache
 creation-date: 2025-12-05
 ---
 
@@ -372,14 +376,6 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 | cpu     | No       | integer | Number of CPUs per node                             |
 | memory  | No       | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
 | storage | No       | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
-
-### Risks and Mitigations
-
-TBD
-
-## Design Details
-
-TBD
 
 ### Upgrade / Downgrade Strategy
 
