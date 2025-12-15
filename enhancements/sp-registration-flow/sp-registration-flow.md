@@ -168,11 +168,6 @@ with AEP, the response payload for a creation request mirrors the request
 payload. Therefore, the response will contain all fields from the create
 request, possibly with updated values.
 
-**Non-Goal**
-The design and implementation of meta-service-providers is out of scope for this
-enhancement, which focuses on the Service Provider registration mechanism.
-_meta-service-provider_ design will be addressed in a separate enhancement.
-
 ##### Update Service Provider capabilities flow
 
 The registration endpoint is idempotent. If an SP's capabilities change
