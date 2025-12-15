@@ -22,13 +22,12 @@ creation-date: 2025-12-05
 The DCM (Data Center Management) is designed to provide a unified control plane
 for managing distributed infrastructure across multiple enclaves, including
 air-gapped environments, regional datacenters, and isolated security zones (e.g.
-ships, edge locations).
-A fundamental architectural decision must be made about how Service Providers
-(SP) — the components that execute infrastructure provisioning work — become
-known to and integrate with the DCM Control Plane. This decision directly
-impacts scalability, security, network topology, operational model (whether
-centralized DCM teams or distributed SME teams manage Service Provider
-lifecycle).
+ships, edge locations). A fundamental architectural decision must be made about
+how Service Providers (SP) — the components that execute infrastructure
+provisioning work — become known to and integrate with the DCM Control Plane.
+This decision directly impacts scalability, security, network topology,
+operational model (whether centralized DCM teams or distributed SME teams manage
+Service Provider lifecycle).
 
 ## Motivation
 
@@ -54,12 +53,12 @@ lifecycle).
 
 Service Providers must register using the DCM Service Provider API to operate
 within the DCM system. The Registration Handler component implements the
-provider registration endpoints of the Service Provider API.
-The registration phase provides to the DCM Control Plane the SP endpoint,
-metadata and capabilities so it can route requests to the appropriate SP.
-The registration call can be initiated either by the SP itself during start up
-phase or by a third party (e.g. platform admins) on behalf of the SP. Both
-approaches use the same registration API.
+provider registration endpoints of the Service Provider API. The registration
+phase provides to the DCM Control Plane the SP endpoint, metadata and
+capabilities so it can route requests to the appropriate SP. The registration
+call can be initiated either by the SP itself during start up phase or by a
+third party (e.g. platform admins) on behalf of the SP. Both approaches use the
+same registration API.
 
 The _initial implementation_ will focus only on the **self registration flow**.
 
@@ -76,11 +75,10 @@ Service Provider API that implements the provider registration endpoints
 registers, the Registration Handler communicates with the Control Plane to
 update the Service Registry and Service Catalog.
 
-Architectural Assumptions
-There must be network connectivity between Service Providers and the Service
-Provider API.
-If the Service Provider API cannot reach an SP, it cannot route provisioning
-requests to it, regardless of the registration or discovery method used.
+Architectural Assumptions There must be network connectivity between Service
+Providers and the Service Provider API. If the Service Provider API cannot reach
+an SP, it cannot route provisioning requests to it, regardless of the
+registration or discovery method used.
 
 #### Registration Flow
 
@@ -134,9 +132,8 @@ flowchart BT
 - Each Service Provider must implement Service Provider API contract at a
   reachable endpoint
 - A registration call must be made to the Service Provider API (Registration
-  Handler endpoint) for each service type the SP supports.
-  The payload will be defined in a dedicated enhancement.
-  It may include, just as an example:
+  Handler endpoint) for each service type the SP supports. The payload will be
+  defined in a dedicated enhancement. It may include, just as an example:
   1. Unique provider name
   2. Unique providerID
   3. Endpoint URL (e.g.,
@@ -159,8 +156,7 @@ registrations.
 
 During the registration phase, if the provided Service Provider _name_ already
 exists in DCM, the registration will fail. Similarly, registration will also
-fail if the Service Provider provides a _providerID_ that already exists in
-DCM.
+fail if the Service Provider provides a _providerID_ that already exists in DCM.
 If the Service Provider does not specify a _providerID_, DCM will automatically
 generate one. The response to a create request will always include the
 _providerID_, regardless of whether it was generated or provided. Consistent
@@ -258,8 +254,8 @@ This approach separates registration from capability advertisement. The benefit
 is that the Control Plane always queries real-time capacity and availability
 during placement decisions, rather than relying on potentially stale cached
 capabilities. This is useful when SP capabilities change frequently based on
-resource availability.
-Same as the static approach the registration process is per service type.
+resource availability. Same as the static approach the registration process is
+per service type.
 
 ```mermaid
 flowchart TD
@@ -316,35 +312,29 @@ proactively send registration information to the Service Provider API
 (Registration Handler endpoints). However, during placement operations, the DCM
 Control Plane **pulls** information from the Service Provider API.
 
-- _Registration:_
-  The SP initiates the process by pushing registration information to the
-  Control Plane.
-- Workflow Execution
-  The Control Plane pushes provisioning requests to the SP.
+- _Registration:_ The SP initiates the process by pushing registration
+  information to the Control Plane.
+- Workflow Execution The Control Plane pushes provisioning requests to the SP.
 
 #### Advantages
 
-- Decentralized Control
-  It's the SME team that maintains control over when their SPs become active in
-  the system
-- Efficient Registration
-  Complete metadata is provided in a single registration call.
-- Scalability
-  Supports large-scale deployments, handling tens to hundreds of distributed SP
-  instances
-- Industry Alignment
-  Consistent with established industry patterns (e.g., Kubernetes, Crossplane,
-  Consul).
+- Decentralized Control It's the SME team that maintains control over when their
+  SPs become active in the system
+- Efficient Registration Complete metadata is provided in a single registration
+  call.
+- Scalability Supports large-scale deployments, handling tens to hundreds of
+  distributed SP instances
+- Industry Alignment Consistent with established industry patterns (e.g.,
+  Kubernetes, Crossplane, Consul).
 
 #### Drawbacks
 
-- Protocol Understanding
-  SP implementers are required to understand the registration protocol.
-- Explicit Registration
-  An explicit registration step is necessary; automatic discovery is not
-  supported.
-- Re-registration on Change
-  Any changes to the SP endpoint necessitate a re-registration process.
+- Protocol Understanding SP implementers are required to understand the
+  registration protocol.
+- Explicit Registration An explicit registration step is necessary; automatic
+  discovery is not supported.
+- Re-registration on Change Any changes to the SP endpoint necessitate a
+  re-registration process.
 
 ### DCM discovers Service Providers
 
@@ -400,38 +390,31 @@ flowchart BT
 
 #### Advantages
 
-- Automatic Discovery
-  No explicit registration step is needed from the Service Provider (SP).
-- Centralized Control
-  The Control Plane manages the discovery process, providing a centralized view
-  and timing control.
-- Passive SPs
-  SPs are passive; they wait to be discovered instead of actively registering.
-- Automatic Change Detection
-  Changes to SP endpoints can be automatically detected via re-scanning,
-  provided the endpoint is reachable.
+- Automatic Discovery No explicit registration step is needed from the Service
+  Provider (SP).
+- Centralized Control The Control Plane manages the discovery process, providing
+  a centralized view and timing control.
+- Passive SPs SPs are passive; they wait to be discovered instead of actively
+  registering.
+- Automatic Change Detection Changes to SP endpoints can be automatically
+  detected via re-scanning, provided the endpoint is reachable.
 
 #### Disadvantages
 
-- Air-Gapped
-  Discovery fails in disconnected networks
-- Firewall Issues
-  Inbound scanning is typically blocked by network security policies.
-- Scalability Concerns
-  Scanning is impractical for hundreds of SPs across various networks and
-  security zones.
-- Discovery Delay
-  A time gap exists between SP deployment and its actual discovery (dependent on
-  the scan interval).
-- Network Configuration Overhead
-  Requires maintenance of network ranges and port configurations for scanning.
-- SP Cooperation Still Needed
-  SPs must still implement a discovery endpoint and respond with metadata.
-- Security Risks
-  Network scanning can trigger security alerts or violate existing security
+- Air-Gapped Discovery fails in disconnected networks
+- Firewall Issues Inbound scanning is typically blocked by network security
   policies.
-- Lack of Readiness Control
-  SME teams cannot control when SPs join the system or signal maintenance
-  windows
-- Persistent Network Routes
-  The Control Plane must maintain network routes to all SP networks.
+- Scalability Concerns Scanning is impractical for hundreds of SPs across
+  various networks and security zones.
+- Discovery Delay A time gap exists between SP deployment and its actual
+  discovery (dependent on the scan interval).
+- Network Configuration Overhead Requires maintenance of network ranges and port
+  configurations for scanning.
+- SP Cooperation Still Needed SPs must still implement a discovery endpoint and
+  respond with metadata.
+- Security Risks Network scanning can trigger security alerts or violate
+  existing security policies.
+- Lack of Readiness Control SME teams cannot control when SPs join the system or
+  signal maintenance windows
+- Persistent Network Routes The Control Plane must maintain network routes to
+  all SP networks.
