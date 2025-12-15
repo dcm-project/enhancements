@@ -71,8 +71,8 @@ The
 is under development.
 
 Within this architecture, the _Registration Handler_ is a component within the
-Service Provider API that implements the provider registration endpoints _(POST
-/resource/{resourceKind}/provider_ and related endpoints). When an SP registers,
+Service Provider API that implements the provider registration endpoints (`POST
+/service/{serviceType}/provider` and related endpoints). When an SP registers,
 the Registration Handler communicates with the Control Plane to update the
 Service Registry and Service Catalog.
 
