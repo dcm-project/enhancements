@@ -88,16 +88,29 @@ All service schemas share common fields defined once in
 
 ## Schema Structure
 
-| Field         | Required | Type   | Description                                                                                                                       |
-| :------------ | :------- | :----- | :-------------------------------------------------------------------------------------------------------------------------------- |
-| kind          | Yes      | string | Service type identifier (_vm, database, etc._)                                                                                    |
-| schemaVersion | Yes      | string | Schema version (e.g., _v1aplha1_)                                                                                                 |
-| metadata      | Yes      | object | Service name (required) plus custom key-values pair for tagging (e.g., _labels: {environment: production, owner: platform-team}_) |
-| providerHints | No       | object | Platform specific config (e.g., _"kubevirt: {instanceType: u1.large}", "vmware: {vmxVersion: 17}")_                               |
+| Field         | Required | Type                                   | Description                                                        |
+| :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- |
+| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) |
+| schemaVersion | Yes      | string                                 | Schema version (e.g., _v1alpha1_)                                  |
+| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  |
+| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    |
+
+### Metadata Object
+
+| Field  | Required | Type              | Description                                                                                            |
+| :----- | :------- | :---------------- | :----------------------------------------------------------------------------------------------------- |
+| name   | Yes      | string            | Unique service name identifier                                                                         |
+| labels | No       | map[string]string | Key-value pairs for tagging and organization (e.g., _environment: production_, _owner: platform-team_) |
+
+### ProviderHints Object
+
+| Field             | Required | Type           | Description                                                                                            |
+| :---------------- | :------- | :------------- | :----------------------------------------------------------------------------------------------------- |
+| \<provider-name\> | No       | map[string]any | Provider-specific configuration keyed by provider identifier (e.g., _kubevirt_, _vmware_, _openstack_) |
 
 _providerHints_ is key to portability: providers use hints they recognize and
-ignore the rest. This means catalog offering using only common fields (vcpu,
-memory, guestOS) can be provisioned by any compatible provider. The
+ignore the rest. This means catalog offering using only common fields (`vcpu`,
+`memory`, `guestOS`) can be provisioned by any compatible provider. The
 _providerHints_ section allows adding platform-specific optimizations: providers
 use hints they recognize and silently ignore the rest, so the same catalog item
 remains portable across platforms.
@@ -174,18 +187,54 @@ flowchart TD
 #### Schema
 
 For easier review, the schema is accessible here
-[vmspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/vmspec.yaml)
-.  
-Plus common fields: _schemaVersion, metadata, providerHints_
+[vmspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/vmspec.yaml).  
+Plus
+common fields: _serviceType, schemaVersion, metadata, providerHints_
 
-| Field                      | Required | Type    | Description                                    |
-| :------------------------- | :------- | :------ | :--------------------------------------------- |
-| vcpu.count                 | No \*\*  | integer | Number of virtual CPUs                         |
-| memroy.size                | No \*\*  | integer | Memory with unit                               |
-| storage.disks\[\].name     | No       | string  | Disk identifier (e.g., _boot_, _data_)         |
-| storage.disks\[\].capacity | No       | string  | Disk capacity with unit (e.g., _100GB, 2TB_)   |
-| guestOS.type               | Yes      | string  | OS identifier (e.g., _rhel-9_, _ubuntu-22.04_) |
-| access.sshPublicKey        | No       | string  | SSH public key for VM access (optional)        |
+| Field   | Required | Type                          | Description                    |
+| :------ | :------- | :---------------------------- | :----------------------------- |
+| vcpu    | No       | [Vcpu](#vm-vcpu-object)       | Virtual CPU configuration      |
+| memory  | No       | [Memory](#vm-memory-object)   | Memory configuration           |
+| storage | No       | [Storage](#vm-storage-object) | Storage configuration          |
+| guestOS | Yes      | [GuestOS](#vm-guestos-object) | Operating system specification |
+| access  | No       | [Access](#vm-access-object)   | VM access configuration        |
+
+#### VM vcpu Object
+
+| Field | Required | Type    | Description            |
+| :---- | :------- | :------ | :--------------------- |
+| count | No       | integer | Number of virtual CPUs |
+
+#### VM memory Object
+
+| Field | Required | Type   | Description                                 |
+| :---- | :------- | :----- | :------------------------------------------ |
+| size  | No       | string | Memory size with unit (e.g., _8GB_, _16GB_) |
+
+#### VM storage Object
+
+| Field | Required | Type                           | Description                 |
+| :---- | :------- | :----------------------------- | :-------------------------- |
+| disks | No       | array[[Disk](#vm-disk-object)] | List of disk specifications |
+
+#### VM disk Object
+
+| Field    | Required | Type   | Description                                    |
+| :------- | :------- | :----- | :--------------------------------------------- |
+| name     | No       | string | Disk identifier (e.g., _boot_, _data_)         |
+| capacity | No       | string | Disk capacity with unit (e.g., _100GB_, _2TB_) |
+
+#### VM guestOS Object
+
+| Field | Required | Type   | Description                                                           |
+| :---- | :------- | :----- | :-------------------------------------------------------------------- |
+| type  | Yes      | string | OS identifier (e.g., _rhel-9_, _ubuntu-22.04_, _windows-server-2022_) |
+
+#### VM access Object
+
+| Field        | Required | Type   | Description                  |
+| :----------- | :------- | :----- | :--------------------------- |
+| sshPublicKey | No       | string | SSH public key for VM access |
 
 ### Containers
 
@@ -196,17 +245,66 @@ The following sections detail the Container schema architecture.
 For easier review, the schema is accessible here
 [containerspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/containerspec.yaml).  
 Plus
-common fields: _schemaVersion, metadata, providerHints_
+common fields: _serviceType, schemaVersion, metadata, providerHints_
 
-| Field                           | Required | Type    | Description                                                           |
-| :------------------------------ | :------- | :------ | :-------------------------------------------------------------------- |
-| image.reference                 | Yes      | string  | Container Image (e.g., "_quay.io/myapp:v1.2_")                        |
-| resources.cpu.min               | No       | integer | Minimum guaranteed CPU                                                |
-| resources.cpu.max               | No       | integer | Maximum guaranteed CPU                                                |
-| resources.memory.min            | No       | integer | Minimum guaranteed memory with unit (e.g., _100GB, 2TB_)              |
-| resources.memory.max            | No       | integer | Maximum allowed memory with unit (e.g., _100GB_, _1TB_)               |
-| process.env\[\]                 | No       | array   | Environment variables (e.g., _{name: "DB_HOST", value: "localhost"}_) |
-| network.ports\[\].containerPort | No       | integer | Ports to expose (e.g., _8080, 443_)                                   |
+| Field     | Required | Type                                     | Description                   |
+| :-------- | :------- | :--------------------------------------- | :---------------------------- |
+| image     | Yes      | [Image](#container-image-object)         | Container image specification |
+| resources | No       | [Resources](#container-resources-object) | CPU and memory limits         |
+| process   | No       | [Process](#container-process-object)     | Process configuration         |
+| network   | No       | [Network](#container-network-object)     | Network configuration         |
+
+#### Container image Object
+
+| Field     | Required | Type   | Description                                                                      |
+| :-------- | :------- | :----- | :------------------------------------------------------------------------------- |
+| reference | Yes      | string | Container image reference (e.g., _quay.io/myapp:v1.2_, _docker.io/nginx:latest_) |
+
+#### Container resources Object
+
+| Field  | Required | Type                                         | Description                 |
+| :----- | :------- | :------------------------------------------- | :-------------------------- |
+| cpu    | No       | [Cpu](#container-resources-cpu-object)       | CPU resource constraints    |
+| memory | No       | [Memory](#container-resources-memory-object) | Memory resource constraints |
+
+#### Container resources.cpu Object
+
+| Field | Required | Type    | Description                  |
+| :---- | :------- | :------ | :--------------------------- |
+| min   | No       | integer | Minimum guaranteed CPU cores |
+| max   | No       | integer | Maximum allowed CPU cores    |
+
+#### Container resources.memory Object
+
+| Field | Required | Type   | Description                                              |
+| :---- | :------- | :----- | :------------------------------------------------------- |
+| min   | No       | string | Minimum guaranteed memory with unit (e.g., _1GB_, _2GB_) |
+| max   | No       | string | Maximum allowed memory with unit (e.g., _2GB_, _4GB_)    |
+
+#### Container process Object
+
+| Field | Required | Type                                   | Description           |
+| :---- | :------- | :------------------------------------- | :-------------------- |
+| env   | No       | array[[EnvVar](#container-env-object)] | Environment variables |
+
+#### Container env Object
+
+| Field | Required | Type   | Description                |
+| :---- | :------- | :----- | :------------------------- |
+| name  | No       | string | Environment variable name  |
+| value | No       | string | Environment variable value |
+
+#### Container network Object
+
+| Field | Required | Type                                  | Description     |
+| :---- | :------- | :------------------------------------ | :-------------- |
+| ports | No       | array[[Port](#container-port-object)] | Ports to expose |
+
+#### Container port Object
+
+| Field         | Required | Type    | Description                                 |
+| :------------ | :------- | :------ | :------------------------------------------ |
+| containerPort | No       | integer | Port number to expose (e.g., _8080_, _443_) |
 
 ### Database
 
@@ -217,15 +315,21 @@ The following sections detail the Database schema architecture.
 For easier review, the schema is accessible here
 [databasespec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/databasespec.yaml).  
 Plus
-common fields: schemaVersion, metadata, providerHints.
+common fields: _serviceType, schemaVersion, metadata, providerHints_
 
-| Field             | Required | Type    | Description                                       |
-| :---------------- | :------- | :------ | :------------------------------------------------ |
-| engine            | Yes      | string  | Database type (e.g., _postgresql, elasticsearch_) |
-| version           | No       | string  | Engine version (e.g., _15, 8.11_)                 |
-| resources.cpu     | No       | integer | CPU cores                                         |
-| resources.memory  | No       | string  | Memory in with unit (e.g., _100GB, 2TB_)          |
-| resources.storage | No       | string  | Storage size with unit (e.g., _100GB, 2TB_)       |
+| Field     | Required | Type                                    | Description                                                                    |
+| :-------- | :------- | :-------------------------------------- | :----------------------------------------------------------------------------- |
+| engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _elasticsearch_, _mongodb_) |
+| version   | No       | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                                     |
+| resources | No       | [Resources](#database-resources-object) | Compute and storage resources                                                  |
+
+#### Database resources Object
+
+| Field   | Required | Type    | Description                                   |
+| :------ | :------- | :------ | :-------------------------------------------- |
+| cpu     | No       | integer | Number of CPU cores                           |
+| memory  | No       | string  | Memory size with unit (e.g., _8GB_, _16GB_)   |
+| storage | No       | string  | Storage size with unit (e.g., _100GB_, _2TB_) |
 
 ### Kubernetes Cluster
 
@@ -237,19 +341,37 @@ GKE, AKS, etc.
 For easier review, the schema is available here:
 [clusterspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/clusterspec.yaml).  
 Plus
-common fields: schemaVersion, metadata, providerHints.
+common fields: _serviceType, schemaVersion, metadata, providerHints_
 
-| Field                      | Required | Type    | Description                                                  |
-| :------------------------- | :------- | :------ | :----------------------------------------------------------- |
-| version                    | Yes      | string  | Kubernetes version (e.g., _1.29, 1.30_)                      |
-| nodes.controlPlane.count   | No       | integer | Number of control plane nodes                                |
-| nodes.controlPlane.cpu     | No       | integer | Number of CPU per control plane node                         |
-| nodes.controlPlane.memory  | No       | string  | Memory with unit (e.g., _100GB, 2TB_) per control plane node |
-| nodes.controlPlane.storage | No       | string  | Storage per control plane node (e.g., 120GB)                 |
-| nodes.worker.count         | No       | integer | Number of worker nodes                                       |
-| nodes.worker.cpu           | No       | integer | Number of CPU per worker node                                |
-| nodes.worker.memory        | No       | integer | Memory with unit (e.g., _100GB, 2TB_) per worker node        |
-| nodes.worker.storage       | No       | string  | Storage per worker node (e.g., 120GB)                        |
+| Field   | Required | Type                           | Description                               |
+| :------ | :------- | :----------------------------- | :---------------------------------------- |
+| version | Yes      | string                         | Kubernetes version (e.g., _1.29_, _1.30_) |
+| nodes   | No       | [Nodes](#cluster-nodes-object) | Node pool configuration                   |
+
+#### Cluster nodes Object
+
+| Field        | Required | Type                                         | Description                      |
+| :----------- | :------- | :------------------------------------------- | :------------------------------- |
+| controlPlane | No       | [ControlPlane](#cluster-controlplane-object) | Control plane node configuration |
+| worker       | No       | [Worker](#cluster-worker-object)             | Worker node configuration        |
+
+#### Cluster controlPlane Object
+
+| Field   | Required | Type    | Description                                         |
+| :------ | :------- | :------ | :-------------------------------------------------- |
+| count   | No       | integer | Number of control plane nodes                       |
+| cpu     | No       | integer | Number of CPUs per node                             |
+| memory  | No       | string  | Memory per node with unit (e.g., _16GB_, _32GB_)    |
+| storage | No       | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+
+#### Cluster worker Object
+
+| Field   | Required | Type    | Description                                         |
+| :------ | :------- | :------ | :-------------------------------------------------- |
+| count   | No       | integer | Number of worker nodes                              |
+| cpu     | No       | integer | Number of CPUs per node                             |
+| memory  | No       | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
+| storage | No       | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
 
 ### Risks and Mitigations
 
