@@ -132,8 +132,9 @@ flowchart BT
 - Each Service Provider must implement Service Provider API contract at a
   reachable endpoint
 - A registration call must be made to the Service Provider API (Registration
-  Handler endpoint) for each service type the SP supports. The payload will be
-  defined in a dedicated enhancement. It may include, just as an example:
+  Handler endpoint) for each service type the SP supports. The payload structure
+  is not finalized and may evolve during implementation. It may include, just as
+  an example:
   1. Unique provider name
   2. Unique providerID
   3. Endpoint URL (e.g.,
