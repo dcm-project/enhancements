@@ -97,12 +97,12 @@ for complete schema definition.
 
 Each field in the _fields_ array has:
 
-| Field            | Required | Type    | Description                                            |
-| :--------------- | :------- | :------ | :----------------------------------------------------- |
-| name             | Yes      | string  | Field path in service schema (e.g., _vcpu.count_)      |
-| editable         | No       | boolean | Whether users can modify this field (default: _false_) |
-| default          | No       | any     | Default value for this field                           |
-| validationSchema | No       | object  | JSON Schema rules (only applies if editable)           |
+| Field            | Required | Type    | Default | Description                                       |
+| :--------------- | :------- | :------ | :------ | :------------------------------------------------ |
+| name             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_) |
+| editable         | No       | boolean | false   | Whether users can modify this field               |
+| default          | No       | any     | -       | Default value for this field                      |
+| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)      |
 
 Fields not listed are neither editable nor have default values. The catalog item
 owner must ensure all mandatory fields are listed.
