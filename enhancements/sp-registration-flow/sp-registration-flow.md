@@ -75,10 +75,12 @@ Service Provider API that implements the provider registration endpoints
 registers, the Registration Handler communicates with the Control Plane to
 update the Service Registry and Service Catalog.
 
-Architectural Assumptions There must be network connectivity between Service
-Providers and the Service Provider API. If the Service Provider API cannot reach
-an SP, it cannot route provisioning requests to it, regardless of the
-registration or discovery method used.
+#### Architectural Assumptions
+
+There must be network connectivity between Service Providers and the Service
+Provider API. If the Service Provider API cannot reach an SP, it cannot route
+provisioning requests to it, regardless of the registration or discovery method
+used.
 
 #### Registration Flow
 
