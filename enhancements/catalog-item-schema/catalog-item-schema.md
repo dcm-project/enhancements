@@ -129,9 +129,9 @@ metadata:
     default: "rhel-9"
 ```
 
-The same VM schema can produce multiple catalog items with different
-constraints: a _Production VM_ item could require _vcpu.count_ between 4-16
-instead of 1-4, without modifying the base schema.
+Multiple CatalogItems can reference the same ServiceType with different
+constraints: a `Production VM` item could require `vcpu.count` between 4-16
+instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
 
 ## Design Details
 
