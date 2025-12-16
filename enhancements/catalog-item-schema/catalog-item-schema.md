@@ -46,7 +46,7 @@ service type defined in
 ### Non-Goals
 
 - Defining the service schemas themselves (see
-  [ADR \- ServiceType](?tab=t.egv2hwot8psy) )
+  [ADR - ServiceType](?tab=t.egv2hwot8psy) )
 
 ## Proposal
 
@@ -74,7 +74,7 @@ spec:
   - name: "version"
     editable: true
     default: "15"
-    validationSchema: { enum: \["14", "15", "16"\] }
+    validationSchema: { enum: ["14", "15", "16"] }
   - name: "resources.cpu"
     editable: true
     default: 4
@@ -107,7 +107,7 @@ Each field in the _fields_ array has:
 Fields not listed are neither editable nor have default values. The catalog item
 owner must ensure all mandatory fields are listed.
 
-_Example "Development VM" CatalogItem \- only CPU and memory required_
+_Example "Development VM" CatalogItem - only CPU and memory required_
 
 ```yaml
 kind: CatalogItem
@@ -156,7 +156,7 @@ For the complete validation vocabulary, see the
 1. Admin creates catalog item with template and validation rules
 2. User requests service from catalog item
 3. UI validates user input against validationSchema.
-4. ServiceType payload created from template \+ user overrides
+4. ServiceType payload created from template + user overrides
 5. Placement Service calls policy engine for validation/mutation
 6. Once approved, Placement Service selects a Service Provider and sends a
    request to it
