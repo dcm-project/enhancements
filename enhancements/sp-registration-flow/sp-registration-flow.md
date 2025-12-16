@@ -11,7 +11,9 @@ reviewers:
   - "@pkliczewski"
   - "@gabriel-farache"
 approvers:
-  - TBD
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jubah"
 creation-date: 2025-12-05
 ---
 
