@@ -105,24 +105,34 @@ flowchart BT
     end
 
     subgraph API_Block [**Service Provider API**]
-        Handler["_Service&nbsp;Registration&nbsp;Handler_<br/>4. Receive Request<br/>5. Validate & Process"]:::innerBox
+        Handler["_Service Registration Handler_
+        2. Receive Request
+        3. Validate & Process"]:::innerBox
     end
 
-    subgraph Service_API [**Service API**<br/>&nbsp;<br/>&nbsp;]
+    subgraph Service_API [**Service API**<br/><br/> ]
 
-        subgraph SP1 [**ServiceProvider 1**<br/>&nbsp;]
-            VM_Prov["**VM Provider Impl.**<br/>Listening at: .../api/vm)<br/>Ops: Create, Delete"]:::innerBox
-            Storage_Prov["**Storage Provider Impl.**<br/>Listening at: .../api/storage)<br/>Ops: Create, Update, Delete"]:::innerBox
+        subgraph SP1 [**ServiceProvider 1**<br/>]
+            VM_Prov["**VM Provider Impl.**
+            Listening at: https://sp1.local/api/vm
+            Ops: Create, Delete"]:::innerBox
+            Storage_Prov["**Storage Provider Impl.**
+            Listening at: https://sp1.local/api/storage
+            Ops: Create, Update, Delete"]:::innerBox
         end
 
-        subgraph SP2 [**ServiceProvider 2**<br/>&nbsp;]
-            Container_Prov["**Container Provider Impl.**<br/>Listening at: .../api/container<br/>Ops: Create, Update"]:::innerBox
-            Pod_Prov["**Pod Provider Impl.**<br/>Listening at: .../api/pod)<br/>Ops: Create, Delete"]:::innerBox
+        subgraph SP2 [**ServiceProvider 2**<br/>]
+            Container_Prov["**Container Provider Impl.**
+            Listening at: https://sp2.local/api/container
+            Ops: Create, Update"]:::innerBox
+            Pod_Prov["**Pod Provider Impl.**
+            Listening at: https://sp2.local/api/pod
+            Ops: Create, Delete"]:::innerBox
         end
     end
 
     VM_Prov & Storage_Prov & Container_Prov & Pod_Prov -- 1. Register --> Handler
-    Handler -- 2. Update Service Registry --> DB
+    Handler -- 4. Update Service Registry --> DB
 
     class Data_Sources dataSource
     class API_Block apiLayer
@@ -146,10 +156,9 @@ flowchart BT
   6. References catalog service kind this provider can fulfill (e.g, "vm",
      "container")
 - The Registration Handler processes and validates the metadata
-- The Registration Handler internally updates:
-  1. Service Registry with:
-     1. SP endpoint
-     2. metadata
+- The Registration Handler internally updates the Service Registry with:
+  1. SP endpoint
+  1. metadata
 - When user requests a catalog offering, Control Plane matches it to registered
   SPs that can fulfill it and calls the selected SP endpoint (endpoint must be
   reachable)
