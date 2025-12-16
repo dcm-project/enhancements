@@ -267,7 +267,9 @@ Response:
 
 ### Risks and Mitigations
 
-### Dynamic Approach
+## Alternatives
+
+### Dynamic Registration Approach
 
 This approach separates registration from capability advertisement. The benefit
 is that the Control Plane always queries real-time capacity and availability
@@ -355,7 +357,11 @@ Control Plane **pulls** information from the Service Provider API.
 - Re-registration on Change Any changes to the SP endpoint necessitate a
   re-registration process.
 
-### DCM discovers Service Providers
+**Why not chosen:** Adds complexity without clear benefits for initial
+implementation. The static approach provides simpler, predictable registration
+while still supporting capability updates through re-registration.
+
+### DCM Discovery Approach
 
 The DCM actively scans endpoints to discover and register SPs.
 
@@ -437,3 +443,6 @@ flowchart BT
   signal maintenance windows
 - Persistent Network Routes The Control Plane must maintain network routes to
   all SP networks.
+
+**Why not chosen:** Too complex for initial delivery. Requirements for network
+scanning, discovery protocols, and security policies are not yet defined.
