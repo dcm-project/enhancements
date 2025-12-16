@@ -69,19 +69,19 @@ name: production-postgres
 spec:
   serviceType: database
   fields:
-  - name: "engine"
-    default: "postgresql"
-  - name: "version"
-    editable: true
-    default: "15"
-    validationSchema: { enum: ["14", "15", "16"] }
-  - name: "resources.cpu"
-    editable: true
-    default: 4
-    validationSchema: { minimum: 2, maximum: 16 }
-  - name: "resources.memory"
-    editable: true
-    default: "16GB"
+    - name: "engine"
+      default: "postgresql"
+    - name: "version"
+      editable: true
+      default: "15"
+      validationSchema: { enum: ["14", "15", "16"] }
+    - name: "resources.cpu"
+      editable: true
+      default: 4
+      validationSchema: { minimum: 2, maximum: 16 }
+    - name: "resources.memory"
+      editable: true
+      default: "16GB"
 ```
 
 See
@@ -115,18 +115,20 @@ metadata:
   name: dev-vm
   labels:
   displayName: "Development VM"
-  spec:  serviceType: vm  fields:
-  - name: "vcpu.count"
-    editable: true
-    default: 2
-    validationSchema: { minimum: 1, maximum: 4 }
-  - name: "memory.size"
-    editable: true
-    default: "4GB"
-    validationSchema: { minimum: 2, maximum: 8 }
-  - name: "guestOS.type"
-    editable: false
-    default: "rhel-9"
+  spec:
+    serviceType: vm
+    fields:
+      - name: "vcpu.count"
+        editable: true
+        default: 2
+        validationSchema: { minimum: 1, maximum: 4 }
+      - name: "memory.size"
+        editable: true
+        default: "4GB"
+        validationSchema: { minimum: 2, maximum: 8 }
+      - name: "guestOS.type"
+        editable: false
+        default: "rhel-9"
 ```
 
 Multiple CatalogItems can reference the same ServiceType with different
