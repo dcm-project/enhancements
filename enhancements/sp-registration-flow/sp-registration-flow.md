@@ -79,10 +79,10 @@ Registry.
 
 #### Architectural Assumptions
 
-There must be network connectivity between Service Providers and the Service
-Provider API. If the Service Provider API cannot reach an SP, it cannot route
-provisioning requests to it, regardless of the registration or discovery method
-used.
+Bidirectional network connectivity between Service Providers and the DCM Control
+Plane is required. SPs must reach DCM to register, and DCM must reach SPs to
+route provisioning requests. If either direction is blocked, the system cannot
+function regardless of the registration method used.
 
 #### Registration Flow
 
