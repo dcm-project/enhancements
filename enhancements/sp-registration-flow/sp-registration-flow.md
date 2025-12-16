@@ -143,8 +143,6 @@ flowchart BT
 ```
 
 - Admins predefine supported ServiceTypes (e.g., "vm", "database")
-- Each Service Provider must implement Service Provider API contract at a
-  reachable endpoint
 - A registration call must be made to the Service Provider API (Registration
   Handler endpoint) for each service type the SP supports. The payload structure
   is not finalized and may evolve during implementation. It may include, just as
