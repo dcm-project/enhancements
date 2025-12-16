@@ -3,13 +3,13 @@ title: sp-registration-flow
 authors:
   - "@gciavarrini"
 reviewers:
-  - machacekondra
-  - ygalblum
-  - jubah
-  - croadfel
-  - flocati
-  - pkliczewski
-  - gabriel-farache
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jubah"
+  - "@croadfel"
+  - "@flocati"
+  - "@pkliczewski"
+  - "@gabriel-farache"
 approvers:
   - TBD
 creation-date: 2025-12-05
