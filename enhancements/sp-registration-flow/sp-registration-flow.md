@@ -166,15 +166,22 @@ flowchart BT
 The Service Provider's _name_ is the natural key used to match existing
 registrations.
 
-During the registration phase, if the provided Service Provider _name_ already
-exists in DCM, the registration will fail. Similarly, registration will also
-fail if the Service Provider provides a _providerID_ that already exists in DCM.
-If the Service Provider does not specify a _providerID_, DCM will automatically
-generate one. The response to a create request will always include the
-_providerID_, regardless of whether it was generated or provided. Consistent
-with AEP, the response payload for a creation request mirrors the request
-payload. Therefore, the response will contain all fields from the create
-request, possibly with updated values.
+The registration endpoint is idempotent. During the registration phase:
+
+- If the _name_ does not exist in DCM, a new SP entry is created. If no
+  _providerID_ is specified, DCM will automatically generate one.
+- If the _name_ already exists and no _providerID_ is provided (or the same
+  _providerID_ is provided), the existing entry is updated and the same
+  _providerID_ is returned.
+- If the _name_ already exists but a **different** _providerID_ is provided,
+  registration fails (conflict: another SP is attempting to register with a
+  taken name).
+- If a new _name_ is provided but the _providerID_ already exists in DCM,
+  registration fails (conflict: _providerID_ is already assigned to another SP).
+
+The response to a registration request will always include the _providerID_,
+regardless of whether it was generated or provided. Consistent with AEP, the
+response payload mirrors the request payload with possibly updated values.
 
 ##### Update Service Provider capabilities flow
 
