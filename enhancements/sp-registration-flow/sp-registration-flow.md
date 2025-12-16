@@ -160,8 +160,8 @@ flowchart BT
   1. SP endpoint
   1. metadata
 - When user requests a catalog offering, Control Plane matches it to registered
-  SPs that can fulfill it and calls the selected SP endpoint (endpoint must be
-  reachable)
+  SPs that can fulfill it based on configured policies and calls the selected SP
+  endpoint (endpoint must be reachable)
 
 The Service Provider's _name_ is the natural key used to match existing
 registrations.
