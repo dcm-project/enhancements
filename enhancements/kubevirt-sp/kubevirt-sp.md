@@ -18,14 +18,14 @@ creation-date: 2025-12-15
 The KubeVirt Service Provider API is a REST API that manages Virtual Machines
 (VMs) in a Kubernetes cluster running KubeVirt. It exposes endpoints for
 creating, reading and deleting VMs, and integrates with the DCM Service Provider
-Registry. To get started with this template:
+Registry.
 
 ### Goals
 
 - Define the lifecycle of an SP running KubeVirt.
 - Implement registration flow with SP API.
-- Implement Create, Read and Delete endpoints for managing VMs on a KIND
-  cluster.  
+- Implement Create, Read and Delete endpoints for managing VMs
+  running on a cluster.  
   **Note** Update is out of scope for the first version (v1).
 - Implement status reporting for DCM requests.
 
@@ -49,7 +49,7 @@ Registry. To get started with this template:
 - The DCM Service Provider Registry is reachable for registration.
 - The API service has valid Kubernetes credentials (kubeconfig or in-cluster
   service account).
-- DCM status reporting endpoint is reachable resource updates.
+- DCM status reporting endpoint is reachable for resource updates.
 - DCM provider heartbeat endpoint is reachable for health updates.
 
 ##### Integration Points
@@ -132,15 +132,12 @@ machine resources.
 ###### Endpoints Overview
 
 | Method | Endpoint                | Description                        |
-| ------ | ----------------------- | ---------------------------------- |
+| ------ | ----------------------- |------------------------------------|
 | POST   | /api/v1/vm              | Create a new virtual machine       |
-| GET    | /api/v1/vm              | List all virtual machine           |
+| GET    | /api/v1/vm              | List all virtual machines          |
 | GET    | /api/v1/vm/{vmId}       | Get a virtual machine instance     |
 | DELETE | /api/v1/vm/{vmId}       | Delete a virtual machine instance  |
 | GET    | /api/v1/health          | KubeVirt API service health check  |
-| POST   | /api/v1/vm/{id}/start   | Start a virtual machine instance   |
-| POST   | /api/v1/vm/{id}/stop    | Stop a virtual machine instance    |
-| POST   | /api/v1/vm/{id}/restart | Restart a virtual machine instance |
 
 ###### AEP Compliance
 
@@ -175,7 +172,7 @@ after it is created.
 {
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "name": "web-frontend",
-  "namespace": "us-east-1",
+  "namespace": "web-frontend-001",
   "status": "PROVISIONING"
 }
 ```
@@ -193,19 +190,19 @@ Example payload
 [
   {
     "name": "web-frontend",
-    "namespace": "us-east-1",
+    "namespace": "web-frontend-001",
     "requestId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
     "status": "PROVISIONING"
   },
   {
     "name": "fedora-webserver",
-    "namespace": "us-west-1",
+    "namespace": "fedora-webserver-001",
     "requestId": "c66be104-eea3-4246-975c-e6cc9b32d74d",
     "status": "FAILED"
   },
   {
     "name": "ubuntu-vm",
-    "namespace": "us-east-2",
+    "namespace": "ubuntu-vm-001",
     "requestId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
     "status": "PROVISIONING"
   }
@@ -218,7 +215,7 @@ Example payload
   Calls GetVMFromCluster(_vmId_)
 - Cluster lookup:  
   Query KubeVirt API for VirtualMachine with matching
-  _dcm-uuid-id_ label
+  `dcm-instance-id` label
 - VMI details:  
   Query VirtualMachineInstance for runtime info  
   Extract IP address from network interfaces   
@@ -234,10 +231,9 @@ Example payload
 Example payload
 
 ```json
-[
   {
     "name": "fedora-vm",
-    "namespace": "us-east-1",
+    "namespace": "fedora-vm-001",
     "status": "RUNNING",
     "ip": "10.244.0.12",
     "ssh":
@@ -252,7 +248,6 @@ Example payload
           }
       }
   }
-]
 ```
 
 **Note**: In the example payload above, ssh is configured with nodeport.
@@ -260,17 +255,6 @@ Example payload
 **DELETE /api/v1/vm/{vmId}**
 
 Remove a single virtual machine instance and returns 204 (No Content)
-
-###### Day 2 Endpoints
-
-**POST /api/v1/vm/{vmId}/start** - Start a virtual machine instance.
-
-**POST /api/v1/vm/{vmId}/stop** - Stop a virtual machine instance.
-
-**POST /api/v1/vm/{vmId}/restart** - Restart a virtual machine instance.  
-
-**Note**: Implementation of these endpoints (stop/start/restart) is out of scope
-for version 1.
 
 ##### Status Reporting To DCM
 
@@ -293,17 +277,21 @@ Event driven architecture following the design
 in the updated version of the status reporting ADR.
 
 ##### Status Mapping from DCM to KubeVirt
-This maps the DCM generic status to the lifecycle phase of the
-within the VMI status.
+This maps the DCM generic status to the lifecycle phase within 
+the VMI status. See Status reporting ADR for more information.
 
-| DCM          | KubeVirt                       |
-|--------------|--------------------------------|
-| PROVISIONING | Pending, Scheduling, Scheduled |
-| RUNNING      | Running                        |
-| STOPPING     | Succeeded                      |
-| FAILED       | Failed                         |
-| FAILED       | Unknown                        |
-| DELETED      | N/A (VMI not found)            |
+| DCM          | KubeVirt                       | Description                    |
+|--------------|--------------------------------|--------------------------------|
+| PROVISIONING | Pending, Scheduling, Scheduled | VMI is in a provisioning state |
+| RUNNING      | Running                        | VMI is in a running state      |
+| STOPPING     | Succeeded                      | VMI is in a stopped state      |
+| FAILED       | Failed                         | VMI is in a failed state       |
+| FAILED       | Unknown                        | VMI is in an unknown state     |
+| DELETED      | N/A                            | VMI & VM spec are not found    |
+
+See 
+[KubeVirt VMI Phase](https://github.com/kubevirt/kubevirt/blob/main/staging/src/kubevirt.io/api/core/v1/types.go#L1086) 
+definitions.
 
 ## Infrastructure Needed
 TBD
