@@ -143,10 +143,9 @@ flowchart BT
 ```
 
 - Admins predefine supported ServiceTypes (e.g., "vm", "database")
-- A registration call must be made to the Service Provider API (Registration
-  Handler endpoint) for each service type the SP supports. The payload structure
-  is not finalized and may evolve during implementation. It may include, just as
-  an example:
+- A registration call must be made to the Registration Handler endpoint for each
+  service type the SP supports. The payload structure is not finalized and may
+  evolve during implementation. It may include, just as an example:
   1. Unique provider name
   2. Unique providerID
   3. Endpoint URL (e.g.,
