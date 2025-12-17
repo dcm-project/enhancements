@@ -15,13 +15,8 @@ creation-date: 2025-12-05
 
 # Service Type Definition
 
-This ADR defines provider-agnostic schemas for DCM service types. These schemas
-enable Service Providers to provision four core service types—virtual machines,
-containers, databases, and Kubernetes clusters—across different infrastructure
-platforms without vendor lock-in.  
-The key principle is _portability first_: schemas contain only minimal fields
-common across all implementations, with platform-specific configuration
-delegated to _providerHints_.
+This enhancement defines standardized schemas for DCM service types to enable
+cross-platform portability.
 
 ## Open Questions
 
@@ -34,12 +29,12 @@ Example:
 ## Summary
 
 This ADR defines provider-agnostic schemas for DCM service types. These schemas
-enable Service Providers to provision four core service types—virtual machines,
-containers, databases, and Kubernetes clusters—across different infrastructure
-platforms without vendor lock-in.  
-The key principle is _portability first_: schemas contain only minimal fields
-common across all implementations, with platform-specific configuration
-delegated to _providerHints_.
+enable Service Providers to provision four core service types — virtual
+machines, containers, databases, and Kubernetes clusters — across different
+infrastructure platforms without vendor lock-in. The key principle is
+_portability first_: schemas contain only minimal fields common across all
+implementations, with platform-specific configuration delegated to
+_providerHints_.
 
 ## Motivation
 
