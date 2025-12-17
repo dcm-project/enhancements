@@ -307,11 +307,11 @@ For easier review, the schema is accessible here
 Plus
 common fields: _serviceType, schemaVersion, metadata, providerHints_
 
-| Field     | Required | Type                                    | Description                                                                    |
-| :-------- | :------- | :-------------------------------------- | :----------------------------------------------------------------------------- |
+| Field     | Required | Type                                    | Description                                                   |
+| :-------- | :------- | :-------------------------------------- | :------------------------------------------------------------ |
 | engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _mariadb_) |
-| version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                                     |
-| resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                                  |
+| version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                    |
+| resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                 |
 
 #### Database resources Object
 
@@ -349,7 +349,7 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 | Field   | Required | Type    | Description                                         |
 | :------ | :------- | :------ | :-------------------------------------------------- |
-| count   | Yes      | integer | Number of control plane nodes                       |
+| count   | Yes      | integer | Number of control plane nodes (1, 3, or 5)          |
 | cpu     | Yes      | integer | Number of CPUs per node                             |
 | memory  | Yes      | string  | Memory per node with unit (e.g., _16GB_, _32GB_)    |
 | storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
