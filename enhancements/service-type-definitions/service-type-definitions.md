@@ -222,7 +222,7 @@ Disk names must be unique within the VM.
 
 | Field        | Required | Type   | Description                  |
 | :----------- | :------- | :----- | :--------------------------- |
-| sshPublicKey | Yes      | string | SSH public key for VM access |
+| sshPublicKey | No       | string | SSH public key for VM access |
 
 ### Containers
 
