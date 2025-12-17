@@ -65,9 +65,10 @@ Database_" that users can request without knowing the underlying details.
 ```yaml
 kind: CatalogItem
 metadata:
-name: production-postgres
+  name: production-postgres
 spec:
   serviceType: database
+  schemaVersion: v1alpha1
   fields:
     - name: "engine"
       default: "postgresql"
@@ -90,10 +91,11 @@ for complete schema definition.
 
 #### CatalogItem components
 
-| Field       | Required | Type   | Description                                                |
-| :---------- | :------- | :----- | :--------------------------------------------------------- |
-| serviceType | Yes      | string | Type of service (e.g., _vm, container, database, cluster_) |
-| fields      | Yes      | array  | List of field configurations (see below)                   |
+| Field         | Required | Type   | Description                                                                                      |
+| :------------ | :------- | :----- | :----------------------------------------------------------------------------------------------- |
+| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                       |
+| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by SPs to determine translation logic |
+| fields        | Yes      | array  | List of field configurations (see below)                                                         |
 
 Each field in the _fields_ array has:
 
@@ -113,27 +115,42 @@ _Example "Development VM" CatalogItem - only CPU and memory required_
 kind: CatalogItem
 metadata:
   name: dev-vm
-  labels:
   displayName: "Development VM"
-  spec:
-    serviceType: vm
-    fields:
-      - name: "vcpu.count"
-        editable: true
-        default: 2
-        validationSchema: { minimum: 1, maximum: 4 }
-      - name: "memory.size"
-        editable: true
-        default: "4GB"
-        validationSchema: { minimum: 2, maximum: 8 }
-      - name: "guestOS.type"
-        editable: false
-        default: "rhel-9"
+spec:
+  serviceType: vm
+  schemaVersion: v1alpha1
+  fields:
+    - name: "vcpu.count"
+      editable: true
+      default: 2
+      validationSchema: { minimum: 1, maximum: 4 }
+    - name: "memory.size"
+      editable: true
+      default: "4GB"
+      validationSchema: { minimum: 2, maximum: 8 }
+    - name: "guestOS.type"
+      editable: false
+      default: "rhel-9"
 ```
 
 Multiple CatalogItems can reference the same ServiceType with different
 constraints: a `Production VM` item could require `vcpu.count` between 4-16
 instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
+
+#### Versioning
+
+The `schemaVersion` field creates a contract between CatalogItems and Service
+Providers. SPs use this version to determine which translation logic to apply
+when provisioning resources.
+
+This enables:
+
+- **SP selection**: Version info can be used for placement decisions (e.g.,
+  excluding SPs that don't support a given schema version)
+- **Schema evolution**: New schema versions can add/modify fields while older
+  catalog items continue working
+- **Common naming**: All SPs serving the same `serviceType@schemaVersion` must
+  understand the same field names
 
 ## Design Details
 
