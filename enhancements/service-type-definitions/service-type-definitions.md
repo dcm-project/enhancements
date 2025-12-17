@@ -121,8 +121,8 @@ remains portable across platforms.
 
 Any _serviceType_ can be defined by inheriting from
 [common.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/common.yaml)
-and adding type-specific fields. For the first milestone, we support the
-following specific serviceTypes:
+and adding type-specific fields. For the first milestone, DCM will support the
+following serviceTypes:
 
 - Virtual Machine  
   Virtual machines with CPU, memory, storage, and OS specifications
