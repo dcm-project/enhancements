@@ -70,17 +70,17 @@ spec:
   serviceType: database
   schemaVersion: v1alpha1
   fields:
-    - name: "engine"
+    - path: "engine"
       default: "postgresql"
-    - name: "version"
+    - path: "version"
       editable: true
       default: "15"
       validationSchema: { enum: ["14", "15", "16"] }
-    - name: "resources.cpu"
+    - path: "resources.cpu"
       editable: true
       default: 4
       validationSchema: { minimum: 2, maximum: 16 }
-    - name: "resources.memory"
+    - path: "resources.memory"
       editable: true
       default: "16GB"
 ```
@@ -99,12 +99,13 @@ for complete schema definition.
 
 Each field in the _fields_ array has:
 
-| Field            | Required | Type    | Default | Description                                       |
-| :--------------- | :------- | :------ | :------ | :------------------------------------------------ |
-| name             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_) |
-| editable         | No       | boolean | false   | Whether users can modify this field               |
-| default          | No       | any     | -       | Default value for this field                      |
-| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)      |
+| Field            | Required | Type    | Default | Description                                                    |
+| :--------------- | :------- | :------ | :------ | :------------------------------------------------------------- |
+| path             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)              |
+| displayName      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path |
+| editable         | No       | boolean | false   | Whether users can modify this field                            |
+| default          | No       | any     | -       | Default value for this field                                   |
+| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)                   |
 
 Fields not listed are neither editable nor have default values. The catalog item
 owner must ensure all mandatory fields are listed.
@@ -120,15 +121,18 @@ spec:
   serviceType: vm
   schemaVersion: v1alpha1
   fields:
-    - name: "vcpu.count"
+    - path: "vcpu.count"
+      displayName: "CPU Count"
       editable: true
       default: 2
       validationSchema: { minimum: 1, maximum: 4 }
-    - name: "memory.size"
+    - path: "memory.size"
+      displayName: "Memory"
       editable: true
       default: "4GB"
       validationSchema: { minimum: 2, maximum: 8 }
-    - name: "guestOS.type"
+    - path: "guestOS.type"
+      displayName: "Operating System"
       editable: false
       default: "rhel-9"
 ```
