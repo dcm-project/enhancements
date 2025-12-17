@@ -80,6 +80,9 @@ without breaking compatibility.
 
 ### Implementation Details/Notes/Constraints
 
+All schemas use OpenAPI 3.1.0 to leverage JSON Schema features like `contains`
+for array validation.
+
 ## Generic Service
 
 All service schemas share common fields defined once in
@@ -196,16 +199,18 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 #### VM storage Object
 
-| Field | Required | Type                           | Description                 |
-| :---- | :------- | :----------------------------- | :-------------------------- |
-| disks | Yes      | array[[Disk](#vm-disk-object)] | List of disk specifications |
+| Field | Required | Type                           | Description                                  |
+| :---- | :------- | :----------------------------- | :------------------------------------------- |
+| disks | Yes      | array[[Disk](#vm-disk-object)] | List of disks; must include one named _boot_ |
+
+Disk names must be unique within the VM.
 
 #### VM disk Object
 
-| Field    | Required | Type   | Description                                    |
-| :------- | :------- | :----- | :--------------------------------------------- |
-| name     | Yes      | string | Disk identifier (e.g., _boot_, _data_)         |
-| capacity | Yes      | string | Disk capacity with unit (e.g., _100GB_, _2TB_) |
+| Field    | Required | Type   | Description                                       |
+| :------- | :------- | :----- | :------------------------------------------------ |
+| name     | Yes      | string | Disk identifier; root volume must be named _boot_ |
+| capacity | Yes      | string | Disk capacity with unit (e.g., _100GB_, _2TB_)    |
 
 #### VM guestOS Object
 
