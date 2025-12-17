@@ -3,13 +3,13 @@ title: service-type-definition
 authors:
   - "@gciavarrini"
 reviewers:
-  - machacekondra
-  - ygalblum
-  - jubah
-  - croadfel
-  - flocati
-  - pkliczewski
-  - gabriel-farache
+  - @machacekondra
+  - @ygalblum
+  - @jubah
+  - @croadfel
+  - @flocati
+  - @pkliczewski
+  - @gabriel-farache
 creation-date: 2025-12-05
 ---
 
@@ -18,7 +18,7 @@ creation-date: 2025-12-05
 This enhancement defines standardized schemas for DCM service types to enable
 cross-platform portability.
 
-## Open Questions
+<!-- ## Open Questions -->
 
 <!--
 Call out areas of the design that require closure before deciding to implement.
