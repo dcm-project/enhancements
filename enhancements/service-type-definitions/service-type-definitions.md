@@ -309,7 +309,7 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 | Field     | Required | Type                                    | Description                                                                    |
 | :-------- | :------- | :-------------------------------------- | :----------------------------------------------------------------------------- |
-| engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _elasticsearch_, _mongodb_) |
+| engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _mariadb_) |
 | version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                                     |
 | resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                                  |
 
