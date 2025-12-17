@@ -137,39 +137,25 @@ The following sections detail the VM schema architecture.
 
 ```mermaid
 flowchart TD
-    classDef dbStyle text-align:center;
-    classDef providerBox text-align:left;
-    classDef note text-align:center;
-
-    SC[("
-    <div style='min-width: 350px; padding: 10px; line-height: 1;'>
-        <div style='font-weight: bold; font-size: 16px; margin-bottom: 5px;'>Service Catalog</div>
-        <div style='border: 1px solid; padding: 10px; text-align: left; font-family: monospace; font-size: 11px; margin-top: 0px;'>
-    <b>Catalog Item</b><br/>
-    {
-    &quot;name&quot;: &quot;rhel9-medium&quot;,
-    &quot;kind&quot;: &quot;vm&quot;,
-    &quot;spec&quot;: {
-        &quot;compute&quot;: { &quot;vcpu&quot;: 16, &quot;ram&quot;: 32 },
-        &quot;guestOS&quot;: { &quot;type&quot;: &quot;rhel-9&quot; }
-        }
-    }
-    </div>
-</div>
-    ")]:::dbStyle
-
+    SC[(Service Catalog)]
     API[Service Provider API]
 
     subgraph SP [Service Provider]
         direction LR
-        KV["<u>KubeVirt</u><br/>instancetype: o1.4xlarge"]:::providerBox
-        VW["<u>VMware</u><br/>NumCPUs=16<br/>MemoryMB=32768"]:::providerBox
-        OS["<u>OpenStack</u><br/>flavor lookup"]:::providerBox
-        AWS["<u>AWS EC2</u><br/>c5.4xlarge"]:::providerBox
+        KV[KubeVirt]
+        VW[VMware]
+        OS[OpenStack]
+        AWS[AWS EC2]
     end
 
-    Note_Reg@{ shape: card, label: "During registration,<br>these providers<br>advertised that they<br>fulfill service type<br>&quot;vm&quot;" }
-    Note_Trans@{ shape: card, label: "Each provider<br>translates the<br>catalog item to its<br>native resource<br>format" }
+    Note_Reg@{ shape: card, label: "During registration,
+these providers advertised
+that they fulfill
+service type vm" }
+
+    Note_Trans@{ shape: card, label: "Each provider translates
+the catalog item to its
+native resource format" }
 
     SC --> API
     API --> SP
@@ -179,8 +165,6 @@ flowchart TD
     Note_Trans -.-> VW
     Note_Trans -.-> OS
     Note_Trans -.-> AWS
-
-    class Note_Reg,Note_Trans note
 ```
 
 #### Schema
