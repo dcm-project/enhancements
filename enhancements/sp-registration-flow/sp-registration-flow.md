@@ -270,7 +270,7 @@ Response:
 
 ### Dynamic Registration Approach
 
-This approach separates registration from capability advertisement. The benefit
+**Description:** This approach separates registration from capability advertisement. The benefit
 is that the Control Plane always queries real-time capacity and availability
 during placement decisions, rather than relying on potentially stale cached
 capabilities. This is useful when SP capabilities change frequently based on
@@ -336,7 +336,7 @@ Control Plane **pulls** information from the Service Provider API.
   information to the Control Plane.
 - Workflow Execution The Control Plane pushes provisioning requests to the SP.
 
-#### Advantages
+**Pros:**
 
 - Decentralized Control It's the SME team that maintains control over when their
   SPs become active in the system
@@ -347,7 +347,7 @@ Control Plane **pulls** information from the Service Provider API.
 - Industry Alignment Consistent with established industry patterns (e.g.,
   Kubernetes, Crossplane, Consul).
 
-#### Drawbacks
+**Cons:**
 
 - Protocol Understanding SP implementers are required to understand the
   registration protocol.
@@ -356,12 +356,14 @@ Control Plane **pulls** information from the Service Provider API.
 - Re-registration on Change Any changes to the SP endpoint necessitate a
   re-registration process.
 
-**Why not chosen:** Adds complexity without clear benefits for initial
+**Why rejected:**
+Adds complexity without clear benefits for initial
 implementation. The static approach provides simpler, predictable registration
 while still supporting capability updates through re-registration.
 
 ### DCM Discovery Approach
 
+**Description:**
 The DCM actively scans endpoints to discover and register SPs.
 
 ```mermaid
@@ -412,7 +414,7 @@ flowchart BT
 5. CP updates Service Registry with SP endpoints and metadata
 6. CP update Service Catalog with SP offered services
 
-#### Advantages
+**Pros:**
 
 - Automatic Discovery No explicit registration step is needed from the Service
   Provider (SP).
@@ -423,7 +425,7 @@ flowchart BT
 - Automatic Change Detection Changes to SP endpoints can be automatically
   detected via re-scanning, provided the endpoint is reachable.
 
-#### Disadvantages
+**Cons:**
 
 - Air-Gapped Discovery fails in disconnected networks
 - Firewall Issues Inbound scanning is typically blocked by network security
@@ -443,5 +445,6 @@ flowchart BT
 - Persistent Network Routes The Control Plane must maintain network routes to
   all SP networks.
 
-**Why not chosen:** Too complex for initial delivery. Requirements for network
+**Why rejected:** 
+Too complex for initial delivery. Requirements for network
 scanning, discovery protocols, and security policies are not yet defined.
