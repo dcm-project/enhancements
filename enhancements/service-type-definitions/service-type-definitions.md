@@ -239,8 +239,8 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 | :-------- | :------- | :--------------------------------------- | :---------------------------- |
 | image     | Yes      | [Image](#container-image-object)         | Container image specification |
 | resources | Yes      | [Resources](#container-resources-object) | CPU and memory limits         |
-| process   | Yes      | [Process](#container-process-object)     | Process configuration         |
-| network   | Yes      | [Network](#container-network-object)     | Network configuration         |
+| process   | No       | [Process](#container-process-object)     | Process configuration         |
+| network   | No       | [Network](#container-network-object)     | Network configuration         |
 
 #### Container image Object
 
