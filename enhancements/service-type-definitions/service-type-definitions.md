@@ -271,9 +271,11 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 
 #### Container process Object
 
-| Field | Required | Type                                   | Description           |
-| :---- | :------- | :------------------------------------- | :-------------------- |
-| env   | Yes      | array[[EnvVar](#container-env-object)] | Environment variables |
+| Field   | Required | Type                                   | Description                 |
+| :------ | :------- | :------------------------------------- | :-------------------------- |
+| command | No       | array[string]                          | Entrypoint override         |
+| args    | No       | array[string]                          | Arguments to the entrypoint |
+| env     | No       | array[[EnvVar](#container-env-object)] | Environment variables       |
 
 #### Container env Object
 
