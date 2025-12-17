@@ -46,7 +46,7 @@ without breaking compatibility.
 
 - Define a generic schema that works for any serviceType, ensure portability,
   and allows extensibility without schema changes.
-- Define an initial set four primary service types applying this pattern:
+- Define an initial set of four primary service types applying this pattern:
   - _VM_  
     Virtual machines with compute, storage, and OS specifications
   - _Container_  
