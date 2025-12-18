@@ -3,13 +3,13 @@ title: Service Provider Status Report Implementation
 authors:
   - "@machacekondra"
 reviewers:
-  - gciavarrini
-  - ygalblum
-  - jubah
-  - croadfel
-  - flocati
-  - pkliczewski
-  - gabriel-farache
+  - @gciavarrini
+  - @ygalblum
+  - @jubah
+  - @croadfel
+  - @flocati
+  - @pkliczewski
+  - @gabriel-farache
 approvers:
   - ""
 creation-date: 2025-12-15
@@ -26,7 +26,7 @@ This proposal defines the architectural patterns and implementation guidelines f
 
 The DCM relies on Service Providers to be the "source of truth" for service state. However, underlying platforms (like AWS, vSphere, or Kubernetes) expose this state differently. Some offer real-time event streams (Kubernetes Watches), while others only offer snapshot APIs (GET requests).
 
-To ensure scalability and prevent API exhaustion on both the DCM and the underlying platform, implementation patterns are be defined.
+To ensure scalability and prevent API exhaustion on both the DCM and the underlying platform, implementation patterns are defined.
 
 ### Goals
 
@@ -57,7 +57,7 @@ In this model, the Service Provider establishes a persistent connection to the u
 
 #### Requirements for Implementation
 
-2.  **Provider support:** The Provider must support streaming.
+1.  **Provider support:** The Provider must support streaming.
 
 #### Benefits
 
