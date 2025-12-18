@@ -1,5 +1,6 @@
 # Define variables at the top for easier maintenance
 PRETTIER ?= npx prettier
+SPELLCHECK ?= npx cspell
 FILE ?= **/*.md
 
 # First target is the default (running just 'make')
@@ -16,6 +17,9 @@ format:
 
 check-format:
 	$(PRETTIER) --check --prose-wrap always --print-width 80 "$(FILE)"
+
+check-spell:
+	$(SPELLCHECK) "$(FILE)"
 
 new:
 	@# Shell logic: Check if NAME is empty
