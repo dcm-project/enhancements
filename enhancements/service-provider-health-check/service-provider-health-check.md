@@ -3,13 +3,13 @@ title: Service Provider Health Check
 authors:
   - "@machacekondra"
 reviewers:
-  - gciavarrini
-  - ygalblum
-  - jubah
-  - croadfel
-  - flocati
-  - pkliczewski
-  - gabriel-farache
+  - @gciavarrini
+  - @ygalblum
+  - @jubah
+  - @croadfel
+  - @flocati
+  - @pkliczewski
+  - @gabriel-farache
 approvers:
   - ""
 creation-date: 2025-12-15
@@ -19,7 +19,7 @@ last-updated: 2025-12-15
 # Service Provider Health Check
 
 ## Summary
-This enhancement proposes a mechanism for the DCM control plane to actively monitor the liveness and readiness of service providers. By implementing a heartbeat system similar to Kubernetes node health checks, DCM can ensure services are only placed on active and healthy providers.
+This enhancement proposes a mechanism for the DCM control plane to actively monitor the liveness of service providers. By implementing a heartbeat system similar to Kubernetes node health checks, DCM can ensure services are only placed on active and healthy providers.
 
 ## Motivation
 
@@ -59,11 +59,13 @@ The architecture relies on a **Dual-Heartbeat Mechanism** to optimize for bandwi
 1.  **Provider Side:** A process within the service provider calculates its status and sends it to the DCM Provider API.
     * *Reliability:* If the request fails, the provider uses exponential backoff to retry.
 2.  **Control Plane Side:** The DCM Provider API receives the heartbeat and updates the status in the internal database.
-3.  **Placement Logic:** Services can now identify if a provider is disconnected. If the heartbeat is missing, the placement logic will consider the provider unavailable and will not schedule new services there.
+3.  **Placement Logic:** The control plane monitors a configurable Failure Threshold (defaulting to 3 missed heartbeats); if this threshold is exceeded, the provider is transitioned to a NotReady state and strictly excluded from the scheduling pool until a successful heartbeat is received.
 
 ## Design Details
 
 ### API Definition
+
+#### Liveness Heartbeat API
 
 **Endpoint:** `PUT /providers/{providerName}/status`
 
@@ -100,3 +102,41 @@ Response:
 ```
 
 * **next_interval_seconds**: Control plane instruction to speed up or slow down heartbeats.
+
+#### Provider Info Update API
+
+**Endpoint:** `PATCH /providers/{providerName}/resources`
+
+**Summary:** Update Provider Resource Specifications. This provides a comprehensive update of the provider's hardware and software capabilities.
+
+* **Frequency:** Clients should send this every 5 minutes, or immediately when a significant hardware/configuration change occurs.
+* **Optimization:** Uses a PATCH method to allow for partial updates of specific resource fields without re-sending the entire provider object.
+
+#### Request Parameters
+
+| Name | In | Type | Required | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `providerName` | path | string | Yes | The unique name of the provider. |
+
+#### Request Body (`HeartbeatPayload`)
+
+Content-Type: `application/json`
+
+```json
+{
+  "timestamp": "2025-12-16T10:00:00Z",
+  "capacity": {
+    "memory": 1024,
+  },
+}
+```
+
+* **timestamp** (string, date-time): Current time on the provider.
+* **capacity** (object): Total hardware resources physically present on the node.
+
+Response:
+```json
+{
+    "last_synced_at": "2025-12-16T10:00:05Z"
+}
+```
