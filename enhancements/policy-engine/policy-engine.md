@@ -71,8 +71,8 @@ The execution order is strictly determined by **Level** first, then
 2. **Tenant:** (Tenant Admin) - Runs second.
 3. **User:** (End User) - Runs last.
 
-_Within each level, policies are sorted by the priority integer (Highest priority
-first)._
+_Within each level, policies are sorted by the priority integer (Highest
+priority first)._
 
 ### The "Rego Contract"
 
@@ -114,6 +114,14 @@ following elements
 
   For the complete validation vocabulary, see the
   [JSON Schema Validation specification](https://json-schema.org/draft/2020-12/json-schema-validation).
+
+### Policy Code Ownership and Responsability
+
+- DCM admins and users implement the policies' REGO code
+- DCM admins and users are responsible for correct registeration of the policies
+- DCM admins and users are responsible for the accuracy and performance of the
+  policies
+- Trying to register a REGO code snipet that fails compilation will fail
 
 ## System Architecture
 
@@ -273,6 +281,8 @@ evaluation; it calls pre-loaded modules in OPA.
   - Query DB for active policies matching the request payload based on the
     policy’s matching criteria.
   - Sort by Level (Global -> Tenant -> User) then Priority (Desc).
+- If no policies matching the request payload were found, the request will
+  return successfully
 - Iterate for each policy P:
   - Call `OPA`:
     - Invoke data.dcm.policy.<P.id>.result
