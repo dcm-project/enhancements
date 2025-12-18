@@ -5,7 +5,7 @@ authors:
 reviewers:
   - "@gciavarrini"
   - "@machacekondra"
-  - "@jubah"
+  - "@jenniferubah"
   - "@croadfel"
   - "@flocati"
   - "@pkliczewski"
@@ -14,31 +14,39 @@ approvers:
   - TBD
 creation-date: 2025-12-15
 ---
+
 # Policy API & Execution Engine
 
 ## Goal
 
 Define the flow of how Policies are managed and used by the Policy Engine
 
-* Define Policy types - Global, Tenant, User
-* Define Policy management
-  * How policies should be added/updated
-  * How policies will be stored
-* Define Policy execution
-  * Policy priority
-  * Value immutability and constraints
-* Determine which enforcement engine ([OPA](https://www.openpolicyagent.org/docs)) and policy language ([Rego](https://www.openpolicyagent.org/docs/policy-language)) to use
-* Define the input format
-* Define the output format
+- Define Policy types - Global, Tenant, User
+- Define Policy management
+  - How policies should be added/updated
+  - How policies will be stored
+- Define Policy execution
+  - Policy priority
+  - Value immutability and constraints
+- Determine which enforcement engine
+  ([OPA](https://www.openpolicyagent.org/docs)) and policy language
+  ([Rego](https://www.openpolicyagent.org/docs/policy-language)) to use
+- Define the input format
+- Define the output format
 
 ## Non-Goals
 
-* Policy implementation
-* Actionable OpenAPI specification
+- Policy implementation
+- Actionable OpenAPI specification
 
 ## Overview
 
-The Policy API operates as a specialized microservice within the Data Center Management (DCM) application responsible for governing resource creation and modification (e.g., VirtualMachines, Containers). It enables Admins, Tenant-Admins, and Users to inject logic that validates requests (Approve/Reject) and mutates request payloads (Defaulting/Altering) using Open Policy Agent (OPA) and Rego.
+The Policy API operates as a specialized microservice within the Data Center
+Management (DCM) application responsible for governing resource creation and
+modification (e.g., VirtualMachines, Containers). It enables Admins,
+Tenant-Admins, and Users to inject logic that validates requests
+(Approve/Reject) and mutates request payloads (Defaulting/Altering) using Open
+Policy Agent (OPA) and Rego.
 
 ## Core Concepts & Definitions
 
@@ -46,20 +54,25 @@ The Policy API operates as a specialized microservice within the Data Center Man
 
 Every policy may return one or more of the following outputs
 
-1. **Reject:** Requests are approved by default. Policies may decide whether the request should be _Rejected_.
-2. **Mutation:** Modifying the request payload (e.g., injecting default labels) by providing a patch map.
-3. **Field Constraints:** Defining the mutability of fields for *subsequent* policies in the chain.
+1. **Reject:** Requests are approved by default. Policies may decide whether the
+   request should be _Rejected_.
+2. **Mutation:** Modifying the request payload (e.g., injecting default labels)
+   by providing a patch map.
+3. **Field Constraints:** Defining the mutability of fields for _subsequent_
+   policies in the chain.
 4. **Service Provider Selection:** Policies may set a value and/or constraints
 
 ### Policy Scope & Hierarchy (Execution Order)
 
-The execution order is strictly determined by **Level** first, then **Priority**.
+The execution order is strictly determined by **Level** first, then
+**Priority**.
 
 1. **Global:** (Super Admin) - Runs first.
 2. **Tenant:** (Tenant Admin) - Runs second.
-3. **User:** (End User) \- Runs last.
+3. **User:** (End User) - Runs last.
 
-*Within each level, policies are sorted by the priority integer (Highest first).*
+_Within each level, policies are sorted by the priority integer (Highest priority
+first)._
 
 ### The "Rego Contract"
 
@@ -67,28 +80,31 @@ The execution order is strictly determined by **Level** first, then **Priority**
 
 The input payload includes:
 
-* The original request payload
-* The current patched request payload
-  * Assumption - While policies do not have to be specific for resource types they will need to know the expected content
-* The current constraints
-* User information
-  * User ID
-  * Tenant ID
-* The service provider (value and constraints)
+- The original request payload
+- The current patched request payload
+  - Assumption - While policies do not have to be specific for Service Types
+    they will need to know the expected content
+- The current constraints
+- User information
+  - User ID
+  - Tenant ID
+- The service provider (value and constraints)
 
 #### Output
 
-Following the policy responsibilities, the output should be comprised of the following elements
+Following the policy responsibilities, the output should be comprised of the
+following elements
 
-* **Reject** - since requests are approved by default, policies may reject them.
-* **Service Provider** -
-  * Value - the name of the service provider chosen to fulfill the request
-  * Constraints - list of allowed SPs, can take a form of Allowlist of Regex
-* **Patch** -  a dictionary of the corresponding service type for setting values. Each internal key is optional
-* **Constraints** - follows [JSON Schema (draft 2020-12)](https://json-schema.org/draft/2020-12/json-schema-validation).
+- **Reject** - since requests are approved by default, policies may reject them.
+- **Service Provider** -
+  - Value - the name of the service provider chosen to fulfill the request
+  - Constraints - list of allowed SPs, can take a form of Allowlist of Regex
+- **Patch** - a dictionary of the corresponding service type for setting values.
+  Each internal key is optional
+- **Constraints** - follows
+  [JSON Schema (draft 2020-12)](https://json-schema.org/draft/2020-12/json-schema-validation).
 
   This standard supports:
-
   - Immutable: _const_
   - Numeric constraints: _minimum, maximum, multipleOf_
   - String patterns: _pattern, minLength, maxLength_
@@ -97,14 +113,16 @@ Following the policy responsibilities, the output should be comprised of the fol
   - Conditional logic: _if/then/else_
 
   For the complete validation vocabulary, see the
-[JSON Schema Validation specification](https://json-schema.org/draft/2020-12/json-schema-validation).
+  [JSON Schema Validation specification](https://json-schema.org/draft/2020-12/json-schema-validation).
 
 ## System Architecture
 
 The Policy API serves two distinct functions:
 
-1. Management Plane: CRUD operations for Policy definitions and synchronization with the Policy Engine.
-2. Execution Plane: Resource requests evaluation against active policies using a stored-policy model.
+1. Management Plane: CRUD operations for Policy definitions and synchronization
+   with the Policy Engine.
+2. Execution Plane: Resource requests evaluation against active policies using a
+   stored-policy model.
 
 ### Policy Management
 
@@ -124,7 +142,7 @@ sequenceDiagram
     else Uniqueness check passed
         PolicyEngine->>PolicyEngine: Generate UUID
         PolicyEngine->>Database: Store policy metadata
-        Note right of Database: UUID, Name, ResourceKind,<br/>LabelSelector, Policy Type, Priority
+        Note right of Database: UUID, Name, ServiceType,<br/>LabelSelector, Policy Type, Priority
         PolicyEngine->>OPA: Push REGO code with UUID
         alt REGO compilation failed
             OPA-->>PolicyEngine: Compilation error
@@ -143,40 +161,40 @@ sequenceDiagram
 
 ###### Payload
 
-* Name
-  * Must be unique at its level. That is:
-    * All global policies must have unique names
-    * All tenant policies must have unique names within their tenant
-    * All user policies must have unique names for their user
-* Policy Matching Criteria. Treated with AND.
-  * ResourceKind
-  * Label Selector
-* Policy Type
-  * Global, Tenant, User
-* Priority
-  * Must be unique at its level
-  * A lower number means a higher priority and therefore will be evaluated first
-* REGO Code
+- Name
+  - Must be unique at its level. That is:
+    - All global policies must have unique names
+    - All tenant policies must have unique names within their tenant
+    - All user policies must have unique names for their user
+- Policy Matching Criteria. Treated with AND.
+  - ServiceType
+  - Label Selector
+- Policy Type
+  - Global, Tenant, User
+- Priority
+  - Must be unique at its level
+  - A lower number means a higher priority and therefore will be evaluated first
+- REGO Code
 
 ###### Response Payload
 
-* Generated UUID
+- Generated UUID
 
 ###### Execution Logic & Flow
 
-* Validate the Policy Name and Priority
-  * If not unique return an error
-* Generate a UUID
-* Store the following information in the DB
-  * UUID
-  * Name
-  * Resource Type
-  * Policy Type
-  * Priority
-* Push the REGO code to OPA
-  * Use the UUID for naming to avoid collisions
-  * If failed, rollback DB and return an error
-* Return UUID to caller
+- Validate the Policy Name and Priority
+  - If not unique return an error
+- Generate a UUID
+- Store the following information in the DB
+  - UUID
+  - Name
+  - Service Type
+  - Policy Type
+  - Priority
+- Push the REGO code to OPA
+  - Use the UUID for naming to avoid collisions
+  - If failed, rollback DB and return an error
+- Return UUID to caller
 
 ##### GET /api/v1/policies
 
@@ -186,7 +204,7 @@ Return the list of policies. Allow for filtering
 
 Return the specific policy
 
-##### Delete /api/v1/policies/{UUID}
+##### DELETE /api/v1/policies/{UUID}
 
 Delete the specific policy
 
@@ -196,9 +214,9 @@ Update the specific policy. Policy name and type are immutable
 
 ###### Payload
 
-* Policy Matching Criteria
-* Priority
-* REGO Code
+- Policy Matching Criteria
+- Priority
+- REGO Code
 
 ### Execution Plane
 
@@ -238,56 +256,63 @@ sequenceDiagram
 
 ###### Payload
 
-* Request Payload
-* User ID
-* Tenant ID
+- Request Payload
+- User ID
+- Tenant ID
 
 ###### Execution Logic & Flow
 
-The Engine acts as an orchestrator. It does not send Rego code during evaluation; it calls pre-loaded modules in OPA.
+The Engine acts as an orchestrator. It does not send Rego code during
+evaluation; it calls pre-loaded modules in OPA.
 
-####### *Pipeline Logic (The "Chain of Responsibility")*
+###### _Pipeline Logic (The "Chain of Responsibility")_
 
-* The Policy API maintains a `ConstraintContext` map in memory for the duration of the request.
-* Fetch & Sort:
-  * Query DB for active policies matching the request payload based on the policy’s matching criteria.
-  * Sort by Level (Global -> Tenant -> User) then Priority (Desc).
-* Iterate for each policy P:
-  * Call `OPA`:
-    * Invoke data.dcm.policy.<P.id>.result
-    * Pass
-      * `OriginalRequestPayload`
-      * `CurrentRequestPayload`
-      * `ConstraintContext`
-      * `UserID`
-      * `TenantID`
-      * `ServiceProvider`
-  * Check `Reject`
-    * If `Reject` is `true`, ABORT IMMEDIATELY (Fail Fast). Return 403.
-  * Validate `Constraints`:
-    * A lower-level policy cannot "unlock" a field locked by a higher-level policy.
-    * If it does, ABORT with "Policy Conflict Error"
-  * Update `ConstraintContext`:
-    * Merge new `Constraints` from Policy P into `ConstraintContext`.
-  * Validate `Patch`:
-    * Validate `Patch` against `ConstraintContext`.
-    * Example: If `ConstraintContext.region` is immutable and Policy P tries to patch the `region`, ABORT with "Policy Conflict Error"
-  * Apply `Patch`
-    * Update resource_payload with valid patches.
-  * Validate `ServiceProvider`
-    * If Policy P returned a `ServiceProvider` and `ServiceProviderConstraints` exists, validate it.
+- The Policy API maintains a `ConstraintContext` map in memory for the duration
+  of the request.
+- Fetch & Sort:
+  - Query DB for active policies matching the request payload based on the
+    policy’s matching criteria.
+  - Sort by Level (Global -> Tenant -> User) then Priority (Desc).
+- Iterate for each policy P:
+  - Call `OPA`:
+    - Invoke data.dcm.policy.<P.id>.result
+    - Pass
+      - `OriginalRequestPayload`
+      - `CurrentRequestPayload`
+      - `ConstraintContext`
+      - `UserID`
+      - `TenantID`
+      - `ServiceProvider`
+  - Check `Reject`
+    - If `Reject` is `true`, ABORT IMMEDIATELY (Fail Fast). Return 403.
+  - Validate `Constraints`:
+    - A lower-level policy cannot "unlock" a field locked by a higher-level
+      policy.
+    - If it does, ABORT with "Policy Conflict Error"
+  - Update `ConstraintContext`:
+    - Merge new `Constraints` from Policy P into `ConstraintContext`.
+  - Validate `Patch`:
+    - Validate `Patch` against `ConstraintContext`.
+    - Example: If `ConstraintContext.region` is immutable and Policy P tries to
+      patch the `region`, ABORT with "Policy Conflict Error"
+  - Apply `Patch`
+    - Update resource_payload with valid patches.
+  - Validate `ServiceProvider`
+    - If Policy P returned a `ServiceProvider` and `ServiceProviderConstraints`
+      exists, validate it.
 
-* Finalize: Return the final `CurrentRequestPayload` and `ServiceProvider` to Placement Manager.
+- Finalize: Return the final `CurrentRequestPayload` and `ServiceProvider` to
+  Placement Manager.
 
-####### *Constraint Validation Example*
+###### _Constraint Validation Example_
 
-* Step 1 (Global Policy):
-  * Patch: {"billing_tag": "engineering"}
-  * Constraint: {"billing_tag": {"mode": "immutable"}}
-  * Result: Payload has billing_tag. Context has billing_tag=immutable.
-* Step 2 (User Policy):
-  * Patch: {"billing_tag": "marketing"}
-  * Action: Engine checks Context. billing_tag is immutable.
-* Result: Error. The User policy violates the Global constraint.
+- Step 1 (Global Policy):
+  - Patch: {"billing_tag": "engineering"}
+  - Constraint: {"billing_tag": {"mode": "immutable"}}
+  - Result: Payload has billing_tag. Context has billing_tag=immutable.
+- Step 2 (User Policy):
+  - Patch: {"billing_tag": "marketing"}
+  - Action: Engine checks Context. billing_tag is immutable.
+- Result: Error. The User policy violates the Global constraint.
 
 ## Alternatives Considered/rejected
