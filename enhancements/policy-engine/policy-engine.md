@@ -17,7 +17,18 @@ creation-date: 2025-12-15
 
 # Policy API & Execution Engine
 
-## Goal
+## Summary
+
+The Policy API operates as a specialized microservice within the Data Center
+Management (DCM) application responsible for governing service creation and
+modification (e.g., VirtualMachines, Containers). It enables Admins,
+Tenant-Admins, and Users to inject logic that validates requests
+(Approve/Reject) and mutates request payloads (Defaulting/Altering) using Open
+Policy Agent (OPA) and Rego.
+
+## Motivation
+
+### Goal
 
 Define the flow of how Policies are managed and used by the Policy Engine
 
@@ -34,19 +45,10 @@ Define the flow of how Policies are managed and used by the Policy Engine
 - Define the input format
 - Define the output format
 
-## Non-Goals
+### Non-Goals
 
 - Policy implementation
 - Actionable OpenAPI specification
-
-## Overview
-
-The Policy API operates as a specialized microservice within the Data Center
-Management (DCM) application responsible for governing service creation and
-modification (e.g., VirtualMachines, Containers). It enables Admins,
-Tenant-Admins, and Users to inject logic that validates requests
-(Approve/Reject) and mutates request payloads (Defaulting/Altering) using Open
-Policy Agent (OPA) and Rego.
 
 ## Core Concepts & Definitions
 
