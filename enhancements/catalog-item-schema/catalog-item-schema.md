@@ -92,12 +92,12 @@ for complete schema definition.
 
 #### CatalogItem components
 
-| Field         | Required | Type   | Description                                                                                                   |
-| :------------ | :------- | :----- | :------------------------------------------------------------------------------------------------------------ |
-| apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                           |
-| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                                    |
-| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used to determine which ServiceType payload to generate |
-| fields        | Yes      | array  | List of field configurations (see below)                                                                      |
+| Field         | Required | Type   | Description                                                                                           |
+| :------------ | :------- | :----- | :---------------------------------------------------------------------------------------------------- |
+| apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                   |
+| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                            |
+| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by DCM to generate the ServiceType payload |
+| fields        | Yes      | array  | List of field configurations (see below)                                                              |
 
 Each field in the _fields_ array has:
 
@@ -182,12 +182,11 @@ For the complete validation vocabulary, see the
 
 ### Data Flow
 
-1. Admin creates catalog item with template and validation rules
-2. User requests service from catalog item
-3. UI validates user input against validationSchema.
-4. ServiceType payload created from template + user overrides
+1. Admin creates CatalogItem with defaults and validation rules
+2. User requests service from CatalogItem
+3. UI validates user input against validationSchema
+4. DCM translates CatalogItem + user input into ServiceType payload
 5. Placement Service calls policy engine for validation/mutation
-6. Once approved, Placement Service selects a Service Provider and sends a
-   request to it
-7. The Service Provider receives the serviceType payload and translates it to
-   their native format using simple struct-to-struct mapping.
+6. Once approved, Placement Service selects a Service Provider and sends the
+   ServiceType payload
+7. Service Provider translates the ServiceType payload to their native format
