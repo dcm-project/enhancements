@@ -63,6 +63,7 @@ Administrators create catalog offerings like "_Small Dev VM_" or "_Production
 Database_" that users can request without knowing the underlying details.
 
 ```yaml
+apiVersion: v1alpha1
 kind: CatalogItem
 metadata:
   name: production-postgres
@@ -91,11 +92,12 @@ for complete schema definition.
 
 #### CatalogItem components
 
-| Field         | Required | Type   | Description                                                                                      |
-| :------------ | :------- | :----- | :----------------------------------------------------------------------------------------------- |
-| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                       |
-| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by SPs to determine translation logic |
-| fields        | Yes      | array  | List of field configurations (see below)                                                         |
+| Field         | Required | Type   | Description                                                                                                   |
+| :------------ | :------- | :----- | :------------------------------------------------------------------------------------------------------------ |
+| apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                           |
+| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                                    |
+| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used to determine which ServiceType payload to generate |
+| fields        | Yes      | array  | List of field configurations (see below)                                                                      |
 
 Each field in the _fields_ array has:
 
@@ -113,6 +115,7 @@ owner must ensure all mandatory fields are listed.
 _Example "Development VM" CatalogItem - only CPU and memory required_
 
 ```yaml
+apiVersion: v1alpha1
 kind: CatalogItem
 metadata:
   name: dev-vm
@@ -143,11 +146,14 @@ instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
 
 #### Versioning
 
-The `schemaVersion` field creates a contract between CatalogItems and Service
-Providers. SPs use this version to determine which translation logic to apply
-when provisioning resources.
+CatalogItems use two version fields:
 
-This enables:
+- **`apiVersion`**: Versions the CatalogItem schema itself (e.g., `v1alpha1`).
+  Enables evolution of the CatalogItem structure.
+- **`schemaVersion`**: Versions the referenced ServiceType schema (e.g.,
+  `v1alpha1`). Creates a contract for ServiceType payload generation.
+
+The `schemaVersion` enables:
 
 - **SP selection**: Version info can be used for placement decisions (e.g.,
   excluding SPs that don't support a given schema version)
