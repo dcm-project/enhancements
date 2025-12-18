@@ -42,7 +42,7 @@ Define the flow of how Policies are managed and used by the Policy Engine
 ## Overview
 
 The Policy API operates as a specialized microservice within the Data Center
-Management (DCM) application responsible for governing resource creation and
+Management (DCM) application responsible for governing service creation and
 modification (e.g., VirtualMachines, Containers). It enables Admins,
 Tenant-Admins, and Users to inject logic that validates requests
 (Approve/Reject) and mutates request payloads (Defaulting/Altering) using Open
@@ -121,7 +121,7 @@ The Policy API serves two distinct functions:
 
 1. Management Plane: CRUD operations for Policy definitions and synchronization
    with the Policy Engine.
-2. Execution Plane: Resource requests evaluation against active policies using a
+2. Execution Plane: Service requests evaluation against active policies using a
    stored-policy model.
 
 ### Policy Management
@@ -230,7 +230,7 @@ sequenceDiagram
     participant Database
     participant OPA
 
-    User->>PlacementManager: Create Resource request
+    User->>PlacementManager: Create Service request
     PlacementManager->>PolicyEngine: Validate Payload
     PolicyEngine->>Database: Get matching policies by serviceType and labelSelector
     Database-->>PolicyEngine: List of policies
@@ -247,7 +247,7 @@ sequenceDiagram
     end
 
     PolicyEngine-->>PlacementManager: Success with updated payload
-    PlacementManager-->>User: Resource created
+    PlacementManager-->>User: Service created
 ```
 
 #### Pseudo API
@@ -296,7 +296,7 @@ evaluation; it calls pre-loaded modules in OPA.
     - Example: If `ConstraintContext.region` is immutable and Policy P tries to
       patch the `region`, ABORT with "Policy Conflict Error"
   - Apply `Patch`
-    - Update resource_payload with valid patches.
+    - Update service_payload with valid patches.
   - Validate `ServiceProvider`
     - If Policy P returned a `ServiceProvider` and `ServiceProviderConstraints`
       exists, validate it.
