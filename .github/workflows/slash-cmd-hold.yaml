@@ -11,7 +11,7 @@ jobs:
       issues: write
     steps:
       - name: Add hold label
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const prNumber = ${{ github.event.client_payload.pull_request.number }};
