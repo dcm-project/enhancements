@@ -138,19 +138,41 @@ Find the best argument against it.
 ## Alternatives
 
 <!--
-What other approaches were considered?
-Why were they not chosen?
+What other approaches were considered and why were they rejected?
+This section is important to show that options were thoughtfully evaluated.
 -->
 
 ### Alternative 1
 
-**Description:** ...
+#### Description
 
-**Pros:** ...
+...
 
-**Cons:** ...
+#### Pros
 
-**Why rejected:** ...
+- ...
+
+#### Cons
+
+- ...
+
+#### Status
+
+<!--
+Possible values:
+- Rejected: Evaluated and not chosen
+- Deferred: Not now, but could be revisited later
+-->
+
+Rejected
+
+#### Rationale
+
+<!--
+Explain the reasoning behind the status. Be specific:
+- What limitation or trade-off influenced the decision?
+- If deferred, what conditions would change the decision?
+-->
 
 ## Infrastructure Needed
 
