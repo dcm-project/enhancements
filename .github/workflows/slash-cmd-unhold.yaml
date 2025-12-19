@@ -1,0 +1,34 @@
+name: unhold-command
+on:
+  repository_dispatch:
+    types: [unhold-command]
+
+jobs:
+  unhold:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Remove hold label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.client_payload.pull_request.number }};
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: 'do-not-merge/hold'
+              });
+            } catch (e) {
+              // Label might not exist, ignore
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: '🟢 Hold removed by @${{ github.event.client_payload.github.actor }}'
+            });
+
