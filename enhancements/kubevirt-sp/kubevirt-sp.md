@@ -1,11 +1,11 @@
 ---
 title: kubevirt-sp
 authors:
-  - "@jubah"
+  - "@jenniferubah"
 reviewers:
+  - "@gciavarrini"
   - "@machacekondra"
   - "@ygalblum"
-  - "@jubah"
   - "@croadfel"
   - "@flocati"
   - "@pkliczewski"
@@ -264,17 +264,84 @@ Kubernetes watch APIs to stream VMI events per VM instance and update DCM in
 real time. These resources must be labeled with
 `managed-by=dcm,dcm-instance-id=vmId` during creation to enable filtering.
 
-VMStatusSyncService - Watcher Loop Flow
-1. Spawns a goroutine to run a watcher per VM instance.
-2. Context cancellation will stop all watchers.
-3. Each VM instance has its own watcher loop, hence monitored independently.
-4. Process VM instance event
-5. Map VMI phase to DCM status
-6. Send status update to DCM status endpoint `/instances/{instanceId}/status`.
+VM Status Update Flow - Using Informer
 
-**Note**: The implementation of the status report flow will change to
-Event driven architecture following the design 
-in the updated version of the status reporting ADR.
+###### Setup Phase:
+* Create a single SharedIndexInformer for VirtualMachineInstances
+* Add a custom indexer for `dcm-instance-i` labels for fast lookups
+* Register event handlers - AddVMI(), UpdateVMI(), DeleteVMI()
+* Start the informer in a background goroutine
+* Initial list - fetch all VMIs from the cluster (one API call)
+* Establish a single watch connection for all VMIs
+* Wait for cache sync before processing events
+
+###### Event Processing Flow
+* Watch receives a VMI event (Added/Updated/Delete)
+* Informer updates the local cache (thread-safe)
+* Handler extracts `dcm-instance-id` from VMI labels
+* Map VMI phase to DCM status (Scheduled → Provisioning, etc.)
+* Send status update to DCM status endpoint `/instances/{instanceId}/status`.
+
+###### Periodic Resync
+* Resync periodically - every 10 minutes
+* Automatic reconnection (with exponential backoff) on disconnect
+* Cache indexed queries (no API calls needed)
+
+###### Pros
+* Single shared watch connection (scales better)
+* Local cache for fast queries (no API calls)
+* Automatic reconnection with exponential backoff
+* Periodic resync for consistency
+* Faster startup
+* Lower API server load (one connection)
+* Good for large scale (> 100 VMs)
+* Indexed queries (e.g., by `dcm-instance-id`)
+* Handles missed events via resync
+
+###### Cons
+* Higher memory usage (caches all VMIs)
+* More complex setup (indexers, handlers)
+* Receives all VMI events (filter in handlers)
+* Slightly high latency (cache + handler overhead)
+* Requires understanding of cache/indexers
+* More code to maintain
+* Cache can become stale if not properly synced
+* Overkill for small scale ( <50 VMs)
+
+
+**Note**: The implementation of the status report flow will
+be updated (in v2) to Event driven architecture following the design
+in the updated version of the Status reporting ADR.
+
+###### Alternative/Rejected
+VM Status Update Flow - Using Watch Loop
+* Spawns a goroutine to run a watcher per VM instance.
+* Context cancellation will stop all watchers.
+* Each VM instance has its own watcher loop, hence monitored independently.
+* Process VM instance event
+* Map VMI phase to DCM status
+
+###### Pros
+* Simple implementation
+* Lower memory usage (no cache)
+* Direct event stream (minimal latency)
+* API-level filtering (label selector)
+* Only receives relevant events
+* Easy to understand and debug
+* Less code to maintain
+* No cache synchronization needed
+* Good for small scale (< 50 VMs)
+* Per-VM isolation (one failure doesn't affect others)
+
+###### Cons
+* Multiple connections (N VMs = N connections)
+* No local cache (queries require API calls)
+* Manual reconnection logic needed
+* Slower startup
+* Higher API server load
+* No automatic resync
+* Can miss events on disconnect
+* Doesn't scale well (> 100 VMs)
 
 ##### Status Mapping from DCM to KubeVirt
 This maps the DCM generic status to the lifecycle phase within 
