@@ -3,13 +3,19 @@ title: service-type-definition
 authors:
   - "@gciavarrini"
 reviewers:
-  - @machacekondra
-  - @ygalblum
-  - @jubah
-  - @croadfel
-  - @flocati
-  - @pkliczewski
-  - @gabriel-farache
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jubah"
+  - "@croadfel"
+  - "@flocati"
+  - "@pkliczewski"
+  - "@gabriel-farache"
+approvers:
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jubah"
+  - "@flocati"
+  - "@gabriel-farache"
 creation-date: 2025-12-05
 ---
 
