@@ -15,10 +15,14 @@ creation-date: 2025-12-15
 
 # KubeVirt Service Provider
 
+## Summary
+
 The KubeVirt Service Provider API is a REST API that manages Virtual Machines
 (VMs) in a Kubernetes cluster running KubeVirt. It exposes endpoints for
 creating, reading and deleting VMs, and integrates with the DCM Service Provider
 Registry.
+
+## Motivation
 
 ### Goals
 
