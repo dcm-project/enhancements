@@ -1,0 +1,30 @@
+name: hold-command
+on:
+  repository_dispatch:
+    types: [hold-command]
+
+jobs:
+  hold:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Add hold label
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prNumber = ${{ github.event.client_payload.pull_request.number }};
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ['do-not-merge/hold']
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: '🔴 Hold added by @${{ github.event.client_payload.github.actor }}'
+            });
+

@@ -1,0 +1,20 @@
+name: Hold Check
+on:
+  pull_request:
+    types: [opened, synchronize, labeled, unlabeled]
+
+jobs:
+  hold-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for hold label
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            if (labels.includes('do-not-merge/hold')) {
+              core.setFailed('PR is on hold. Use /unhold to remove.');
+            } else {
+              console.log('No hold label, OK to merge.');
+            }
+

@@ -1,0 +1,23 @@
+name: Slash Command Dispatch
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  slashCommandDispatch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Slash Command Dispatch
+        uses: peter-evans/slash-command-dispatch@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commands: |
+            approve
+            hold
+            unhold
+          permission: write
+
