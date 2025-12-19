@@ -14,6 +14,8 @@ approvers:
   - "@machacekondra"
   - "@ygalblum"
   - "@jubah"
+  - "@flocati"
+  - "@gabriel-farache"
 creation-date: 2025-12-05
 ---
 
