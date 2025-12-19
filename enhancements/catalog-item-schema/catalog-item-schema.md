@@ -3,12 +3,19 @@ title: catalog-item-schema
 authors:
   - "@gciavarrini"
 reviewers:
-  - "@omachace"
-  - "@jubah"
-  - "@yblum"
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jenniferubah"
+  - "@croadfel"
   - "@flocati"
+  - "@pkliczewski"
+  - "@gabriel-farache"
 approvers:
-  - TBD
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jenniferubah"
+  - "@flocati"
+  - "@gabriel-farache"
 creation-date: 2025-12-05
 see-also:
   - "/enhancements/service-type-definitions/service-type-definition.md"
