@@ -11,13 +11,19 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      - name: Generate App Token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.SLASH_COMMANDS_APP_ID }}
+          private-key: ${{ secrets.SLASH_COMMANDS_APP_PRIVATE_KEY }}
+
       - name: Slash Command Dispatch
         uses: peter-evans/slash-command-dispatch@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           commands: |
             approve
             hold
             unhold
           permission: write
-
