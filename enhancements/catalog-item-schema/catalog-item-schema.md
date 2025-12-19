@@ -184,9 +184,15 @@ For the complete validation vocabulary, see the
 
 1. Admin creates CatalogItem with defaults and validation rules
 2. User requests service from CatalogItem
-3. UI validates user input against validationSchema
-4. DCM translates CatalogItem + user input into ServiceType payload
+3. User submits request (UI may validate against `validationSchema` for early
+   feedback)
+4. DCM validates input against `validationSchema` and translates CatalogItem +
+   user input into ServiceType payload
 5. Placement Service calls policy engine for validation/mutation
 6. Once approved, Placement Service selects a Service Provider and sends the
    ServiceType payload
 7. Service Provider translates the ServiceType payload to their native format
+
+Note: The validationSchema is used by both UI (for UX) and DCM (for
+enforcement). Users may bypass the UI (CLI, Ansible, cURL), so DCM must always
+validate.
