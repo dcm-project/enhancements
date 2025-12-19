@@ -3,13 +3,13 @@ title: Service Provider Status Report Implementation
 authors:
   - "@machacekondra"
 reviewers:
-  - @gciavarrini
-  - @ygalblum
-  - @jubah
-  - @croadfel
-  - @flocati
-  - @pkliczewski
-  - @gabriel-farache
+  - "@gciavarrini"
+  - "@ygalblum"
+  - "@jenniferubah"
+  - "@croadfel"
+  - "@flocati"
+  - "@pkliczewski"
+  - "@gabriel-farache"
 approvers:
   - ""
 creation-date: 2025-12-15
@@ -53,7 +53,7 @@ In this model, the Service Provider establishes a persistent connection to the u
 
 1.  **Label Filtering:** The Provider watches only resources containing specific identification labels (e.g., `managed-by=dcm`, `dcm-instance-id=<uuid>`).
 2.  **The Watch Loop:** The Provider maintains a resilient "Informer" or "Watch" loop. If the connection drops, it performs a re-list and resumes watching to ensure no events were missed.
-3.  **Push to DCM:** The Provider send event using CloudEvents using message system.
+3.  **Push to DCM:** The Provider sends CloudEvents via the message system.
 
 #### Requirements for Implementation
 
@@ -72,9 +72,9 @@ In this model, the Service Provider periodically queries the underlying platform
 
 #### Workflow
 
-1.  **Label Filtering:** The Provider poll only resources containing specific identification labels (e.g., `managed-by=dcm`, `dcm-instance-id=<uuid>`).
-2.  **Change detection:** The Provider check if the resource/state has changed.
-3.  **Push to DCM:** The Provider send event using CloudEvents using message system.
+1.  **Label Filtering:** The Provider polls only resources containing specific identification labels (e.g., `managed-by=dcm`, `dcm-instance-id=<uuid>`).
+2.  **Change detection:** The Provider checks if the resource/state has changed.
+3.  **Push to DCM:** The Provider sends CloudEvents via the message system.
 
 
 #### Requirements for Implementation
@@ -94,4 +94,4 @@ The logic flows as follows:
 
 1.  **Event Detected:** The KubeVirt API server pushes an `Update` event to the Service Provider.
 2.  **ID Extraction:** The handler parses the VMI spec to find the `dcm-instance-id` annotation/label.
-3.  **Call Status API:** The provider formats the payload and send CloudEvent to message system server.
+3.  **Call Status API:** The provider formats the payload and sends CloudEvent to message system server.
