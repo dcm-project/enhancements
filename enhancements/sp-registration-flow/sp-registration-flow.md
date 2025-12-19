@@ -142,7 +142,9 @@ flowchart BT
     class SP1,SP2 lightContainer
 ```
 
-- Admins predefine supported ServiceTypes (e.g., "vm", "database")
+- Admins predefine supported
+  [Service Types](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md)
+  (e.g., "vm", "database")
 - A registration call must be made to the Registration Handler endpoint for each
   service type the SP supports. The payload structure is not finalized and may
   evolve during implementation. It may include, just as an example:
