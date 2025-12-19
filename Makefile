@@ -10,6 +10,8 @@ help:
 	@echo "  make format FILE=x.md    - Format specific file"
 	@echo "  make check-format        - Check all markdown files"
 	@echo "  make check-format FILE=x - Check specific file"
+	@echo "  make check-spell         - Check spelling in all markdown files"
+	@echo "  make check-spell FILE=x  - Check spelling in specific file"
 	@echo "  make new NAME=xxx        - Create new enhancement"
 
 format:
@@ -38,4 +40,4 @@ new:
 	@cp enhancements/template.md enhancements/$(NAME)/$(NAME).md
 	@echo "Created enhancements/$(NAME)/$(NAME).md"
 
-.PHONY: help format check-format new
+.PHONY: help format check-format check-spell new
