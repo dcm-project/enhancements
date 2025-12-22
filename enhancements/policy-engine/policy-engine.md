@@ -117,10 +117,10 @@ following elements
   For the complete validation vocabulary, see the
   [JSON Schema Validation specification](https://json-schema.org/draft/2020-12/json-schema-validation).
 
-### Policy Code Ownership and Responsability
+### Policy Code Ownership and Responsibilities
 
 - DCM admins and users implement the policies' REGO code
-- DCM admins and users are responsible for correct registeration of the policies
+- DCM admins and users are responsible for correct registration of the policies
 - DCM admins and users are responsible for the accuracy and performance of the
   policies
 - Trying to register a REGO code snipet that fails compilation will fail
@@ -210,15 +210,15 @@ sequenceDiagram
 
 Return the list of policies. Allow for filtering
 
-##### GET /api/v1/policies/{UUID}
+##### GET /api/v1/policies/{policyId}
 
 Return the specific policy
 
-##### DELETE /api/v1/policies/{UUID}
+##### DELETE /api/v1/policies/{policyId}
 
 Delete the specific policy
 
-##### PUT /api/v1/policies/{UUID}
+##### PUT /api/v1/policies/{policyId}
 
 Update the specific policy. Policy name and type are immutable
 
@@ -326,5 +326,3 @@ evaluation; it calls pre-loaded modules in OPA.
   - Patch: {"billing_tag": "marketing"}
   - Action: Engine checks Context. billing_tag is immutable.
 - Result: Error. The User policy violates the Global constraint.
-
-## Alternatives Considered/rejected
