@@ -19,14 +19,17 @@ creation-date: 2025-12-15
 
 ## Summary
 
-The Policy API operates as a specialized microservice within the Data Center
-Management (DCM) application responsible for governing service creation and
-modification (e.g., VirtualMachines, Containers). It enables Admins,
-Tenant-Admins, and Users to inject logic that validates requests
-(Approve/Reject) and mutates request payloads (Defaulting/Altering) using Open
-Policy Agent (OPA) and Rego.
+This ADR defines the Management and Execution API and Workflow of the DCM Policy
+Engine
 
 ## Motivation
+
+The Policy Engine operates as a specialized microservice within the Data Center
+Management (DCM) application responsible for governing service creation and
+modification (e.g., VirtualMachines, Containers). It enables Admins,
+Tenant-Admins, and Users to inject logic that validates (Approve/Reject),
+mutates (Defaulting/Altering) and assigns Service Providers to request payloads
+using Open Policy Agent (OPA) and Rego.
 
 ### Goal
 
