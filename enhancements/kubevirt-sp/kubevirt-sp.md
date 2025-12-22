@@ -71,7 +71,7 @@ Registry.
 
 ###### DCM Provider Status Heartbeat
 
-- Periodically send heartbeat information (as designed in SP Heartbeat ADR) to DCM to
+- Periodically send health information to DCM to
   indicate it (KubeVirt SP) is alive.
 - Send updates about current resource availability.
 - Send heartbeat to DCM endpoint `PUT /providers/{providerId}/status` with payload
@@ -87,8 +87,9 @@ Registry.
 KubeVirt SP API must successfully complete a registration process to ensure
 DCM is aware of it and can use it. During startup, the service uses the DCM
 registration client to send a request to the SP API registration endpoint:
-`PUT /service/{serviceType}/provider`. See DCM registration client library for more
-information.
+`POST /api/v1/providers`. See DCM [registration client library]
+(https://github.com/dcm-project/service-provider-api/tree/main/pkg/registration/client) 
+for more information.
 
 Example of request payload.
 
@@ -254,7 +255,8 @@ Example payload
   }
 ```
 
-**Note**: In the example payload above, ssh is configured with nodeport.
+**Note**: Payload above is **only** an example. This will be updated
+when the schema contract is defined by DCM.
 
 **DELETE /api/v1/vm/{vmId}**
 
@@ -262,7 +264,7 @@ Remove a single virtual machine instance and returns 204 (No Content)
 
 ##### Status Reporting To DCM
 
-Following the design and recommendation in the DCM status reporting ADR, the
+Following the design and recommendation in the DCM Status Reporting, the
 VMStatusSyncService within KubeVirt SP implements a watcher loop that uses
 Kubernetes watch APIs to stream VMI events per VM instance and update DCM in
 real time. These resources must be labeled with
@@ -272,7 +274,7 @@ VM Status Update Flow - Using Informer
 
 ###### Setup Phase:
 * Create a single SharedIndexInformer for VirtualMachineInstances
-* Add a custom indexer for `dcm-instance-i` labels for fast lookups
+* Add a custom indexer for `dcm-instance-id` labels for fast lookups
 * Register event handlers - AddVMI(), UpdateVMI(), DeleteVMI()
 * Start the informer in a background goroutine
 * Initial list - fetch all VMIs from the cluster (one API call)
@@ -284,7 +286,7 @@ VM Status Update Flow - Using Informer
 * Informer updates the local cache (thread-safe)
 * Handler extracts `dcm-instance-id` from VMI labels
 * Map VMI phase to DCM status (Scheduled → Provisioning, etc.)
-* Send status update to DCM status endpoint `/instances/{instanceId}/status`.
+* Send status update to DCM status endpoint `PUT /instances/{instanceId}/status`.
 
 ###### Periodic Resync
 * Resync periodically - every 10 minutes
@@ -306,50 +308,20 @@ VM Status Update Flow - Using Informer
 * Higher memory usage (caches all VMIs)
 * More complex setup (indexers, handlers)
 * Receives all VMI events (filter in handlers)
-* Slightly high latency (cache + handler overhead)
 * Requires understanding of cache/indexers
 * More code to maintain
 * Cache can become stale if not properly synced
 * Overkill for small scale ( <50 VMs)
-
+* Cold start requires fetching all existing VMIs 
+  before watch begins
 
 **Note**: The implementation of the status report flow will
-be updated (in v2) to Event driven architecture following the design
-in the updated version of the Status reporting ADR.
-
-###### Alternative/Rejected
-VM Status Update Flow - Using Watch Loop
-* Spawns a goroutine to run a watcher per VM instance.
-* Context cancellation will stop all watchers.
-* Each VM instance has its own watcher loop, hence monitored independently.
-* Process VM instance event
-* Map VMI phase to DCM status
-
-###### Pros
-* Simple implementation
-* Lower memory usage (no cache)
-* Direct event stream (minimal latency)
-* API-level filtering (label selector)
-* Only receives relevant events
-* Easy to understand and debug
-* Less code to maintain
-* No cache synchronization needed
-* Good for small scale (< 50 VMs)
-* Per-VM isolation (one failure doesn't affect others)
-
-###### Cons
-* Multiple connections (N VMs = N connections)
-* No local cache (queries require API calls)
-* Manual reconnection logic needed
-* Slower startup
-* Higher API server load
-* No automatic resync
-* Can miss events on disconnect
-* Doesn't scale well (> 100 VMs)
+be updated (in v2) to Event driven architecture (message broker) following the design
+in the updated version of the DCM Status Reporting.
 
 ##### Status Mapping from DCM to KubeVirt
 This maps the DCM generic status to the lifecycle phase within 
-the VMI status. See Status reporting ADR for more information.
+the VMI status. See DCM Status Reporting for more information.
 
 | DCM          | KubeVirt                       | Description                    |
 |--------------|--------------------------------|--------------------------------|
@@ -363,6 +335,48 @@ the VMI status. See Status reporting ADR for more information.
 See 
 [KubeVirt VMI Phase](https://github.com/kubevirt/kubevirt/blob/main/staging/src/kubevirt.io/api/core/v1/types.go#L1086) 
 definitions.
+
+## Alternatives
+
+### VM Status Update Flow - Using Watch Loop
+
+#### Description
+How the Watch Loops works:
+- Spawns a goroutine to run a watcher per VM instance.
+- Context cancellation will stop all watchers.
+- Each VM instance has its own watcher loop, hence monitored independently.
+- Process VM instance event
+- Map VMI phase to DCM status
+
+#### Pros
+* Simple implementation
+* Lower memory usage (no cache)
+* Direct event stream (minimal latency)
+* API-level filtering (label selector)
+* Only receives relevant events
+* Easy to understand and debug
+* Less code to maintain
+* No cache synchronization needed
+* Good for small scale (< 50 VMs)
+* Per-VM isolation (one failure doesn't affect others)
+
+#### Cons
+- Multiple connections (N VMs = N connections)
+- No local cache (queries require API calls)
+- Manual reconnection logic needed
+- Slower startup
+- Higher API server load
+- No automatic resync
+- Can miss events on disconnect
+- Doesn't scale well (> 100 VMs)
+
+#### Status
+- Rejected
+
+#### Rationale
+The watch loop per VM does not scale at all because N number of VMs mean 
+N number of connections. This increases API server load 
+and management overhead.
 
 ## Infrastructure Needed
 TBD
