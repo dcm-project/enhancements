@@ -27,15 +27,15 @@ Registry.
 ### Goals
 
 - Define the lifecycle of an SP running KubeVirt.
-- Implement registration flow with SP API.
-- Implement Create, Read and Delete endpoints for managing VMs
+- Define the registration flow with DCM SP API.
+- Define Create, Read and Delete endpoints for managing VMs
   running on a cluster.  
   **Note** Update is out of scope for the first version (v1).
-- Implement status reporting for DCM requests.
+- Define status reporting for DCM requests.
 
 ### Non-Goals
 
-- Implement endpoints for day 2 operations (stop, start and restart) a virtual
+- Define endpoints for day 2 operations (stop, start and restart) a virtual
   machine instance.
 - Mechanism for retrieving available computing, storage, etc., information from
   the SP infrastructure.
@@ -43,33 +43,32 @@ Registry.
 
 ## Proposal
 
-##### Assumptions
+### Assumptions
 
-- The KubeVirt Service Provider API is connected to a Kubernetes cluster (OCP,
+- The KubeVirt Service Provider is connected to a Kubernetes cluster (OCP,
   KIND, Minikube) with KubeVirt installed.
-- The KubeVirt Service Provider API should have the necessary permissions to
-  either an entire cluster or a limited set of namespaces to create and manage
-  VirtualMachine resources.
+- The KubeVirt Service Provider should have the necessary permissions to
+  either an entire cluster.
 - The DCM Service Provider Registry is reachable for registration.
 - The API service has valid Kubernetes credentials (kubeconfig or in-cluster
   service account).
 - DCM status reporting endpoint is reachable for resource updates.
 - DCM provider heartbeat endpoint is reachable for health updates.
 
-##### Integration Points
+### Integration Points
 
-###### KubeVirt Integration
+#### KubeVirt Integration
 
 - Uses kubevirt.io/client-go to interact with KubeVirt.
 - Creates and manages VirtualMachine Custom Resources.
 - Leverages KubeVirt's VM lifecycle management.
 
-###### DCM SP Registry
+#### DCM SP Registry
 
 - Auto-registration on startup with DCM SP Registrar.
-- Metadata includes zone, region, and total availability of resources.
+- Metadata includes region, status and total availability of resources.
 
-###### DCM Provider Status Heartbeat
+#### DCM SP Heath Check
 
 - Periodically send health information to DCM to
   indicate it (KubeVirt SP) is alive.
@@ -77,18 +76,20 @@ Registry.
 - Send heartbeat to DCM endpoint `PUT /providers/{providerId}/status` with payload
   request conforming to schema defined in DCM API schema.
 
-###### DCM SP Status Reporting
+#### DCM SP Status Reporting
 
 - Send status for virtual machine instance to DCM endpoint
   `/instances/{instanceId}/status`.
-- Use a watcher loop to monitor VMI events.
+- Use a shared informer to watch/monitor VMI events.
 
-##### Registration Flow
+### Registration Flow
 KubeVirt SP API must successfully complete a registration process to ensure
 DCM is aware of it and can use it. During startup, the service uses the DCM
 registration client to send a request to the SP API registration endpoint:
-`POST /api/v1/providers`. See DCM [registration client library]
-(https://github.com/dcm-project/service-provider-api/tree/main/pkg/registration/client) 
+`POST /api/v1/providers`. See DCM 
+[registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
+and
+[registration client library](https://github.com/dcm-project/service-provider-api/tree/main/pkg/registration/client) 
 for more information.
 
 Example of request payload.
@@ -116,9 +117,9 @@ request := &dcm.RegistrationRequest{
 
 **Note**: The registration payload above is not concluded and may change.
 
-###### Registration Process
-
-- API performs self-registration at startup.
+#### Registration Process
+The follow steps highlights the process for self-registration at startup
+ 
 - API server starts and initializes HTTP listener.
 - After the server is ready, registration runs in a background goroutine.
 - The service constructs the API host URL from the listener address or
@@ -129,12 +130,12 @@ request := &dcm.RegistrationRequest{
   not block server startup. Alternatively, SP can fall back to manual
   registration.
 
-##### API Endpoints
+### API Endpoints
 
 The CRUD endpoints are consumed by the DCM SP API to create and manage virtual
 machine resources.
 
-###### Endpoints Overview
+#### Endpoints Overview
 
 | Method | Endpoint                | Description                        |
 | ------ | ----------------------- |------------------------------------|
@@ -153,7 +154,7 @@ check for compliance with AEP.
 
 The POST endpoint follows the contract defined in the VM schema spec pre-defined
 by DCM core. During creation of the resources, each virtual machine must be
-labelled with _managed-by=dcm,dcm-instance-id=vmId_.
+labeled with _managed-by=dcm,dcm-instance-id=vmId_.
 
 Example payload
 
@@ -262,7 +263,11 @@ when the schema contract is defined by DCM.
 
 Remove a single virtual machine instance and returns 204 (No Content)
 
-##### Status Reporting To DCM
+**GET /api/v1/health**
+
+Retrieve the health status for the KubeVirt Service Provider API.
+
+### Status Reporting To DCM
 
 Following the design and recommendation in the DCM Status Reporting, the
 VMStatusSyncService within KubeVirt SP implements a watcher loop that uses
@@ -270,49 +275,45 @@ Kubernetes watch APIs to stream VMI events per VM instance and update DCM in
 real time. These resources must be labeled with
 `managed-by=dcm,dcm-instance-id=vmId` during creation to enable filtering.
 
-VM Status Update Flow - Using Informer
+#### VM Status Update Flow - Using Informer
 
-###### Setup Phase:
-* Create a single SharedIndexInformer for VirtualMachineInstances
-* Add a custom indexer for `dcm-instance-id` labels for fast lookups
-* Register event handlers - AddVMI(), UpdateVMI(), DeleteVMI()
-* Start the informer in a background goroutine
-* Initial list - fetch all VMIs from the cluster (one API call)
-* Establish a single watch connection for all VMIs
-* Wait for cache sync before processing events
+##### Setup Phase
+- Create a single SharedIndexInformer for VirtualMachineInstances
+- Add a custom indexer for `dcm-instance-id` labels for fast lookups
+- Register event handlers - AddVMI(), UpdateVMI(), DeleteVMI()
+- Start the informer in a background goroutine
+- Initial list - fetch all VMIs from the cluster (one API call)
+- Establish a single watch connection for all VMIs
+- Wait for cache sync (every 10 mins) before processing events
 
-###### Event Processing Flow
-* Watch receives a VMI event (Added/Updated/Delete)
-* Informer updates the local cache (thread-safe)
-* Handler extracts `dcm-instance-id` from VMI labels
-* Map VMI phase to DCM status (Scheduled → Provisioning, etc.)
-* Send status update to DCM status endpoint `PUT /instances/{instanceId}/status`.
+##### Event Processing Flow
+- Watch receives a VMI event (Added/Updated/Delete)
+- Informer updates the local cache (thread-safe)
+- Handler extracts `dcm-instance-id` from VMI labels
+- Map VMI phase to DCM status (Scheduled → Provisioning, etc.)
+- Send status update to DCM status endpoint `PUT /instances/{instanceId}/status`
+- Failed events are automatically retried (with exponential backoff)
 
-###### Periodic Resync
-* Resync periodically - every 10 minutes
-* Automatic reconnection (with exponential backoff) on disconnect
-* Cache indexed queries (no API calls needed)
+##### Pros
+- Single shared watch connection for the cluster (scales better)
+- Local cache for fast queries (no API calls)
+- Automatic reconnection with exponential backoff
+- Periodic resync for consistency
+- Faster startup
+- Lower API server load (one connection)
+- Good for large scale (> 100 VMs)
+- Indexed queries (e.g., by `dcm-instance-id`)
+- Handles missed events via resync
 
-###### Pros
-* Single shared watch connection (scales better)
-* Local cache for fast queries (no API calls)
-* Automatic reconnection with exponential backoff
-* Periodic resync for consistency
-* Faster startup
-* Lower API server load (one connection)
-* Good for large scale (> 100 VMs)
-* Indexed queries (e.g., by `dcm-instance-id`)
-* Handles missed events via resync
-
-###### Cons
-* Higher memory usage (caches all VMIs)
-* More complex setup (indexers, handlers)
-* Receives all VMI events (filter in handlers)
-* Requires understanding of cache/indexers
-* More code to maintain
-* Cache can become stale if not properly synced
-* Overkill for small scale ( <50 VMs)
-* Cold start requires fetching all existing VMIs 
+##### Cons
+- Higher memory usage (caches all VMIs)
+- More complex setup (indexers, handlers)
+- Receives all VMI events (filter in handlers)
+- Requires understanding of cache/indexers
+- More code to maintain
+- Cache can become stale if not properly synced
+- Overkill for small scale ( <50 VMs)
+- Cold start requires fetching all existing VMIs 
   before watch begins
 
 **Note**: The implementation of the status report flow will
@@ -349,16 +350,16 @@ How the Watch Loops works:
 - Map VMI phase to DCM status
 
 #### Pros
-* Simple implementation
-* Lower memory usage (no cache)
-* Direct event stream (minimal latency)
-* API-level filtering (label selector)
-* Only receives relevant events
-* Easy to understand and debug
-* Less code to maintain
-* No cache synchronization needed
-* Good for small scale (< 50 VMs)
-* Per-VM isolation (one failure doesn't affect others)
+- Simple implementation
+- Lower memory usage (no cache)
+- Direct event stream (minimal latency)
+- API-level filtering (label selector)
+- Only receives relevant events
+- Easy to understand and debug
+- Less code to maintain
+- No cache synchronization needed
+- Good for small scale (< 50 VMs)
+- Per-VM isolation (one failure doesn't affect others)
 
 #### Cons
 - Multiple connections (N VMs = N connections)
