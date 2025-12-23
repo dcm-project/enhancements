@@ -78,8 +78,8 @@ The execution order is strictly determined by **Level** first, then
 2. **Tenant:** (Tenant Admin) - Runs second.
 3. **User:** (End User) - Runs last.
 
-_Within each level, policies are sorted by the priority integer (Highest
-priority first)._
+_Within each level, policies are sorted by priority: lower integers indicate
+higher priority._
 
 ### The "Rego Contract"
 
