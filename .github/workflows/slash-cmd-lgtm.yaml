@@ -1,10 +1,10 @@
-name: approve-command
+name: lgtm-command
 on:
   repository_dispatch:
-    types: [approve-command]
+    types: [lgtm-command]
 
 jobs:
-  approve:
+  lgtm:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
