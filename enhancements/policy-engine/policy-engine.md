@@ -95,7 +95,9 @@ The input payload includes:
 - User information
   - User ID
   - Tenant ID
-- The service provider (value and constraints)
+- The service provider (empty at first and populated while evaluating policies)
+  - Value
+  - Constraints
 
 #### Output
 
