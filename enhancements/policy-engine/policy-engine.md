@@ -127,10 +127,11 @@ following elements
 
 ### Policy Code Ownership and Responsibilities
 
-- DCM admins and users implement the policies' REGO code
-- DCM admins and users are responsible for correct registration of the policies
-- DCM admins and users are responsible for the accuracy and performance of the
-  policies
+- DCM Admins, Tenant-Admins and Users implement the policies' REGO code
+- DCM Admins, Tenant-Admins and Users are responsible for correct registration
+  of the policies
+- DCM Admins, Tenant-Admins and Users are responsible for the accuracy and
+  performance of the policies
 - Trying to register a REGO code snipet that fails compilation will fail
 
 ## System Architecture
