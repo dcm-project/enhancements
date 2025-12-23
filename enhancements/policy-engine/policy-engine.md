@@ -193,6 +193,8 @@ sequenceDiagram
   - Must be unique at its level
   - A lower number means a higher priority and therefore will be evaluated first
 - REGO Code
+- Enabled
+  - Optional. Default `true`
 
 ###### Response Payload
 
@@ -235,6 +237,7 @@ Update the specific policy. Policy name and type are immutable
 - Policy Matching Criteria
 - Priority
 - REGO Code
+- Enabled
 
 ### Execution Plane
 
@@ -288,7 +291,7 @@ evaluation; it calls pre-loaded modules in OPA.
 - The Policy API maintains a `ConstraintContext` map in memory for the duration
   of the request.
 - Fetch & Sort:
-  - Query DB for active policies matching the request payload based on the
+  - Query DB for enabled policies matching the request payload based on the
     policy’s matching criteria.
   - Sort by Level (Global -> Tenant -> User) then Priority (Desc).
 - If no policies matching the request payload were found, the request will
