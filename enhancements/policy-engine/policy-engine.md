@@ -42,9 +42,10 @@ Define the flow of how Policies are managed and used by the Policy Engine
 - Define Policy execution
   - Policy priority
   - Value immutability and constraints
-- Determine which enforcement engine
-  ([OPA](https://www.openpolicyagent.org/docs)) and policy language
-  ([Rego](https://www.openpolicyagent.org/docs/policy-language)) to use
+- Determine the enforcement engine and policy language
+  - For V1, [OPA](https://www.openpolicyagent.org/docs) and
+    [Rego](https://www.openpolicyagent.org/docs/policy-language)) will be used
+  - Other alternatives may be considered in future versions
 - Define the input format
 - Define the output format
 
