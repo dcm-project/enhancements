@@ -52,6 +52,8 @@ Define the flow of how Policies are managed and used by the Policy Engine
 
 - Policy implementation
 - Actionable OpenAPI specification
+- While this ADR references `Tenant` level `Policy` and `ID`, `Tenants` are not
+  supported in V1
 
 ## Core Concepts & Definitions
 
