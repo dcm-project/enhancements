@@ -10,22 +10,15 @@ jobs:
       pull-requests: write
       issues: write
     steps:
-      - name: Approve PR
+      - name: Remind to approve manually
         uses: actions/github-script@v8
         with:
           script: |
             const prNumber = ${{ github.event.client_payload.pull_request.number }};
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-              event: 'APPROVE',
-              body: 'Approved via /approve by @${{ github.event.client_payload.github.actor }}'
-            });
-            await github.rest.issues.addLabels({
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
-              labels: ['approved']
+              body: '@${{ github.event.client_payload.github.actor }} Please use GitHub\'s review approval (Files changed → Review → Approve) to approve this PR.'
             });
 
