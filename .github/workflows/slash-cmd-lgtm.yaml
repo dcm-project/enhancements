@@ -1,0 +1,24 @@
+name: lgtm-command
+on:
+  repository_dispatch:
+    types: [lgtm-command]
+
+jobs:
+  lgtm:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Remind to approve manually
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prNumber = ${{ github.event.client_payload.pull_request.number }};
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: '@${{ github.event.client_payload.github.actor }} Please use GitHub\'s review approval (Files changed → Review → Approve) to approve this PR.'
+            });
+
