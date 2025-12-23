@@ -88,7 +88,6 @@ higher priority._
 
 The input payload includes:
 
-- The original request payload
 - The current patched request payload
   - Assumption - While policies do not have to be specific for Service Types
     they will need to know the expected content
@@ -298,7 +297,6 @@ evaluation; it calls pre-loaded modules in OPA.
   - Call `OPA`:
     - Invoke data.dcm.policy.<P.id>.result
     - Pass
-      - `OriginalRequestPayload`
       - `CurrentRequestPayload`
       - `ConstraintContext`
       - `UserID`
