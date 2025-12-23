@@ -378,6 +378,3 @@ How the Watch Loops works:
 The watch loop per VM does not scale at all because N number of VMs mean 
 N number of connections. This increases API server load 
 and management overhead.
-
-## Infrastructure Needed
-TBD
