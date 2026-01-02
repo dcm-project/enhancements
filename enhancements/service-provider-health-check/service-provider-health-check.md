@@ -3,100 +3,77 @@ title: Service Provider Health Check
 authors:
   - "@machacekondra"
 reviewers:
-  - gciavarrini
-  - ygalblum
-  - jubah
-  - croadfel
-  - flocati
-  - pkliczewski
-  - gabriel-farache
+  - "@gciavarrini"
+  - "@ygalblum"
+  - "@jubah"
+  - "@croadfel"
+  - "@flocati"
+  - "@pkliczewski"
+  - "@gabriel-farache"
 approvers:
   - ""
 creation-date: 2025-12-15
-last-updated: 2025-12-15
 ---
 
 # Service Provider Health Check
 
 ## Summary
-This enhancement proposes a mechanism for the DCM control plane to actively monitor the liveness and readiness of service providers. By implementing a heartbeat system similar to Kubernetes node health checks, DCM can ensure services are only placed on active and healthy providers.
+This enhancement proposes a mechanism for the DCM control plane to actively monitor the health of service providers. Instead of providers pushing heartbeats, the DCM control plane will poll a `/health` endpoint on the service provider to verify liveness.
 
 ## Motivation
-
-Currently, the DCM control plane lacks a reliable way to determine if a service provider is accessible. Without a heartbeat mechanism, the control plane cannot distinguish between a provider that is idle and one that has crashed or lost network connectivity. This can lead to service placement failures.
+Define the DCM control plane way to determine if a service provider is accessible. Without an active check, the control plane might attempt to schedule services on providers that are down.
 
 ### Goals
-
-* Define a solution for DCM to detect if a service provider is alive.
-* Ensure DCM can reliably verify a provider is ready to accept services before placement.
+* Implement a polling mechanism where DCM checks provider health.
+* Define a standard `/health` endpoint for all Service Providers.
 
 ### Non-Goals
-
-* Status reporting of the actual services running *on* the provider (only the provider level health is in scope).
+* Status reporting of individual services running *on* the provider.
+* Deep provider diagnostics (out of scope for liveness check).
+* Ensure DCM excludes "Unhealthy" or "Unreachable" providers from scheduling.
 
 ## Proposal
 
 ### Overview
-
-The proposed solution reuses the concept of node health checks from Kubernetes. We introduce a "Provider Health Check" which serves as a heartbeat mechanism. This allows the DCM control plane to know if a service provider is alive, healthy, and ready to accept services.
+The DCM Control Plane will act as the "prober." It will maintain a list of registered service providers and their management URLs. At a configurable interval, DCM will perform an HTTP GET request to the provider's `/health` endpoint.
 
 ### Architecture
 
-The architecture relies on a **Dual-Heartbeat Mechanism** to optimize for bandwidth and scalability.
+1.  **Health Polling (High Frequency):**
+    * **Initiator:** DCM Control Plane.
+    * **Target:** Service Provider `/health` endpoint.
+    * **Frequency:** Every 10 seconds (default).
+    * **Success Criteria:** HTTP 200 OK.
 
-1.  **Liveness Heartbeat (High Frequency):**
-    * **Purpose:** Simply confirms "I am alive."
-    * **Frequency:** Every 10 seconds (configurable).
-    * **Payload:** Minimal status.
+2.  **Resource Synchronization (Low Frequency/On-Demand):**
+    * **Note:** Detailed resource data (CPU/Memory) continues to be handled via the Provider Info API, but the "Ready" state is governed by the Health Check results.
 
-2.  **Provider Info Update (Low Frequency):**
-    * **Purpose:** Provides comprehensive resource data (CPU, Memory, Capabilities).
-    * **Frequency:** Every 5 minutes, or immediately upon configuration change.
-    * **Payload:** Full resource details.
+### Health Check Flow
 
-### Heartbeat Flow
-
-1.  **Provider Side:** A process within the service provider calculates its status and sends it to the DCM Provider API.
-    * *Reliability:* If the request fails, the provider uses exponential backoff to retry.
-2.  **Control Plane Side:** The DCM Provider API receives the heartbeat and updates the status in the internal database.
-3.  **Placement Logic:** Services can now identify if a provider is disconnected. If the heartbeat is missing, the placement logic will consider the provider unavailable and will not schedule new services there.
+1.  **DCM Controller:** Iterates through the list of active providers in the database.
+2.  **Probing:** For each provider, DCM executes: `GET http://<provider-ip>:<port>/health`.
+3.  **State Machine:**
+    * **Success:** If response is `200 OK`, reset failure counter and mark as `Ready`.
+    * **Failure:** If timeout or non-200 response, increment failure counter.
+    * **Threshold:** If failures exceed the `FailureThreshold` (default: 3), transition provider to `NotReady`.
+4.  **Recovery:** A single successful `200 OK` transitions a `NotReady` provider back to `Ready`.
 
 ## Design Details
 
-### API Definition
+### Service Provider Implementation
 
-**Endpoint:** `PUT /providers/{providerName}/status`
+The Service Provider must expose a lightweight unauthenticated (or internally secured) endpoint.
 
-**Summary:** Report Provider Heartbeat. Updates the liveness status of a specific provider.
+#### Health Endpoint
 
-* **Frequency:** Clients should send this every 10 seconds.
-* **Optimization:** Heavy resource data should only be included if it has changed.
+**Endpoint:** `GET /health`
 
-#### Request Parameters
-
-| Name | In | Type | Required | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| `providerName` | path | string | Yes | The unique name of the provider. |
-
-#### Request Body (`HeartbeatPayload`)
-
-Content-Type: `application/json`
-
+**Expected Response:**
+* **Code:** `200 OK`
+* **Body:** (Optional) 
 ```json
 {
-  "timestamp": "2025-12-16T10:00:00Z",
-  "phase": "Ready"
+  "status": "pass",
+  "version": "v1.2.3",
+  "uptime": 3600
 }
-```
-
-* **timestamp** (string, date-time): Current time on the provider.
-* **phase** (string): High-level lifecycle state (e.g., "Ready").
-
-Response: 
-```json
-{
-  "next_interval_seconds": 10
-}
-```
-
-* **next_interval_seconds**: Control plane instruction to speed up or slow down heartbeats.
