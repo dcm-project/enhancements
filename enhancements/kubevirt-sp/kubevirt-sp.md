@@ -118,8 +118,7 @@ request := &dcm.RegistrationRequest{
 **Note**: The registration payload above is not concluded and may change.
 
 #### Registration Process
-The follow steps highlights the process for self-registration at startup
- 
+The follow steps highlights the process for self-registration at startup 
 - API server starts and initializes HTTP listener.
 - After the server is ready, registration runs in a background goroutine.
 - The service constructs the API host URL from the listener address or
