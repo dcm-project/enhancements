@@ -35,7 +35,7 @@ Define the DCM control plane way to determine if a service provider is accessibl
 ## Proposal
 
 ### Overview
-The DCM Control Plane will act as the "prober." It will maintain a list of registered service providers and their management URLs. At a configurable interval, DCM will perform an HTTP GET request to the provider's `/health` endpoint.
+The DCM Control Plane will act as the "prober." It will maintain a list of registered service providers URLs. At a configurable interval, DCM will perform an HTTP GET request to the provider's `/health` endpoint.
 
 ### Architecture
 
