@@ -70,11 +70,9 @@ Registry.
 
 #### DCM SP Heath Check
 
-- Periodically send health information to DCM to
-  indicate it (KubeVirt SP) is alive.
-- Send updates about current resource availability.
-- Send heartbeat to DCM endpoint `PUT /providers/{providerId}/status` with payload
-  request conforming to schema defined in DCM API schema.
+Kubevirt SP must expose a health endpoint `http://<provider-ip>:<port>/health` 
+for DCM control plane to poll every 10 seconds. 
+See SP Health Check documentation. 
 
 #### DCM SP Status Reporting
 
