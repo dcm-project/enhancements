@@ -18,7 +18,7 @@ creation-date: 2025-12-15
 ## Summary
 
 The KubeVirt Service Provider API is a REST API that manages Virtual Machines
-(VMs) in a Kubernetes cluster running KubeVirt. It exposes endpoints for
+(VMs) in a Kubernetes-based cluster running KubeVirt. It exposes endpoints for
 creating, reading and deleting VMs, and integrates with the DCM Service Provider
 Registry.
 
@@ -30,7 +30,6 @@ Registry.
 - Define the registration flow with DCM SP API.
 - Define Create, Read and Delete endpoints for managing VMs
   running on a cluster.  
-  **Note** Update is out of scope for the first version (v1).
 - Define status reporting for DCM requests.
 
 ### Non-Goals
@@ -40,20 +39,20 @@ Registry.
 - Mechanism for retrieving available computing, storage, etc., information from
   the SP infrastructure.
 - Deployment for the KubeVirt SP API.
+- Define Update endpoint, as this is out of scope for the first version (v1).
 
 ## Proposal
 
 ### Assumptions
 
-- The KubeVirt Service Provider is connected to a Kubernetes cluster (OCP,
+- The KubeVirt Service Provider is connected to a Kubernetes-based cluster (OCP,
   KIND, Minikube) with KubeVirt installed.
 - The KubeVirt Service Provider should have the necessary permissions to
-  either an entire cluster.
+  an entire cluster.
 - The DCM Service Provider Registry is reachable for registration.
 - The API service has valid Kubernetes credentials (kubeconfig or in-cluster
   service account).
 - DCM status reporting endpoint is reachable for resource updates.
-- DCM provider heartbeat endpoint is reachable for health updates.
 
 ### Integration Points
 
@@ -66,6 +65,8 @@ Registry.
 #### DCM SP Registry
 
 - Auto-registration on startup with DCM SP Registrar.
+  See documentation for
+  [DCM Registration Flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
 - Metadata includes region, status and total availability of resources.
 
 #### DCM SP Heath Check
@@ -112,8 +113,6 @@ request := &dcm.RegistrationRequest{
     Operations: []string{"CREATE", "DELETE", "READ"},
 }
 ```
-
-**Note**: The registration payload above is not concluded and may change.
 
 #### Registration Process
 The follow steps highlights the process for self-registration at startup 
