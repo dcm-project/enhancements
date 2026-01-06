@@ -5,7 +5,7 @@ authors:
 reviewers:
   - "@gciavarrini"
   - "@ygalblum"
-  - "@jubah"
+  - "@jenniferubah"
   - "@croadfel"
   - "@flocati"
   - "@pkliczewski"
