@@ -5,7 +5,7 @@ authors:
 reviewers:
   - "@gciavarrini"
   - "@ygalblum"
-  - "@jubah"
+  - "@jenniferubah"
   - "@croadfel"
   - "@flocati"
   - "@pkliczewski"
@@ -70,7 +70,7 @@ envelope.
 
 ### User Stories
 
-- **As a Service Provider Developer**, I want to publish a status update message
+- **As a Service Provider Developer**, I want to reliantly publish a status update message
   ("fire and forget") so that I don't have to implement complex retry logic if
   the DCM is briefly unavailable.
 - **As a Platform Admin**, I want to see the status of VMs update in real-time
@@ -84,7 +84,7 @@ envelope.
 | Risk                  | Mitigation                                                                                                                                        |
 | :-------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Message Loss**      | For critical transitions, we can use message system persistence to ensure at-least-once delivery with persistence, also to not overload database. |
-| **Flooding/Flapping** | Providers must implement "Debounce" logic to avoid sending updates for rapid oscillation (e.g., running->error->running) within milliseconds.     |
+| **Flooding/Flapping** | Providers must implement "Debounce" logic to avoid sending updates for rapid status oscillation (e.g., running->error->running) within milliseconds.     |
 
 ## Design Details
 
@@ -94,31 +94,33 @@ envelope.
 sequenceDiagram
     autonumber
     participant Provider as Service Provider
-    participant MS as MS Cluster (Subject: dcm.providers.*.status)
+    participant MS as Messaging System
     participant DCM as DCM Core Service
     participant DB as DCM Database
 
-    Note over Provider: Instance state changes<br/>(e.g., "Provisioning" -> "Running")
+    Note over Provider: Instance state changes
 
     rect rgb(240, 248, 255)
-    note right of Provider: Asynchronous "Fire and Forget"
     Provider->>MS: PUBLISH CloudEvent Message
     end
 
-    Note over Provider: Provider continues immediately.<br/>Does NOT wait for DCM response.
-
     par Fan-Out Process
-        MS->>DCM: PUSH Message to Subscriber
+        MS->>DCM: PUSH Message
         DCM->>DCM: Validate CloudEvent Schema
-        DCM->>DB: UPSERT Instance Status
-    and Potentially other subscribers
-        MS-->>Billing Service: PUSH Message to Subscriber
+        alt is valid
+            DCM->>DB: UPSERT Instance Status
+        else is invalid
+            DCM->>DCM: Log Validation Error / Discard
+        end
+
+    and Other subscribers
+        MS-->>Billing Service: PUSH Message
     end
 ```
 
 ### 2. Message system Subject Hierarchy
 
-Providers must publish events to the following subject structure to allow for
+Providers must publish events with type formatted as follow to allow for
 granular subscriptions:
 
 `dcm.providers.{providerName}.{serviceType}.instances.{instanceId}.status`
