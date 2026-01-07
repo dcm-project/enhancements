@@ -229,15 +229,7 @@ sequenceDiagram
     - SP metadata (region, providerName etc)
     - Current SP status (healthy, degraded, unavailable)
   - If SP is not found, returns 404 error to Placement Service
-- **Resource Availability Check**
-  - Validates that the SP supports the requested `serviceType`
-  - Checks available resource capacity against the service specification:
-    - CPU availability
-    - Memory availability
-    - Storage availability
-    - Node capacity (for cluster types)
-  - Verifies resource constraints and quotas
-  - If resources are insufficient, returns 503 Service Unavailable
+  - If SP status is degraded or unavailable, returns 503 error to Placement Service
   - If `serviceType` is not supported, returns 400 Bad Request
 - **Service Provider Invocation**
   - Calls the Service Provider's API endpoint:
@@ -248,6 +240,9 @@ sequenceDiagram
     - `instanceId`: Unique identifier for the created instance
     - `status`: Creation status (`PROVISIONING`)
   - Stores instance metadata in the database
+  - If database record creation fails, returns 500 Internal Server Error with
+    `instanceId` included in error response (instance was created by SP but
+    tracking failed)
 - **Response to Placement Service**
   - Returns success response (202 Accepted) with:
     - `instanceId`: The created instance identifier
@@ -260,5 +255,5 @@ sequenceDiagram
 - **404 Not Found**: Service Provider with the given `providerName` is not
   registered
 - **400 Bad Request**: Invalid request schema or unsupported service type
-- **503 Service Unavailable**: Service Provider has insufficient resources
+- **503 Service Unavailable**: Service Provider is not healthy
 - **500 Internal Server Error**: Unexpected error in SP Resource Manager
