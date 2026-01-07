@@ -158,7 +158,6 @@ the incoming request. For the schema structure definition, see
 and 
 [vmspec](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#schema-structure).
 
-
 ```mermaid
 sequenceDiagram
     autonumber
@@ -167,22 +166,21 @@ sequenceDiagram
     participant DB as Database
     participant SP as Service Provider
 
-    PS->>SPRM: POST /api/v1/services<br/>{providerId, spec}
+    PS->>SPRM: POST /api/v1/services<br/>{providerName, spec}
     activate SPRM
 
 
-    SPRM->>DB: Query SP by providerId
+    SPRM->>DB: Query SP by providerName
     activate DB
     DB-->>SPRM: SP details (endpoint, metadata,<br/>status, resources, serviceType)
     deactivate DB
 
     alt SP not found
-        SPRM-->>PS: 404 Not Found<br/>
+        SPRM-->>PS: 404 Not Found
     else Service type not supported
-        SPRM-->>PS: 400 Bad Request<br/>
-    else Insufficient resources
-        SPRM-->>PS: 503 Service Unavailable<br/>
-    else Resources available
+        SPRM-->>PS: 400 Bad Request
+    else SP Health Check fails
+        SPRM-->>PS: 503 Service Unavailable       
 
         SPRM->>SP: POST {SP_endpoint}/api/v1/services<br/>{payload}
         activate SP
@@ -195,13 +193,18 @@ sequenceDiagram
             SP-->>SPRM: Success response<br/>{instanceId, status, metadata}
             SPRM->>DB: Create instance record<br/>{instanceId, providerId, serviceType, metadata}
             activate DB
-            DB-->>SPRM: Record created
-            deactivate DB
-
-            SPRM-->>PS: 202 Accepted<br/>{instanceId, status}
+            
+            alt DB record creation fails
+                DB-->>SPRM: Error response
+                deactivate DB
+                SPRM-->>PS: 500 Internal Server Error<br/>{instanceId, error}
+            
+            else DB record creation succeeds
+                DB-->>SPRM: Record created
+                SPRM-->>PS: 202 Accepted<br/>{instanceId, status}
+            end
         end
     end
-
     deactivate SPRM
 ```
 
