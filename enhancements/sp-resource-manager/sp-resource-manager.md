@@ -18,14 +18,14 @@ creation-date: 2026-01-02
 ## Summary
 
 The DCM Service Provider Resource manager interfaces with the all the
-registered providers to create and manage resources within DCM core.
+registered providers to create and manage service type instances
+within DCM core.
 
 ## Motivation
 
 ### Goals
 
-- Define CRUD endpoints for creating and managing resources.  
-  **Note**: Update endpoint is out of scope for the first version (v1)
+- Define CRUD endpoints for creating and managing service type instance.
 
 ### Non-Goals
 
@@ -36,6 +36,7 @@ registered providers to create and manage resources within DCM core.
 - Define health check status reporting for SPS (covered in SP Provider health
   check)
 - Define authentication and authorization.
+- Define Update endpoint is out of scope for the first version (v1)
 
 ## Proposal
 
@@ -53,13 +54,13 @@ registered providers to create and manage resources within DCM core.
 
 - **Service Registry**:
   - Stores Service Provider's registration information
-  - SP metadata includes (`endpoints`, `metadata`, `status` and `resource
+  - Used for retrieving SP details during instance creation
+  - SP info includes `endpoints`, `metadata`, `status` and `resource
     capacity`)
-  - For retrieving SP details during resource/instance creation
-- **Resource/Service Instance Records**:
-  - Stores created service instance information
-  - Instance metadata includes (`instanceId`, `providerId`, `serviceType`,
-    `status`)
+- **Service Type Instance Records**:
+  - Stores created service type instance information
+  - Instance data includes `instanceId`, `providerId`, `serviceType`,
+    `status`.
   - Maintains record of all created instances within DCM core
 
 ### API Endpoints
@@ -70,11 +71,11 @@ and manage instances of service types.
 #### Endpoints Overview
 
 | Method | Endpoint                      | Description                      |
-| ------ | ----------------------------- | -------------------------------- |
-| POST   | /api/v1/services              | Create a service instance        |
+| ------ | ----------------------------- |----------------------------------|
+| POST   | /api/v1/services              | Create a service type instance   |
 | GET    | /api/v1/services              | List all resources.              |
-| GET    | /api/v1/services/{instanceId} | Get a service instance           |
-| DELETE | /api/v1/services/{instanceId} | Delete a service instance        |
+| GET    | /api/v1/services/{instanceId} | Get a service type instance      |
+| DELETE | /api/v1/services/{instanceId} | Delete a service type instance   |
 | GET    | /api/v1/health                | SP Resource Manager health check |
 
 ###### AEP Compliance
@@ -83,7 +84,7 @@ These endpoints are defined based on AEP standards and use aep-openapi-linter to
 check for compliance with AEP.
 
 **POST /api/v1/services**  
-Create a service instance.
+Create a service type instance.
 
 The POST endpoint follows the contract defined in DCM service type schemas. It
 can create instances/resources of service types that are supported by DCM.
@@ -133,25 +134,25 @@ Example of payload for incoming VM request
 ```
 
 **GET /api/v1/services**  
-List all service instances with limit.
+List all service type instances with limit and pagination.
 
 **GET /api/v1/services/{instanceId}**  
-Get a service instance based on id.
+Get a service type instance based on id.
 
 **Delete /api/v1/services/{instanceId}**  
-Delete a service instance based on id.
+Delete a service type instance based on id.
 
 **GET /api/v1/health**  
 Retrieve the health status of SP Resource Manager.
 
 ## Design Details
 
-### Service Instance Creation Flow
+### Service Type Instance Creation Flow
 
-This flow demonstrates the creation of a service instance (VMs, containers,
+This flow demonstrates the creation of a service type instance (VMs, containers,
 databases, or clusters) through the SP Resource Manager. It involves
 coordination between the Placement Service, SP Resource Manager, database, and
-the target Service Provider.  
+the targeted Service Provider.  
 **Note**: The `serviceType` field is extracted from within the spec field of 
 the incoming request. For the schema structure definition, see 
 [common fields](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#schema-structure)
