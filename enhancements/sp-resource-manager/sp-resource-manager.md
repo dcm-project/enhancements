@@ -59,7 +59,7 @@ within DCM core.
     capacity`)
 - **Service Type Instance Records**:
   - Stores created service type instance information
-  - Instance data includes `instanceId`, `providerId`, `serviceType`,
+  - Instance data includes `instanceId`, `providerName`, `serviceType`,
     `status`.
   - Maintains record of all created instances within DCM core
 
@@ -98,10 +98,10 @@ content:
     schema:
       type: object
       required:
-        - providerId
+        - providerName
         - spec
       properties:
-        providerId:
+        providerName:
           type: string
           description: The unique identifier of the target Service Provider
           example: "b4c9c543-fad8-4e0e-b027-a7bca416214f"
@@ -119,7 +119,7 @@ content:
 Example of payload for incoming VM request
 ```json
 {
-  "providerId": "d679e1a7-77bd-4eea-b25c-865b534e56e2",
+  "providerName": "kubevirt-sp",
   "spec": {
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
@@ -192,7 +192,7 @@ sequenceDiagram
             SPRM-->>PS: Return SP error<br/>(SP creation failed)
         else SP creation succeeds
             SP-->>SPRM: Success response<br/>{instanceId, status, metadata}
-            SPRM->>DB: Create instance record<br/>{instanceId, providerId, serviceType, metadata}
+            SPRM->>DB: Create instance record<br/>{instanceId, providerName, serviceType, metadata}
             activate DB
             
             alt DB record creation fails
@@ -214,7 +214,7 @@ sequenceDiagram
 - **Request Reception**
   - SP Resource Manager receives a POST request (`/api/v1/services`) from
     Placement Service with:
-    - `providerId`: The unique identifier of the target Service Provider
+    - `providerName`: The unique identifier of the target Service Provider
     - Service specification: The detailed spec following the service type schema
       (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
 - **Request Validation**
@@ -223,10 +223,10 @@ sequenceDiagram
   - Verifies required fields are present
   - Validates data types and constraints
 - **Service Provider Lookup**
-  - Queries the Service Registry database using the `providerId`
+  - Queries the Service Registry database using the `providerName`
   - Retrieves:
     - Service Provider endpoint URL
-    - SP metadata (region, etc)
+    - SP metadata (region, providerName etc)
     - Current SP status (healthy, degraded, unavailable)
   - If SP is not found, returns 404 error to Placement Service
 - **Resource Availability Check**
@@ -257,7 +257,7 @@ sequenceDiagram
 
 #### Error Handling
 
-- **404 Not Found**: Service Provider with the given `providerId` is not
+- **404 Not Found**: Service Provider with the given `providerName` is not
   registered
 - **400 Bad Request**: Invalid request schema or unsupported service type
 - **503 Service Unavailable**: Service Provider has insufficient resources
