@@ -88,8 +88,8 @@ Create a service instance.
 The POST endpoint follows the contract defined in DCM service type schemas. It
 can create instances/resources of service types that are supported by DCM.
 
-Snippet of supported service type schema for the request body (see
-[Service Type documentation](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md))
+Snippet of supported service type schema for the request body (for full schema, see
+[Schema documentation](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md))
 
 ```yaml
 content:
@@ -115,6 +115,23 @@ content:
             - $ref: "#/components/schemas/ClusterSpec"
 ```
 
+Example of payload for incoming VM request
+```json
+{
+  "providerId": "d679e1a7-77bd-4eea-b25c-865b534e56e2",
+  "spec": {
+    "memory": { "size": "2GB" },
+    "vcpu": { "count": 2 },
+    "guestOS": { "type": "fedora-39" },
+    "access":
+    { "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..." },
+    "metadata": { "name": "fedora-vm" },
+    "schemaVersion": "v1alpha1",
+    "serviceType": "vm"
+  }
+}
+```
+
 **GET /api/v1/services**  
 List all service instances with limit.
 
@@ -134,7 +151,13 @@ Retrieve the health status of SP Resource Manager.
 This flow demonstrates the creation of a service instance (VMs, containers,
 databases, or clusters) through the SP Resource Manager. It involves
 coordination between the Placement Service, SP Resource Manager, database, and
-the target Service Provider.
+the target Service Provider.  
+**Note**: The `serviceType` field is extracted from within the spec field of 
+the incoming request. For the schema structure definition, see 
+[common fields](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#schema-structure)
+and 
+[vmspec](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#schema-structure).
+
 
 ```mermaid
 sequenceDiagram
@@ -167,7 +190,7 @@ sequenceDiagram
         alt SP creation fails
             SP-->>SPRM: Error response
             deactivate SP
-            SPRM-->>PS: 502 Bad Gateway<br/>(SP creation failed)
+            SPRM-->>PS: Return SP error<br/>(SP creation failed)
         else SP creation succeeds
             SP-->>SPRM: Success response<br/>{instanceId, status, metadata}
             SPRM->>DB: Create instance record<br/>{instanceId, providerId, serviceType, metadata}
@@ -211,7 +234,7 @@ sequenceDiagram
     - Node capacity (for cluster types)
   - Verifies resource constraints and quotas
   - If resources are insufficient, returns 503 Service Unavailable
-  - If service type is not supported, returns 400 Bad Request
+  - If `serviceType` is not supported, returns 400 Bad Request
 - **Service Provider Invocation**
   - Calls the Service Provider's API endpoint:
     `POST {SP_endpoint}/api/v1/services`
@@ -234,5 +257,4 @@ sequenceDiagram
   registered
 - **400 Bad Request**: Invalid request schema or unsupported service type
 - **503 Service Unavailable**: Service Provider has insufficient resources
-- **502 Bad Gateway**: Service Provider API call failed or returned an error
 - **500 Internal Server Error**: Unexpected error in SP Resource Manager
