@@ -76,24 +76,24 @@ and manage instances of service types.
 
 #### Endpoints Overview
 
-| Method | Endpoint                      | Description                      |
-| ------ | ----------------------------- |----------------------------------|
-| POST   | /api/v1/services              | Create a service type instance   |
-| GET    | /api/v1/services              | List all resources.              |
-| GET    | /api/v1/services/{instanceId} | Get a service type instance      |
-| DELETE | /api/v1/services/{instanceId} | Delete a service type instance   |
-| GET    | /api/v1/health                | SP Resource Manager health check |
+| Method | Endpoint                                     | Description                      |
+|--------|----------------------------------------------|----------------------------------|
+| POST   | /api/v1/service-types/instances              | Create a service type instance   |
+| GET    | /api/v1/service-types/instances              | List all resources.              |
+| GET    | /api/v1/service-types/instances/{instanceId} | Get a service type instance      |
+| DELETE | /api/v1/service-types/instances/{instanceId} | Delete a service type instance   |
+| GET    | /api/v1/health                               | SP Resource Manager health check |
 
 ###### AEP Compliance
 
 These endpoints are defined based on AEP standards and use aep-openapi-linter to
 check for compliance with AEP.
 
-**POST /api/v1/services**  
+**POST /api/v1/service-types/instances**  
 Create a service type instance.
 
 The POST endpoint follows the contract defined in DCM service type schemas. It
-can create instances/resources of service types that are supported by DCM.
+can create instances of service types that are supported by DCM.
 
 Snippet of supported service type schema for the request body (for full OpenAPI spec, see
 [RM OpenAPI](https://github.com/jenniferubah/service-provider-api/blob/resource-manager-openapi/api/v1alpha1/resource-manager-openapi.yaml)
@@ -142,13 +142,51 @@ Example of payload for incoming VM request
 }
 ```
 
-**GET /api/v1/services**  
-List all service type instances with limit and pagination.
+**GET /api/v1/service-types/instances**  
+List all service type according to AEP standards.
 
-**GET /api/v1/services/{instanceId}**  
+Example of Response Payload
+```json
+[
+  {
+    "serviceType": "container",
+    "name": "nginx-container",
+    "providerName": "container-sp",
+    "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+    "status": "PROVISIONING"
+  },
+  {
+    "serviceType": "database",
+    "name": "postgres-001",
+    "providerName": "postgres-sp",
+    "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d",
+    "status": "FAILED"
+  },
+  {
+    "serviceType": "vm",
+    "name": "ubuntu-vm",
+    "providerName": "kubevirt-sp",
+    "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+    "status": "PROVISIONING"
+  }
+]
+```
+
+**GET /api/v1/service-types/instances/{instanceId}**  
 Get a service type instance based on id.
 
-**Delete /api/v1/services/{instanceId}**  
+Example of Response Payload
+```json
+{
+  "serviceType": "vm",
+  "name": "ubuntu-vm",
+  "providerName": "kubevirt-sp",
+  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "status": "PROVISIONING"
+}
+```
+
+**Delete /api/v1/service-types/instances/{instanceId}**  
 Delete a service type instance based on id.
 
 **GET /api/v1/health**  
