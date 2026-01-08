@@ -17,9 +17,15 @@ creation-date: 2026-01-02
 
 ## Summary
 
-The DCM Service Provider Resource manager interfaces with the all the
-registered providers to create and manage service type instances
-within DCM core.
+The DCM Service Provider Resource Manager provides a centralized intermediary
+service between Placement Service and Service Providers (SPs) for creating and
+managing service type instances. Rather than having Placement Service directly
+call individual SPs, the Resource Manager abstracts SP interactions by handling
+SP lookup (retrieving SP endpoints and metadata from the Service Registry),
+health validation, instance tracking, and database persistence. This design
+simplifies Placement Service logic, ensures consistent instance management
+across all SPs, and provides a single point of control for instance lifecycle
+operations within DCM core.
 
 ## Motivation
 
