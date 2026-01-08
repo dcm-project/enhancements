@@ -160,13 +160,8 @@ Retrieve the health status of SP Resource Manager.
 
 This flow demonstrates the creation of a service type instance (VMs, containers,
 databases, or clusters) through the SP Resource Manager. It involves
-coordination between the Placement Service, SP Resource Manager, database, and
-the targeted Service Provider.  
-**Note**: The `serviceType` field is extracted from within the spec field of 
-the incoming request. For the schema structure definition, see 
-[common fields](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#schema-structure)
-and 
-[vmspec](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#schema-structure).
+communication between the Placement Service, SP Resource Manager, database, and
+the targeted Service Provider.
 
 ```mermaid
 sequenceDiagram
@@ -176,7 +171,7 @@ sequenceDiagram
     participant DB as Database
     participant SP as Service Provider
 
-    PS->>SPRM: POST /api/v1/services<br/>{providerName, spec}
+    PS->>SPRM: POST /api/v1/services<br/>{providerName, serviceType, spec}
     activate SPRM
 
 
@@ -224,8 +219,9 @@ sequenceDiagram
   - SP Resource Manager receives a POST request (`/api/v1/services`) from
     Placement Service with:
     - `providerName`: The unique identifier of the target Service Provider
-    - Service specification: The detailed spec following the service type schema
-      (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
+    - `spec`: The detailed spec following any of service type 
+       schema (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
+    - `serviceType`: The type of service instance requested
 - **Service Provider Lookup**
   - Queries the Service Registry database using the `providerName`
   - Retrieves:
