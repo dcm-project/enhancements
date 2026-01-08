@@ -226,11 +226,6 @@ sequenceDiagram
     - `providerName`: The unique identifier of the target Service Provider
     - Service specification: The detailed spec following the service type schema
       (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
-- **Request Validation**
-  - SP Resource Manager validates the request payload against the service type
-    schema
-  - Verifies required fields are present
-  - Validates data types and constraints
 - **Service Provider Lookup**
   - Queries the Service Registry database using the `providerName`
   - Retrieves:
