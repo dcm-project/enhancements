@@ -95,46 +95,49 @@ Create a service type instance.
 The POST endpoint follows the contract defined in DCM service type schemas. It
 can create instances/resources of service types that are supported by DCM.
 
-Snippet of supported service type schema for the request body (for full schema, see
-[Schema documentation](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md))
+Snippet of supported service type schema for the request body (for full OpenAPI spec, see
+[RM OpenAPI](https://github.com/jenniferubah/service-provider-api/blob/resource-manager-openapi/api/v1alpha1/resource-manager-openapi.yaml)
 
 ```yaml
-content:
-  application/json:
-    schema:
-      type: object
-      required:
-        - providerName
-        - spec
-      properties:
-        providerName:
-          type: string
-          description: The unique identifier of the target Service Provider
-          example: "b4c9c543-fad8-4e0e-b027-a7bca416214f"
-        spec:
-          description:
-            Service specification following one of the supported service type
-            schemas
-          oneOf:
-            - $ref: "#/components/schemas/VMSpec"
-            - $ref: "#/components/schemas/ContainerSpec"
-            - $ref: "#/components/schemas/DatabaseSpec"
-            - $ref: "#/components/schemas/ClusterSpec"
+requestBody:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        required:
+          - providerName
+          - serviceType
+          - spec
+        properties:
+          providerName:
+            type: string
+            description: The unique identifier of the target Service Provider
+            example: "kubevirt-sp"
+          serviceType:
+            type: string
+            description: Type of service to create
+            example: "vm"
+          spec:
+            type: object
+            description: |
+              Service specification following one of the supported service type
+              schemas (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec).
+            additionalProperties: true
 ```
 
 Example of payload for incoming VM request
 ```json
 {
   "providerName": "kubevirt-sp",
+  "serviceType": "vm",
   "spec": {
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
     "guestOS": { "type": "fedora-39" },
     "access":
     { "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..." },
-    "metadata": { "name": "fedora-vm" },
-    "schemaVersion": "v1alpha1",
-    "serviceType": "vm"
+    "metadata": { "name": "fedora-vm" }
   }
 }
 ```
