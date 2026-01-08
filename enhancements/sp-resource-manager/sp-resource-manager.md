@@ -62,7 +62,7 @@ operations within DCM core.
   - Stores Service Provider's registration information
   - Used for retrieving SP details during instance creation
   - SP info includes `endpoints`, `metadata`, `status` and `resource
-    capacity`)
+    capacity`
 - **Service Type Instance Records**:
   - Stores created service type instance information
   - Instance data includes `instanceId`, `providerName`, `serviceType`,
@@ -244,6 +244,7 @@ sequenceDiagram
   - Calls the Service Provider's API endpoint:
     `POST {SP_endpoint}/api/v1/services`
   - Forwards the service specification (payload) to the SP
+  - If SP instance creation fails, forward the SP's error response to Placement Service
 - **Persist Response**
   - Receives response from Service Provider containing:
     - `instanceId`: Unique identifier for the created instance
