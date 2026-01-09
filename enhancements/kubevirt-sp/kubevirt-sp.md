@@ -73,12 +73,13 @@ Registry.
 
 Kubevirt SP must expose a health endpoint `http://<provider-ip>:<port>/health` 
 for DCM control plane to poll every 10 seconds. 
-See SP Health Check documentation. 
+See documentation for [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md). 
 
 #### DCM SP Status Reporting
 
 - Send status for virtual machine instance to DCM endpoint
-  `/instances/{instanceId}/status`.
+  `/instances/{instanceId}/status`. See documentation for 
+  [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
 - Use a shared informer to watch/monitor VMI events.
 
 ### Registration Flow
@@ -265,8 +266,8 @@ Retrieve the health status for the KubeVirt Service Provider API.
 
 ### Status Reporting To DCM
 
-Following the design and recommendation in the DCM Status Reporting, the
-VMStatusSyncService within KubeVirt SP implements a watcher loop that uses
+Following the design and recommendation in the [DCM Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md)
+, the VMStatusSyncService within KubeVirt SP implements a watcher loop that uses
 Kubernetes watch APIs to stream VMI events per VM instance and update DCM in
 real time. These resources must be labeled with
 `managed-by=dcm,dcm-instance-id=vmId` during creation to enable filtering.
@@ -314,7 +315,7 @@ real time. These resources must be labeled with
 
 **Note**: The implementation of the status report flow will
 be updated (in v2) to Event driven architecture (message broker) following the design
-in the updated version of the DCM Status Reporting.
+in the updated version of the [DCM Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
 
 ##### Status Mapping from DCM to KubeVirt
 This maps the DCM generic status to the lifecycle phase within 
