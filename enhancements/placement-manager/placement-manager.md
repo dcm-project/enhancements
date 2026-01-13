@@ -15,6 +15,19 @@ creation-date: 2026-01-09
 
 # Placement Manager
 
+## Open Questions
+
+1. Naming for the API?
+   - /applications?
+   - /services?
+   - Others?
+   **Note: Will update the wording across the doc after we decide.**
+2. Do we want the spec to be opaque or import the service type 
+   schema to restrict and validate it?
+   Do we agree to have the `serviceType` on the root level?
+3. Does the flow for placement (creating application) makes sense?
+4. Anything else we are missing in terms of the placement flow for v1?
+
 ## Summary
 
 The Placement Manager orchestrates applications creation requests within DCM
