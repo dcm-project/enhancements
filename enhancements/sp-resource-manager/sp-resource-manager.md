@@ -18,12 +18,12 @@ creation-date: 2026-01-02
 ## Summary
 
 The DCM Service Provider Resource Manager provides a centralized intermediary
-service between Placement Service and Service Providers (SPs) for creating and
-managing service type instances. Rather than having Placement Service directly
+service between Placement Manager and Service Providers (SPs) for creating and
+managing service type instances. Rather than having Placement Manager directly
 call individual SPs, the Resource Manager abstracts SP interactions by handling
 SP lookup (retrieving SP endpoints and metadata from the Service Registry),
 health validation, instance tracking, and database persistence. This design
-simplifies Placement Service logic, ensures consistent instance management
+simplifies Placement Manager logic, ensures consistent instance management
 across all SPs, and provides a single point of control for instance lifecycle
 operations within DCM core.
 
@@ -50,7 +50,7 @@ operations within DCM core.
 
 - The SP Resource Manager has connectivity to the registered SPs.
 - The SP Resource Manager has access/permission to the database.
-- The SP Resource Manager is reachable from the Placement service.
+- The SP Resource Manager is reachable from the Placement Manager.
 - The SP Resource Manager lives within the SP API.
 - The database persists both SP registry information and created resource
 
@@ -71,7 +71,7 @@ operations within DCM core.
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the DCM Placement Service/Manager to create
+The CRUD endpoints are consumed by the DCM Placement Manager to create
 and manage instances of service types.
 
 #### Endpoints Overview
@@ -197,13 +197,13 @@ Retrieve the health status of SP Resource Manager.
 
 This flow demonstrates the creation of a service type instance (VMs, containers,
 databases, or clusters) through the SP Resource Manager. It involves
-communication between the Placement Service, SP Resource Manager, database, and
+communication between the Placement Manager, SP Resource Manager, database, and
 the targeted Service Provider.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant PS as Placement Service
+    participant PS as Placement Manager
     participant SPRM as SP Resource Manager
     participant DB as Database
     participant SP as Service Provider
@@ -253,8 +253,8 @@ sequenceDiagram
 #### Steps
 
 - **Request Reception**
-  - SP Resource Manager receives a POST request (`/api/v1/services`) from
-    Placement Service with:
+  - SP Resource Manager receives a POST request (`/api/v1/service-type-instances`) from
+    Placement Manager with:
     - `providerName`: The unique identifier of the target Service Provider
     - `spec`: The detailed spec following any of service type 
        schema (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
@@ -265,14 +265,14 @@ sequenceDiagram
     - Service Provider endpoint URL
     - SP metadata (region, providerName etc)
     - Current SP status (healthy, degraded, unavailable)
-  - If SP is not found, returns 404 error to Placement Service
-  - If SP status is degraded or unavailable, returns 503 error to Placement Service
+  - If SP is not found, returns 404 error to Placement Manager
+  - If SP status is degraded or unavailable, returns 503 error to Placement Manager
   - If `serviceType` is not supported, returns 400 Bad Request
 - **Service Provider Invocation**
   - Calls the Service Provider's API endpoint:
     `POST {SP_endpoint}/api/v1/services`
   - Forwards the service specification (payload) to the SP
-  - If SP instance creation fails, forward the SP's error response to Placement Service
+  - If SP instance creation fails, forward the SP's error response to Placement Manager
 - **Persist Response**
   - Receives response from Service Provider containing:
     - `instanceId`: Unique identifier for the created instance
@@ -281,7 +281,7 @@ sequenceDiagram
   - If database record creation fails, returns 500 Internal Server Error with
     `instanceId` included in error response (instance was created by SP but
     tracking failed)
-- **Response to Placement Service**
+- **Response to Placement Manager**
   - Returns success response (202 Accepted) with:
     - `instanceId`: The created instance identifier
     - `status`: Current instance status
