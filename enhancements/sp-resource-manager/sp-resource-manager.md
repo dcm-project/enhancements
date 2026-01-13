@@ -76,27 +76,26 @@ and manage instances of service types.
 
 #### Endpoints Overview
 
-| Method | Endpoint                                     | Description                      |
-|--------|----------------------------------------------|----------------------------------|
-| POST   | /api/v1/service-types/instances              | Create a service type instance   |
-| GET    | /api/v1/service-types/instances              | List all resources.              |
-| GET    | /api/v1/service-types/instances/{instanceId} | Get a service type instance      |
-| DELETE | /api/v1/service-types/instances/{instanceId} | Delete a service type instance   |
-| GET    | /api/v1/health                               | SP Resource Manager health check |
+| Method | Endpoint                                    | Description                      |
+|--------|---------------------------------------------|----------------------------------|
+| POST   | /api/v1/service-type-instances              | Create a service type instance   |
+| GET    | /api/v1/service-type-instances              | List all service type instances  |
+| GET    | /api/v1/service-type-instances/{instanceId} | Get a service type instance      |
+| DELETE | /api/v1/service-type-instances/{instanceId} | Delete a service type instance   |
+| GET    | /api/v1/health                              | SP Resource Manager health check |
 
 ###### AEP Compliance
 
 These endpoints are defined based on AEP standards and use aep-openapi-linter to
 check for compliance with AEP.
 
-**POST /api/v1/service-types/instances**  
+**POST /api/v1/service-type-instances**  
 Create a service type instance.
 
-The POST endpoint follows the contract defined in DCM service type schemas. It
-can create instances of service types that are supported by DCM.
+The POST endpoint provides an interface to create instances of
+service types that are supported by DCM.
 
-Snippet of supported service type schema for the request body (for full OpenAPI spec, see
-[RM OpenAPI](https://github.com/jenniferubah/service-provider-api/blob/resource-manager-openapi/api/v1alpha1/resource-manager-openapi.yaml)
+Snippet of supported service type schema for the request body
 
 ```yaml
 requestBody:
@@ -142,8 +141,8 @@ Example of payload for incoming VM request
 }
 ```
 
-**GET /api/v1/service-types/instances**  
-List all service type according to AEP standards.
+**GET /api/v1/service-type-instances**  
+List all service type instances according to AEP standards.
 
 Example of Response Payload
 ```json
@@ -172,7 +171,7 @@ Example of Response Payload
 ]
 ```
 
-**GET /api/v1/service-types/instances/{instanceId}**  
+**GET /api/v1/service-type-instances/{instanceId}**  
 Get a service type instance based on id.
 
 Example of Response Payload
@@ -186,7 +185,7 @@ Example of Response Payload
 }
 ```
 
-**Delete /api/v1/service-types/instances/{instanceId}**  
+**Delete /api/v1/service-type-instances/{instanceId}**  
 Delete a service type instance based on id.
 
 **GET /api/v1/health**  
@@ -209,7 +208,7 @@ sequenceDiagram
     participant DB as Database
     participant SP as Service Provider
 
-    PS->>SPRM: POST /api/v1/services<br/>{providerName, serviceType, spec}
+    PS->>SPRM: POST /api/v1/service-type-instances<br/>{providerName, serviceType, spec}
     activate SPRM
 
 
