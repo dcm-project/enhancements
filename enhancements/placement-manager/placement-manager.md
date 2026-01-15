@@ -20,7 +20,7 @@ creation-date: 2026-01-09
 1. Naming for the API?
    - /applications?
    - /services?
-   - Others?
+   - Others?  
    **Note: Will update the wording across the doc after we decide.**
 2. Do we want the spec to be opaque or import the service type 
    schema to restrict and validate it?
@@ -59,45 +59,35 @@ creation. The following diagram illustrates the system architecture and
 component interactions.
 
 ```mermaid
-%%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10, 'curve': 'linear'}}}%%
+%%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10, 'curve': 'linear'},}}%%
 flowchart TD
-    classDef userLayer fill:#1565c0,stroke:#90caf9,stroke-width:2px
-    classDef placementManager fill:#701782,stroke:#ce93d8,stroke-width:2px
-    classDef policyEngine fill:#bd6c09,stroke:#ffb74d,stroke-width:2px
-    classDef spResourceManager fill:#187034,stroke:#81c784,stroke-width:2px
-    classDef database fill:#9e184b,stroke:#f48fb1,stroke-width:2px
-    classDef dcmCore fill:#0a120d,stroke:#bdbdbd,stroke-width:2px
+    classDef userLayer fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
+    classDef placementManager fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
+    classDef policyEngine fill:#2d2d2d,color:#ffffff,stroke:#ffb74d,stroke-width:2px
+    classDef spResourceManager fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
+    classDef database fill:#2d2d2d,color:#ffffff,stroke:#f48fb1,stroke-width:2px
+    classDef dcmCore fill:#FFFFFF,stroke:#bdbdbd,stroke-width:2px
 
-    subgraph User_Layer [**User Interface**]
-        User["**User UI**<br/>"]:::userLayer
-    end
+    User["**User UI**<br/>Send Request"]:::userLayer
 
     subgraph DCM_Core [ ]
         PM["**Placement Manager**<br/>"]:::placementManager
+        
+        PE["**Policy Manager**<br/>Request Validation<br/>Payload Mutation<br/>SP Selection"]:::policyEngine
+        
+        SPRM["**SP Resource Manager**<br/>Create Instance<br/> Read Instances<br/> Delete Instances"]:::spResourceManager
 
-        subgraph Services [ ]
-            PE["**Policy Manager**<br/>Policy Validation & SP Selection"]:::policyEngine
-            SPRM["**SP Resource Manager**<br/>Instance Lifecycle Management"]:::spResourceManager
-        end
+        PM_DB[("**Placement DB**<br/>Store Intent<br/>Store validated request")]:::database
 
-        subgraph Data_Layer [ ]
-            PM_DB[("**Placement DB**")]:::database
-        end
     end
 
-    User -->|"1. Create/Read/Delete<br/>Application"| PM
-    PM -->|"2. Validate Request<br/>& Select SP"| PE
-    PE -->|"3. Validated Payload<br/>& Selected SP"| PM
-    PM -->|"4. Query Application Records"| PM_DB
-    PM_DB -->|"5. Application Data"| PM
-    PM -->|"6. Create/Read/Delete<br/>Instance"| SPRM
-    SPRM -->|"7. Instance Response"| PM
-    PM -->|"8. Final Response"| User
+    User --> PM
+    PM --> PE
+    PM --> PM_DB
+    PM --> SPRM
+    
 
-    class User_Layer userLayer
     class DCM_Core dcmCore
-    class Services dcmCore
-    class Data_Layer dcmCore
 ```
 
 ### Integration Points
@@ -112,7 +102,7 @@ flowchart TD
 #### Policy Manager
 
 - Sends requests for validation via `POST /api/v1/engine/evaluate`
-- Receives validated payload and selected Service Provider
+- Receives validated/mutated payload and selected Service Provider
 - Receives policy rejections and constraint violations responses and forwards to
   the users
 
@@ -269,7 +259,7 @@ sequenceDiagram
     PM->>PE: POST /api/v1/engine/evaluate<br/>{requestPayload, userId, tenantId}
     activate PE
 
-    PE-->>PM: Validated payload<br/>& selected providerName
+    PE-->>PM: Validated/mutated payload<br/>& selected providerName
     deactivate PE
 
     alt Policy validation fails
@@ -328,7 +318,7 @@ sequenceDiagram
   - Request processing stops
 - If policy validation succeeds:
   - Placement Manager stores the validated request in Placement DB which
-    includes the validated payload and selected `providerName`
+    includes the validated/mutated payload and selected `providerName`
 
 4. **Instance Creation**
 
@@ -351,7 +341,7 @@ sequenceDiagram
 - **Intent Preservation**: Original user request is stored before processing for
   audit and rehydration purposes
 - **Policy-Driven**: Service Provider selection and request validation are
-  handled by Policy Engine
+  handled by Policy Manager
 - **Error Handling**: Clear error paths for policy rejections and instance
   creation failures
 - **State Management**: Both original intent and validated request are stored
