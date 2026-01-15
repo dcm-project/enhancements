@@ -31,7 +31,7 @@ creation-date: 2026-01-09
 ## Summary
 
 The Placement Manager orchestrates applications creation requests within DCM
-core. It receives user requests, validates them through the Policy Engine, and
+core. It receives user requests, validates them through the Policy Manager, and
 delegates instance creation to the SP Resource Manager. The Placement Manager
 focuses on request orchestration and coordination.
 
@@ -76,7 +76,7 @@ flowchart TD
         PM["**Placement Manager**<br/>"]:::placementManager
 
         subgraph Services [ ]
-            PE["**Policy Engine**<br/>Policy Validation & SP Selection"]:::policyEngine
+            PE["**Policy Manager**<br/>Policy Validation & SP Selection"]:::policyEngine
             SPRM["**SP Resource Manager**<br/>Instance Lifecycle Management"]:::spResourceManager
         end
 
@@ -109,7 +109,7 @@ flowchart TD
   service instances
 - Returns responses and error messages to users
 
-#### Policy Engine
+#### Policy Manager
 
 - Sends requests for validation via `POST /api/v1/engine/evaluate`
 - Receives validated payload and selected Service Provider
@@ -255,7 +255,7 @@ sequenceDiagram
     participant User as User UI
     participant PM as Placement Manager
     participant DB as Placement DB
-    participant PE as Policy Engine
+    participant PE as Policy Manager
     participant SPRM as SP Resource Manager
 
     User->>PM: POST /api/v1/applications<br/>{serviceType, spec}
@@ -316,9 +316,9 @@ sequenceDiagram
 - Intent is stored before any processing to ensure request persistence
 
 3. **Policy Validation**
-- Placement Manager forwards the request to Policy Engine for validation
-- Policy Engine evaluates policies
-- Policy Engine returns:
+- Placement Manager forwards the request to Policy Manager for validation
+- Policy Manager evaluates requests against policies
+- Policy Manager returns:
   - Approved or rejected
   - Validated and potentially mutated payload
   - Selected Service Provider name (`providerName`)
