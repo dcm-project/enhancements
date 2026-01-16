@@ -92,7 +92,7 @@ for array validation.
 ## Generic Service
 
 All service schemas share common fields defined once in
-[common.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/common.yaml)
+[common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
 
 ## Schema Structure
 
@@ -126,7 +126,7 @@ remains portable across platforms.
 ## Specific services
 
 Any _serviceType_ can be defined by inheriting from
-[common.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/common.yaml)
+[common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
 and adding type-specific fields. For the first milestone, DCM will support the
 following serviceTypes:
 
@@ -179,7 +179,7 @@ native resource format" }
 #### Schema
 
 For easier review, the schema is accessible here
-[vmspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/vmspec.yaml).  
+[vmspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/vmspec.yaml).  
 Plus
 common fields: _serviceType, schemaVersion, metadata, providerHints_
 
@@ -237,7 +237,7 @@ The following sections detail the Container schema architecture.
 #### Schema
 
 For easier review, the schema is accessible here
-[containerspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/containerspec.yaml).  
+[containerspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/containerspec.yaml).  
 Plus
 common fields: _serviceType, schemaVersion, metadata, providerHints_
 
@@ -309,7 +309,7 @@ The following sections detail the Database schema architecture.
 #### Schema
 
 For easier review, the schema is accessible here
-[databasespec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/databasespec.yaml).  
+[databasespec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/databasespec.yaml).  
 Plus
 common fields: _serviceType, schemaVersion, metadata, providerHints_
 
@@ -335,7 +335,7 @@ GKE, AKS, etc.
 #### Schema
 
 For easier review, the schema is available here:
-[clusterspec.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/clusterspec.yaml).  
+[clusterspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/clusterspec.yaml).  
 Plus
 common fields: _serviceType, schemaVersion, metadata, providerHints_
 
