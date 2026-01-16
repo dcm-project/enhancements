@@ -169,6 +169,12 @@ flowchart BT
 The Service Provider's _name_ is the natural key used to match existing
 registrations.
 
+Per [AEP-133](https://aep.dev/133/), when a client wants to specify the
+_providerID_, it must be passed as a query parameter (`?id=...`), not in the
+request body. This allows the `id` field in the schema to be `readOnly`,
+preventing conflicts between query param and body values. The server sets `id`
+from the query parameter or auto-generates it if not provided.
+
 The registration endpoint is idempotent. During the registration phase:
 
 - If the _name_ does not exist in DCM, a new SP entry is created. If no
@@ -216,9 +222,9 @@ existing SP entry rather than creating a duplicate.
 
 ###### Example
 
-- First registration:
+- First registration (with client-specified id):
 
-`POST /api/v1/providers`
+`POST /api/v1/providers?id=uuid-1234`
 
 ```yaml
 {
@@ -240,8 +246,35 @@ existing SP entry rather than creating a duplicate.
 
 Response:
 {
-"providerID": "uuid-1234",
-"status": "registered"
+  "id": "uuid-1234",
+  "name": "kubevirt-123",
+  "displayName": "KubeVirt Service Provider",
+  "endpoint": "https://sp1.example.com/api/v1/vm",
+  "serviceType": "vm",
+  "status": "registered",
+  "metadata": { ... }
+}
+```
+
+- First registration (with server generated id):
+
+`POST /api/v1/providers`
+
+```yaml
+{
+  "endpoint": "https://sp1.example.com/api/v1/vm",
+  "name": "kubevirt-123",
+  "displayName": "KubeVirt Service Provider",
+  "serviceType": "vm",
+  "metadata": { ... }
+}
+
+Response:
+{
+  "id": "auto-generated-uuid",
+  "name": "kubevirt-123",
+  ...
+  "status": "registered"
 }
 ```
 
@@ -251,20 +284,22 @@ Response:
 
 ```yaml
 {
-"endpoint": "https://sp1.example.com/api/v1/vm",
-"name": "kubevirt-123",
-"displayName": "KubeVirt Service Provider",
-"serviceType": "vm",
-"metadata": {
-  "region": "us-east-1",
-  "zone": "datacenter-b"
+  "endpoint": "https://sp1.example.com/api/v1/vm",
+  "name": "kubevirt-123",
+  "displayName": "KubeVirt Service Provider",
+  "serviceType": "vm",
+  "metadata": {
+    "region": "us-east-1",
+    "zone": "datacenter-b"
   }
 }
 
 Response:
 {
-"providerID": "uuid-1234",
-"status": "updated"
+  "id": "uuid-1234",
+  "name": "kubevirt-123",
+  ...
+  "status": "updated"
 }
 ```
 
