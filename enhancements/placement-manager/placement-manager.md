@@ -140,7 +140,7 @@ resources.
 
 The POST endpoint creates a resource that is supported by DCM.
 
-Snippet of the request body (_TBD_)
+Snippet of the request body
 
 ```yaml
 requestBody:
@@ -150,13 +150,18 @@ requestBody:
       schema:
         type: object
         required:
-          - serviceType
+          - catalogId
+          - version
           - spec
         properties:
-          serviceType:
+          catalog_id:
             type: string
-            description: Type of service/application to create
-            example: "vm"
+            description: Catalog item unique identifier 
+            example: "dev-vm"
+          version:
+            type: string
+            description: Catalog item version
+            example: "v1.0"
           spec:
             type: object
             description: |
@@ -169,8 +174,11 @@ Example of payload for incoming VM catalog instance request
 
 ```json
 {
-  "serviceType": "vm",
+  "catalogId": "dev-vm",
+  "version": "v1.0",
   "spec": {
+    "serviceType": "vm",
+    "serviceTypeVersion": "v1alpha",
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
     "guestOS": { "type": "fedora-39" },
