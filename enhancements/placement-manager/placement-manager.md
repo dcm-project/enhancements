@@ -25,24 +25,25 @@ creation-date: 2026-01-09
 2. Do we want the spec to be opaque or import the service type 
    schema to restrict and validate it?
    Do we agree to have the `serviceType` on the root level?
-3. Does the flow for placement (creating application) makes sense?
+3. Does the flow for placement (creating resource) makes sense?
 4. Anything else we are missing in terms of the placement flow for v1?
 
 ## Summary
 
-The Placement Manager orchestrates applications creation requests within DCM
-core. It receives user requests, validates them through the Policy Manager, and
-delegates instance creation to the SP Resource Manager. The Placement Manager
-focuses on request orchestration and coordination.
+The Placement Manager orchestrates resource requests within DCM
+core. It receives user requests from the Catalog Manager, validates and 
+enriches them through the Policy Manager, and delegates instance creation 
+to the SP Resource Manager. The Placement Manager focuses on 
+request orchestration and coordination.
 
 ## Motivation
 
 ### Goals
 
-- Define end-to-end flow of applications creation
+- Define end-to-end flow of for creating resources
 - Define _Create_, _Read_, _Delete_ endpoints for Placement Manager
-- Define Placement Manager interacts with other services within DCM core (UI,
-  Policy, SP Resource Manager)
+- Define Placement Manager interacts with other services within DCM core
+  (Catalog Manager, Policy Manager, SP Resource Manager)
 - Define orchestration responsibilities for Placement Manager
 
 ### Non-Goals
@@ -54,21 +55,22 @@ focuses on request orchestration and coordination.
 ### System Architecture
 
 The Placement Manager acts as the central orchestration service within DCM core,
-coordinating between user requests, policy validation, and service instance
-creation. The following diagram illustrates the system architecture and
+coordinating between user requests (from Catalog), policy validation, 
+and catalog instance creation. 
+The following diagram illustrates the system architecture and
 component interactions.
 
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10, 'curve': 'linear'},}}%%
 flowchart TD
-    classDef userLayer fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
+    classDef catalogManager fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
     classDef placementManager fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
     classDef policyEngine fill:#2d2d2d,color:#ffffff,stroke:#ffb74d,stroke-width:2px
     classDef spResourceManager fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
     classDef database fill:#2d2d2d,color:#ffffff,stroke:#f48fb1,stroke-width:2px
     classDef dcmCore fill:#FFFFFF,stroke:#bdbdbd,stroke-width:2px
 
-    User["**User UI**<br/>Send Request"]:::userLayer
+    CM["**Catalog Manager**<br/>Send Request"]:::catalogManager
 
     subgraph DCM_Core [ ]
         PM["**Placement Manager**<br/>"]:::placementManager
@@ -81,7 +83,7 @@ flowchart TD
 
     end
 
-    User --> PM
+    CM --> PM
     PM --> PE
     PM --> PM_DB
     PM --> SPRM
@@ -92,11 +94,11 @@ flowchart TD
 
 ### Integration Points
 
-#### User Interface
+#### Catalog Service
 
-- Receives applications creation requests from users
+- Receives resource creation requests from users
 - Provides REST API endpoints for _create_, _read_, _delete_ operations on
-  service instances
+  catalog instances
 - Returns responses and error messages to users
 
 #### Policy Manager
@@ -117,26 +119,26 @@ flowchart TD
 
 - Stores the intent (original request) of the user request
 - Store validated request and enables rehydration process
-- Maintains record of all applications created through Placement Manager
+- Maintains record of all resources created through Placement Manager
 
 ### API Endpoints
 
 The CRUD endpoints are consumed by the User Interface(UI) to create and manage
-applications.
+resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                             | Description                    |
-| ------ | ------------------------------------ | ------------------------------ |
-| POST   | /api/v1/applications                 | Create a application           |
-| GET    | /api/v1/applications                 | List all applications          |
-| GET    | /api/v1/applications/{applicationId} | Get a applications             |
-| DELETE | /api/v1/applications/{applicationId} | Delete a applications          |
-| GET    | /api/v1/health                       | Placement Manager health check |
+| Method | Endpoint                       | Description                    |
+|--------|--------------------------------|--------------------------------|
+| POST   | /api/v1/resources              | Create a resource              |
+| GET    | /api/v1/resources              | List all resources             |
+| GET    | /api/v1/resources/{resourceId} | Get a resource                 |
+| DELETE | /api/v1/resources/{resourceId} | Delete a resource              |
+| GET    | /api/v1/health                 | Placement Manager health check |
 
-**POST /api/v1/applications - Create an application.**
+**POST /api/v1/resources - Create an resource.**
 
-The POST endpoint creates an application that is supported by DCM.
+The POST endpoint creates a resource that is supported by DCM.
 
 Snippet of the request body (_TBD_)
 
@@ -163,7 +165,7 @@ requestBody:
             additionalProperties: true
 ```
 
-Example of payload for incoming VM request
+Example of payload for incoming VM catalog instance request
 
 ```json
 {
@@ -180,8 +182,8 @@ Example of payload for incoming VM request
 }
 ```
 
-**GET /api/v1/applications**  
-List all applications according to AEP standards.
+**GET /api/v1/resources**  
+List all resources according to AEP standards.
 
 Example of Response Payload
 
@@ -211,8 +213,8 @@ Example of Response Payload
 ]
 ```
 
-**GET /api/v1/applications/{applicationId}**  
-Get an application based on id.
+**GET /api/v1/resources/{resourceId}**  
+Get a resource based on id.
 
 Example of Response Payload
 
@@ -226,8 +228,8 @@ Example of Response Payload
 }
 ```
 
-**Delete /api/v1/applications/{applicationId}**  
-Delete an application based on id.
+**Delete /api/v1/resources/{resourceId}**  
+Delete a resource based on id.
 
 **GET /api/v1/health**  
 Retrieve the health status of Placement Manager.
@@ -237,18 +239,18 @@ Retrieve the health status of Placement Manager.
 ### Service Creation Flow
 
 The following sequence diagram illustrates the complete flow for creating a
-applications via the `POST /api/v1/applications` endpoint.
+resources via the `POST /api/v1/resources` endpoint.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant User as User UI
+    participant CM as Catalog Manager
     participant PM as Placement Manager
     participant DB as Placement DB
     participant PE as Policy Manager
     participant SPRM as SP Resource Manager
 
-    User->>PM: POST /api/v1/applications<br/>{serviceType, spec}
+    CM->>PM: POST /api/v1/resources<br/>{catalogId, spec}
     activate PM
 
     PM->>DB: Store intent<br/>{originalRequest}
@@ -263,7 +265,7 @@ sequenceDiagram
     deactivate PE
 
     alt Policy validation fails
-        PM-->>User: 403 Forbidden<br/>(Policy rejection)
+        PM-->>CM: 403 Forbidden<br/>(Policy rejection)
         deactivate PM
     else Policy validation succeeds
 
@@ -277,7 +279,7 @@ sequenceDiagram
 
         alt SP Resource Manager fails
             SPRM-->>PM: Error response
-            PM-->>User: Error response<br/>(Instance creation failed)
+            PM-->>CM: Error response<br/>(Instance creation failed)
             deactivate SPRM
 
         else Instance creation succeeds
@@ -285,7 +287,7 @@ sequenceDiagram
             activate DB
             deactivate DB
 
-            PM-->>User: 202 Accepted<br/>{instanceId, status}
+            PM-->>CM: 202 Accepted<br/>{instanceId, status}
 
         end
     end
@@ -295,8 +297,8 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- User UI sends a POST request to Placement Manager with `serviceType` and
-  `spec` (application specification)
+- Catalog Manager sends a POST request to Placement Manager with `catalogId` and
+  `spec` (resource specification)
 - Placement Manager receives and processes the request
 
 2. **Record Intent**
@@ -334,7 +336,7 @@ sequenceDiagram
   - SP Resource Manager returns success response with `instanceId`, `status`
   - Placement Manager returns 202 Accepted to User UI with `instanceId` and
     `status`
-  - The application is now in a `PROVISIONING` state
+  - The resource is now in a `PROVISIONING` state
 
 #### Key Characteristics/Notes
 
