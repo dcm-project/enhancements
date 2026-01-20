@@ -18,7 +18,7 @@ creation-date: 2026-01-09
 ## Summary
 
 The Placement Manager orchestrates resource requests within DCM
-core. It receives user requests from the Catalog Manager, validates and 
+core. It receives user requests through the Catalog Manager, validates and 
 enriches them through the Policy Manager, and delegates instance creation 
 to the SP Resource Manager. The Placement Manager focuses on 
 request orchestration and coordination.
@@ -110,7 +110,7 @@ flowchart TD
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the User Interface(UI) to create and manage
+The CRUD endpoints are consumed by the Catalog Manager to create and manage
 resources.
 
 #### Endpoints Overview
@@ -125,7 +125,9 @@ resources.
 
 **POST /api/v1/resources - Create an resource.**
 
-The POST endpoint creates a resource that is supported by DCM.
+The POST endpoint creates a resource that is supported by DCM. The resource 
+request is an instance of a catalog item and originates from the user (UI)
+through the Catalog Manager.
 
 Snippet of the request body
 
@@ -137,18 +139,18 @@ requestBody:
       schema:
         type: object
         required:
-          - catalogId
+          - catalogItemId
           - version
           - spec
         properties:
-          catalog_id:
+          catalogItemId:
             type: string
             description: Catalog item unique identifier 
             example: "dev-vm"
           version:
             type: string
             description: Catalog item version
-            example: "v1.0"
+            example: "1.0"
           spec:
             type: object
             description: |
@@ -161,11 +163,11 @@ Example of payload for incoming VM catalog instance request
 
 ```json
 {
-  "catalogId": "dev-vm",
-  "version": "v1.0",
+  "catalogItemId": "dev-vm",
+  "version": "1.0",
   "spec": {
     "serviceType": "vm",
-    "serviceTypeVersion": "v1alpha",
+    "serviceTypeVersion": "1.0",
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
     "guestOS": { "type": "fedora-39" },
@@ -185,25 +187,25 @@ Example of Response Payload
 ```json
 [
   {
-    "serviceType": "container",
+    "catalogItemId": "dev-container",
+    "version": "1.0",
     "name": "nginx-container",
     "providerName": "container-sp",
-    "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
-    "status": "PROVISIONING"
+    "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0"
   },
   {
-    "serviceType": "database",
+    "catalogItemId": "dev-database",
+    "version": "1.0",
     "name": "postgres-001",
     "providerName": "postgres-sp",
-    "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d",
-    "status": "FAILED"
+    "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d"
   },
   {
-    "serviceType": "vm",
+    "catalogItemId": "dev-vm",
+    "version": "1.0",
     "name": "ubuntu-vm",
     "providerName": "kubevirt-sp",
-    "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-    "status": "PROVISIONING"
+    "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
   }
 ]
 ```
@@ -215,11 +217,11 @@ Example of Response Payload
 
 ```json
 {
-  "serviceType": "vm",
+  "catalogItemId": "dev-vm",
+  "version": "1.0",
   "name": "ubuntu-vm",
   "providerName": "kubevirt-sp",
-  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "status": "PROVISIONING"
+  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
 }
 ```
 
@@ -245,7 +247,7 @@ sequenceDiagram
     participant PE as Policy Manager
     participant SPRM as SP Resource Manager
 
-    CM->>PM: POST /api/v1/resources<br/>{catalogId, spec}
+    CM->>PM: POST /api/v1/resources<br/>{catalogItemId, spec}
     activate PM
 
     PM->>DB: Store intent<br/>{originalRequest}
@@ -260,7 +262,7 @@ sequenceDiagram
     deactivate PE
 
     alt Policy validation fails
-        PM-->>CM: 403 Forbidden<br/>(Policy rejection)
+        PM-->>CM: Error response<br/>(Policy rejection)
         deactivate PM
     else Policy validation succeeds
 
@@ -292,7 +294,7 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- Catalog Manager sends a POST request to Placement Manager with `catalogId` and
+- Catalog Manager sends a POST request to Placement Manager with `catalogItemId` and
   `spec` (resource specification)
 - Placement Manager receives and processes the request
 
@@ -311,7 +313,7 @@ sequenceDiagram
   - Selected Service Provider name (`providerName`)
   - Policy constraints and patches applied
 - If policy validation fails (request rejected or constraint violation):
-  - Placement Manager returns 403 Forbidden to User UI
+  - Placement Manager returns error response to Catalog Manager
   - Request processing stops
 - If policy validation succeeds:
   - Placement Manager stores the validated request in Placement DB which
@@ -325,11 +327,11 @@ sequenceDiagram
   provisioning
 - If SP Resource Manager fails to create the instance:
   - Error response is returned to Placement Manager
-  - Placement Manager forwards the error to User UI
+  - Placement Manager forwards the error to Catalog Manager
   - Request processing stops
 - If instance creation succeeds:
   - SP Resource Manager returns success response with `instanceId`, `status`
-  - Placement Manager returns 202 Accepted to User UI with `instanceId` and
+  - Placement Manager returns 202 Accepted to Catalog Manager with `instanceId` and
     `status`
   - The resource is now in a `PROVISIONING` state
 
