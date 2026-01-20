@@ -94,7 +94,7 @@ spec:
 ```
 
 See
-[catalog-item-schema.yaml](https://github.com/gciavarrini/service-provider-api/blob/add-catalog-item/api/v1alpha1/catalog-item-schema.yaml)
+[catalog-item-schema.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/catalog-item-schema.yaml)
 for complete schema definition.
 
 #### CatalogItem components
