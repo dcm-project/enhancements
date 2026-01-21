@@ -98,20 +98,14 @@ capability matrices.
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10}}}%%
 flowchart BT
-    classDef mainContainer fill:#fff2cc,stroke:#333,stroke-width:1px
-    classDef dataSource fill:#fce5cd,stroke:#333,stroke-width:1px
-    classDef apiLayer fill:#d9d2e9,stroke:blue,stroke-width:2px
-    classDef innerBox fill:#ffffff,stroke:#999,stroke-width:1px
-    classDef lightContainer fill:#ffffeb,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
-
     subgraph Data_Sources [**Data Sources**]
-        DB[("**Service Registry**<br/>SP endpoints")]:::innerBox
+        DB[("**Service Registry**<br/>SP endpoints")]
     end
 
     subgraph API_Block [**Service Provider API**]
         Handler["_Service Registration Handler_
         2. Receive Request
-        3. Validate & Process"]:::innerBox
+        3. Validate & Process"]
     end
 
     subgraph Service_API [**Service API**<br/><br/> ]
@@ -119,29 +113,24 @@ flowchart BT
         subgraph SP1 [**ServiceProvider 1**<br/>]
             VM_Prov["**VM Provider Impl.**
             Listening at: https://sp1.local/api/vm
-            Ops: Create, Delete"]:::innerBox
+            Ops: Create, Delete"]
             Storage_Prov["**Storage Provider Impl.**
             Listening at: https://sp1.local/api/storage
-            Ops: Create, Update, Delete"]:::innerBox
+            Ops: Create, Update, Delete"]
         end
 
         subgraph SP2 [**ServiceProvider 2**<br/>]
             Container_Prov["**Container Provider Impl.**
             Listening at: https://sp2.local/api/container
-            Ops: Create, Update"]:::innerBox
+            Ops: Create, Update"]
             Pod_Prov["**Pod Provider Impl.**
             Listening at: https://sp2.local/api/pod
-            Ops: Create, Delete"]:::innerBox
+            Ops: Create, Delete"]
         end
     end
 
     VM_Prov & Storage_Prov & Container_Prov & Pod_Prov -- 1. Register --> Handler
     Handler -- 4. Update Service Registry --> DB
-
-    class Data_Sources dataSource
-    class API_Block apiLayer
-    class Service_API mainContainer
-    class SP1,SP2 lightContainer
 ```
 
 - Admins predefine supported
@@ -320,32 +309,26 @@ per service type.
 
 ```mermaid
 flowchart TD
-    classDef controlPlane fill:#d0e0e3,stroke:#333,stroke-width:1px;
-    classDef spNode fill:#fff2cc,stroke:#333,stroke-width:1px;
-    classDef innerNode fill:#e0e0e0,stroke:#333,stroke-width:1px;
-
     subgraph DCM_Control_Plane [**DCM Control Plane**]
         direction TB
-        ServiceRegistry["**Service Registry**<br/>• SP endpoints<br/>• SP status?<br/>• SP Metadata"]:::innerNode
-        ServiceCatalog["**Service Catalog**<br/>• Available SPs<br/>"]:::innerNode
-        DiscoveryScanner["**Discovery Scanner**<br/>1. Scan network<br/>2. Probe ports<br/>3. Attempt connection (http?)"]:::innerNode
+        ServiceRegistry["**Service Registry**<br/>• SP endpoints<br/>• SP status?<br/>• SP Metadata"]
+        ServiceCatalog["**Service Catalog**<br/>• Available SPs<br/>"]
+        DiscoveryScanner["**Discovery Scanner**<br/>1. Scan network<br/>2. Probe ports<br/>3. Attempt connection (http?)"]
 
         ServiceRegistry --> ServiceCatalog
         ServiceCatalog <--> DiscoveryScanner
     end
 
     subgraph SP1 [Service Provider 1]
-        SP1_Impl["**SP1 Implementation**<br/>Listening at: https://provider-1.local/api<br/><br/>Metadata<br/>• Endpoint URL: https://provider-1.local/api<br/>• Resources (?)<br/>• ...."]:::spNode
+        SP1_Impl["**SP1 Implementation**<br/>Listening at: https://provider-1.local/api<br/><br/>Metadata<br/>• Endpoint URL: https://provider-1.local/api<br/>• Resources (?)<br/>• ...."]
     end
 
     subgraph SP2 [Service Provider 2]
-        SP2_Impl["**SP2 Implementation**<br/>Listening at: https://provider-2.local/api<br/><br/>Metadata<br/>• Endpoint URL: https://provider-2.local/api<br/>• Resources (?)<br/>• ...."]:::spNode
+        SP2_Impl["**SP2 Implementation**<br/>Listening at: https://provider-2.local/api<br/><br/>Metadata<br/>• Endpoint URL: https://provider-2.local/api<br/>• Resources (?)<br/>• ...."]
     end
 
     DiscoveryScanner -- Discover --> SP1
     DiscoveryScanner -- Discover --> SP2
-
-    class DCM_Control_Plane controlPlane
 ```
 
 - Admins predefine supported ServiceTypes (e.g., "vm", "database")
@@ -412,38 +395,28 @@ The DCM actively scans endpoints to discover and register SPs.
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 80, 'nodeSpacing': 20}}}%%
 flowchart BT
-    classDef dataSource fill:#fce5cd,stroke:#333,stroke-width:1px
-    classDef apiLayer fill:#d9d2e9,stroke:#7b68ee,stroke-width:2px
-    classDef spContainer fill:#fff2cc,stroke:#333,stroke-width:1px
-    classDef innerBox fill:#ffffff,stroke:#333,stroke-width:1px
-    classDef lightContainer fill:#ffffeb,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
-
     subgraph Data_Sources ["**Data Sources**"]
-        DB[("**Service Registry**<br/>• SP endpoints")]:::innerBox
+        DB[("**Service Registry**<br/>• SP endpoints")]
     end
 
     subgraph API_Block ["**Service Provider API**"]
-        Handler["_Service Registration Handler_<br/>4. Receive Request<br/>5. Validate & Process"]:::innerBox
+        Handler["_Service Registration Handler_<br/>4. Receive Request<br/>5. Validate & Process"]
     end
 
     subgraph Service_Provider ["**Service Provider**"]
         subgraph SP1 ["Service Provider 1"]
-            VM_Prov["**VM Provider** Implementation<br/>Listening at: https://provider-1.local/api/vm<br/>Operations: Create, Delete<br/>Catalog offering: [vm]"]:::innerBox
+            VM_Prov["**VM Provider** Implementation<br/>Listening at: https://provider-1.local/api/vm<br/>Operations: Create, Delete<br/>Catalog offering: [vm]"]
         end
 
         subgraph SP2 ["Service Provider 2"]
-            Container_Prov["**Container Provider** Implementation<br/>Listening at: https://provider-2.local/api/container<br/>Operations: Create, Update<br/>Catalog offering: [container]"]:::innerBox
-            Pod_Prov["**Pod Provider** Implementation<br/>Listening at: https://provider-2.local/api/pod<br/>Operations: Create, Delete<br/>Catalog offering: [pod]"]:::innerBox
+            Container_Prov["**Container Provider** Implementation<br/>Listening at: https://provider-2.local/api/container<br/>Operations: Create, Update<br/>Catalog offering: [container]"]
+            Pod_Prov["**Pod Provider** Implementation<br/>Listening at: https://provider-2.local/api/pod<br/>Operations: Create, Delete<br/>Catalog offering: [pod]"]
         end
     end
 
     VM_Prov & Container_Prov & Pod_Prov -- "1. Register" --> Handler
     Handler -- "6. Update Service Registry" --> DB
     DB -. "7. Query capabilities:<br/> GET /providers/{id}/services" .-> Service_Provider
-    class Data_Sources dataSource
-    class API_Block apiLayer
-    class Service_Provider spContainer
-    class SP1,SP2 lightContainer
 ```
 
 #### Registration Flow
