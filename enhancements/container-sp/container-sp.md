@@ -208,7 +208,7 @@ set to `PROVISIONING` after the resource is created.
 
 ```json
 {
-  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "name": "web-app",
   "status": "PROVISIONING",
   "metadata": {
@@ -240,7 +240,7 @@ set to `PROVISIONING` after the resource is created.
 {
   "results": [
     {
-      "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "requestId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "name": "web-app",
       "status": "RUNNING",
       "ip": "10.244.0.25",
@@ -255,7 +255,7 @@ set to `PROVISIONING` after the resource is created.
       }
     },
     {
-      "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
+      "requestId": "c66be104-eea3-4246-975c-e6cc9b32d74d",
       "name": "api-gateway",
       "status": "FAILED",
       "ip": "10.244.0.26",
@@ -270,7 +270,7 @@ set to `PROVISIONING` after the resource is created.
       }
     },
     {
-      "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "requestId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
       "name": "worker-service",
       "status": "PROVISIONING",
       "ip": "",
@@ -306,7 +306,7 @@ resource endpoint.
 
 ```json
 {
-  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "requestId": "123e4567-e89b-12d3-a456-426614174000",
   "name": "web-app",
   "status": "RUNNING",
   "ip": "10.244.0.25",
