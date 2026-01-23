@@ -55,6 +55,10 @@ Registry. The Container SP implements the `container` service type schema
 - The Container Service Provider service has valid Kubernetes credentials
   (`kubeconfig` or in-cluster service account).
 - DCM messaging system is reachable for publishing status updates.
+- Container SP deployment supports rolling updates with multiple replicas for high availability.
+- Kubernetes cluster provides persistent storage for container volumes and operational data.
+- Container SP has sufficient privileges for resource cleanup and orphaned resource management.
+- Network policies allow Container SP to communicate with DCM during restart and upgrade scenarios.
 
 ### Integration Points
 
@@ -117,19 +121,18 @@ request := &dcm.RegistrationRequest{
 }
 ```
 
+#### Registration Request Validation
+
+The registration payload must conform to the validation requirements defined in the [SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
+
+**Container SP-specific requirements:**
+- `serviceType` field must be set to `"container"`
+- `operations` field must include at minimum: `CREATE`, `READ`, `DELETE`
+- `metadata.resources` values will be mapped to resource `limits` in Kubernetes `Deployment` manifests
+
 #### Registration Process
 
-The following steps outline the self-registration process at startup:
-
-1. API server starts and initializes HTTP listener.
-2. After the server is ready, registration runs in a background goroutine.
-3. The service constructs the API host URL from the listener address or
-   configuration.
-4. Registration request is sent to the DCM Service Provider Registry.
-5. On success, the service is registered and available for DCM to use.
-6. Registration failures are retried with exponential backoff and logged but do
-   not block server startup. Alternatively, SP can fall back to manual
-   registration.
+The Container SP follows the standard self-registration process defined in the [SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md). The registration request includes the Container SP endpoint URL in the format: `fmt.Sprintf("%s/api/v1alpha1/containers", apiHost)`.
 
 ### API Endpoints
 
@@ -337,7 +340,7 @@ resource endpoint.
 Remove a single container instance (`Deployment` with cascading delete for
 `Pods`) and returns `204 No Content`.
 
-#### GET /api/v1/health
+#### GET /api/v1alpha1/health
 
 **Description:** Retrieve the health status for the Container Service Provider
 API.
@@ -420,6 +423,12 @@ Events are published to the following subject format:
 - `providerName`: Unique name of the Container Service Provider
 - `instanceId`: UUID of the container instance (from `dcm-instance-id` label)
 
+Events are published to the following type format:
+
+`dcm.providers.{providerName}.status.update`
+
+- `providerName`: Unique name of the Container Service Provider
+
 **Payload Structure:**
 
 ```golang
@@ -437,7 +446,8 @@ cloudevents "github.com/cloudevents/sdk-go/v2"
 event := cloudevents.NewEvent()
 event.SetID("event-123-456")
 event.SetSource("container-sp-prod")
-event.SetType("dcm.providers.container-sp.container.instances.abc-123.status")
+event.SetType("dcm.providers.container-sp.status.update")
+event.SetSubject("dcm.providers.container-sp.container.instances.abc-123.status")
 event.SetData(cloudevents.ApplicationJSON, ContainerStatus{
     Status:  "RUNNING",
     Message: "Container is running successfully.",
