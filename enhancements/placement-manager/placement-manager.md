@@ -313,6 +313,7 @@ sequenceDiagram
   - Selected Service Provider name (`providerName`)
   - Policy constraints and patches applied
 - If policy validation fails (request rejected or constraint violation):
+  - Delete record from Placement DB
   - Placement Manager returns error response to Catalog Manager
   - Request processing stops
 - If policy validation succeeds:
@@ -327,6 +328,7 @@ sequenceDiagram
   provisioning
 - If SP Resource Manager fails to create the instance:
   - Error response is returned to Placement Manager
+  - Delete record from Placement DB
   - Placement Manager forwards the error to Catalog Manager
   - Request processing stops
 - If instance creation succeeds:
@@ -344,4 +346,4 @@ sequenceDiagram
 - **Error Handling**: Clear error paths for policy rejections and instance
   creation failures
 - **State Management**: Both original intent and validated request are stored
-  for complete request lifecycle tracking
+  for complete request lifecycle tracking and rehydration purposes
