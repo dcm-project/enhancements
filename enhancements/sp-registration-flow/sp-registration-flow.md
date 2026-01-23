@@ -137,16 +137,16 @@ flowchart BT
   [Service Types](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md)
   (e.g., "vm", "database")
 - A registration call must be made to the Registration Handler endpoint for each
-  service type the SP supports. The payload structure is not finalized and may
-  evolve during implementation. It may include, just as an example:
+  service type the SP supports. The payload includes:
   1. Unique provider name
-  2. Unique providerID
+  2. Unique providerID (optional, server-generated if not provided)
   3. Endpoint URL (e.g.,
      [https://provider-1.local/api](https://provider-1.local/api))
-  4. Metadata (zone, region, resource constraints)
-  5. Operations supported for this service type (e.g., _"create", "delete"_)
-  6. References catalog service kind this provider can fulfill (e.g, "vm",
-     "container")
+  4. Service type this provider can fulfill (e.g., _"vm"_, _"container"_)
+  5. Schema version of the service type (e.g., _"v1alpha1"_)
+  6. Metadata (optional: zone, region, resource constraints)
+  7. Operations supported for this service type (optional, e.g., _"create"_,
+     _"delete"_)
 - The Registration Handler processes and validates the metadata
 - The Registration Handler internally updates the Service Registry with:
   1. SP endpoint
@@ -221,6 +221,7 @@ existing SP entry rather than creating a duplicate.
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
+  "schemaVersion": "v1alpha1",
   "metadata": {
     "region": "us-east-1",
     "status": "healthy",
@@ -240,6 +241,7 @@ Response:
   "displayName": "KubeVirt Service Provider",
   "endpoint": "https://sp1.example.com/api/v1/vm",
   "serviceType": "vm",
+  "schemaVersion": "v1alpha1",
   "status": "registered",
   "metadata": { ... }
 }
@@ -255,6 +257,7 @@ Response:
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
+  "schemaVersion": "v1alpha1",
   "metadata": { ... }
 }
 
@@ -263,6 +266,7 @@ Response:
   "id": "auto-generated-uuid",
   "name": "kubevirt-123",
   ...
+  "schemaVersion": "v1alpha1",
   "status": "registered"
 }
 ```
@@ -277,6 +281,7 @@ Response:
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
+  "schemaVersion": "v1alpha1",
   "metadata": {
     "region": "us-east-1",
     "zone": "datacenter-b"
@@ -287,6 +292,7 @@ Response:
 {
   "id": "uuid-1234",
   "name": "kubevirt-123",
+  "schemaVersion": "v1alpha1",
   ...
   "status": "updated"
 }
