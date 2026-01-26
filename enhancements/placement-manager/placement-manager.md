@@ -139,18 +139,13 @@ requestBody:
       schema:
         type: object
         required:
-          - catalogItemId
-          - version
+          - CatalogItemInstance
           - spec
         properties:
-          catalogItemId:
+          CatalogItemInstance:
             type: string
-            description: Catalog item unique identifier 
-            example: "dev-vm"
-          version:
-            type: string
-            description: Catalog item version
-            example: "1.0"
+            description: The ID of the catalog item instance
+            example: "4baa35eb-e70d-4d37-867d-0f4efa21d05c"
           spec:
             type: object
             description: |
@@ -163,8 +158,7 @@ Example of payload for incoming VM catalog instance request
 
 ```json
 {
-  "catalogItemId": "dev-vm",
-  "version": "1.0",
+  "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
   "spec": {
     "serviceType": "vm",
     "serviceTypeVersion": "1.0",
@@ -179,6 +173,17 @@ Example of payload for incoming VM catalog instance request
 }
 ```
 
+Response payload: Return 202 Accepted if successful.
+```json
+{
+  "CatalogItemInstance": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
+  "name": "fedora-vm",
+  "providerName": "kubevirt-sp",
+  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+}
+```
+**Note**: This is **only** an example of the payload.
+
 **GET /api/v1/resources**  
 List all resources according to AEP standards.
 
@@ -187,22 +192,19 @@ Example of Response Payload
 ```json
 [
   {
-    "catalogItemId": "dev-container",
-    "version": "1.0",
+    "CatalogItemInstance": "52540146-6212-4514-b534-0c3127b2836f",
     "name": "nginx-container",
     "providerName": "container-sp",
     "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0"
   },
   {
-    "catalogItemId": "dev-database",
-    "version": "1.0",
+    "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
     "name": "postgres-001",
     "providerName": "postgres-sp",
     "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d"
   },
   {
-    "catalogItemId": "dev-vm",
-    "version": "1.0",
+    "CatalogItemInstance": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
     "name": "ubuntu-vm",
     "providerName": "kubevirt-sp",
     "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
@@ -217,8 +219,7 @@ Example of Response Payload
 
 ```json
 {
-  "catalogItemId": "dev-vm",
-  "version": "1.0",
+  "CatalogItemInstance": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
   "name": "ubuntu-vm",
   "providerName": "kubevirt-sp",
   "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
@@ -247,7 +248,7 @@ sequenceDiagram
     participant PE as Policy Manager
     participant SPRM as SP Resource Manager
 
-    CM->>PM: POST /api/v1/resources<br/>{catalogItemId, spec}
+    CM->>PM: POST /api/v1/resources<br/>{CatalogItemInstance, spec}
     activate PM
 
     PM->>DB: Store intent<br/>{originalRequest}
@@ -294,7 +295,7 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- Catalog Manager sends a POST request to Placement Manager with `catalogItemId` and
+- Catalog Manager sends a POST request to Placement Manager with `CatalogItemInstance` and
   `spec` (resource specification)
 - Placement Manager receives and processes the request
 
