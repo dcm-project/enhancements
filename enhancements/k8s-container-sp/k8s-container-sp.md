@@ -1,5 +1,5 @@
 ---
-title: container-sp
+title: k8s-container-sp
 authors:
   - "@gabriel-farache"
 reviewers:
@@ -13,25 +13,29 @@ reviewers:
 creation-date: 2026-01-21
 ---
 
-# Container Service Provider
+# Kubernetes Container Service Provider
 
 ## Summary
 
-The Container Service Provider API is a REST API that manages containerized
-workloads in a Kubernetes-based cluster. It exposes endpoints for creating,
-reading and deleting containers, and integrates with the DCM Service Provider
-Registry. The Container SP implements the `container` service type schema
-(`v1alpha1`).
+The Kubernetes Container Service Provider (K8s Container SP) is a REST API that
+manages containerized workloads on Kubernetes clusters. Unlike generic container
+runtimes (Docker, Podman), this Service Provider specifically targets Kubernetes
+as its execution platform. The current implementation focuses exclusively on
+Kubernetes Deployments; other resource types such as Jobs, static Pods,
+DaemonSets, or StatefulSets are not supported. It exposes endpoints for
+creating, reading, and deleting containers, and integrates with the DCM Service
+Provider Registry. The K8s Container SP implements the `container` service type
+schema (`v1alpha1`).
 
 ## Motivation
 
 ### Goals
 
-- Define the lifecycle of a Service Provider (SP) running containers in
-  Kubernetes-based cluster.
+- Define the lifecycle of a Service Provider (SP) running containers on
+  Kubernetes clusters.
 - Define the registration flow with DCM SP API.
 - Define `CREATE`, `READ`, and `DELETE` endpoints for managing containers
-  running on a cluster.
+  running on a Kubernetes cluster.
 - Define status reporting mechanism for DCM requests.
 
 ### Non-Goals
@@ -40,25 +44,22 @@ Registry. The Container SP implements the `container` service type schema
   ... or any update) for container instances.
 - Mechanism for retrieving available computing, memory, etc., information from
   the SP infrastructure.
-- Deployment strategy for the Container SP API.
+- Deployment strategy for the K8s Container SP API.
 - Persistent volume support (v1 uses ephemeral storage only).
 
 ## Proposal
 
 ### Assumptions
 
-- The Container Service Provider is connected to a Kubernetes-based cluster
+- The Kubernetes Container Service Provider is connected to a Kubernetes cluster
   (OCP, KIND, Minikube, ...).
-- The Container Service Provider has the necessary RBAC permissions to manage
-  `Deployment` resources across the cluster.
+- The Kubernetes Container Service Provider has the necessary RBAC permissions
+  to manage `Deployment` resources across the cluster.
 - The DCM Service Provider Registry is reachable for registration.
-- The Container Service Provider service has valid Kubernetes credentials
-  (`kubeconfig` or in-cluster service account).
+- The Kubernetes Container Service Provider service has valid Kubernetes
+  credentials (`kubeconfig` or in-cluster service account).
 - DCM messaging system is reachable for publishing status updates.
-- Container SP deployment supports rolling updates with multiple replicas for high availability.
-- Kubernetes cluster provides persistent storage for container volumes and operational data.
-- Container SP has sufficient privileges for resource cleanup and orphaned resource management.
-- Network policies allow Container SP to communicate with DCM during restart and upgrade scenarios.
+- Network policies allow K8s Container SP to communicate with DCM.
 
 ### Integration Points
 
@@ -76,8 +77,9 @@ Registry. The Container SP implements the `container` service type schema
 
 #### DCM SP Health Check
 
-Container SP must expose a health endpoint `http://<provider-ip>:<port>/health`
-for DCM control plane to poll every 10 seconds. See documentation for
+K8s Container SP must expose a health endpoint
+`http://<provider-ip>:<port>/health` for DCM control plane to poll every 10
+seconds. See documentation for
 [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
 
 #### DCM SP Status Reporting
@@ -92,9 +94,9 @@ for DCM control plane to poll every 10 seconds. See documentation for
 
 ### Registration Flow
 
-The Container SP API must successfully complete a registration process to ensure
-DCM is aware of it and can use it. During startup, the service uses the DCM
-registration client to send a request to the SP API registration endpoint
+The K8s Container SP API must successfully complete a registration process to
+ensure DCM is aware of it and can use it. During startup, the service uses the
+DCM registration client to send a request to the SP API registration endpoint
 `POST /api/v1alpha1/providers`. See DCM
 [registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
 for more information.
@@ -105,11 +107,11 @@ Example request payload:
 dcm "github.com/dcm-project/service-provider-api/pkg/registration/client"
 ...
 request := &dcm.RegistrationRequest{
-    Name: "container-sp",
+    Name: "k8s-container-sp",
     ServiceType: "container",
-    DisplayName: "Container Service Provider",
+    DisplayName: "Kubernetes Container Service Provider",
     Endpoint:  fmt.Sprintf("%s/api/v1alpha1/containers", apiHost),
-    Metadata: dcm.Metadata{ # These are the metadata of the K8s-based cluster on which the provider is running
+    Metadata: dcm.Metadata{ # These are the metadata of the Kubernetes cluster on which the provider is running
       Zone:   "us-east-1b",
       Region: "us-east-1",
       Resources: dcm.ProviderResources{
@@ -123,16 +125,23 @@ request := &dcm.RegistrationRequest{
 
 #### Registration Request Validation
 
-The registration payload must conform to the validation requirements defined in the [SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
+The registration payload must conform to the validation requirements defined in
+the
+[SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
 
-**Container SP-specific requirements:**
+**K8s Container SP-specific requirements:**
+
 - `serviceType` field must be set to `"container"`
 - `operations` field must include at minimum: `CREATE`, `READ`, `DELETE`
-- `metadata.resources` values will be mapped to resource `limits` in Kubernetes `Deployment` manifests
+- `metadata.resources` fields may or may not define the cluster capacity **at the time of registration**
 
 #### Registration Process
 
-The Container SP follows the standard self-registration process defined in the [SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md). The registration request includes the Container SP endpoint URL in the format: `fmt.Sprintf("%s/api/v1alpha1/containers", apiHost)`.
+The K8s Container SP follows the standard self-registration process defined in
+the
+[SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
+The registration request includes the K8s Container SP endpoint URL in the
+format: `fmt.Sprintf("%s/api/v1alpha1/containers", apiHost)`.
 
 ### API Endpoints
 
@@ -141,13 +150,13 @@ resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                               | Description                        |
-| ------ | -------------------------------------- | ---------------------------------- |
-| POST   | /api/v1alpha1/containers               | Create a new container             |
-| GET    | /api/v1alpha1/containers               | List all containers                |
-| GET    | /api/v1alpha1/containers/{containerId} | Get a container instance           |
-| DELETE | /api/v1alpha1/containers/{containerId} | Delete a container instance        |
-| GET    | /api/v1alpha1/health                   | Container API service health check |
+| Method | Endpoint                               | Description                   |
+| ------ | -------------------------------------- | ----------------------------- |
+| POST   | /api/v1alpha1/containers               | Create a new container        |
+| GET    | /api/v1alpha1/containers               | List all containers           |
+| GET    | /api/v1alpha1/containers/{containerId} | Get a container instance      |
+| DELETE | /api/v1alpha1/containers/{containerId} | Delete a container instance   |
+| GET    | /api/v1alpha1/health                   | K8s Container SP health check |
 
 ##### AEP Compliance
 
@@ -287,7 +296,7 @@ set to `PENDING` after the resource is created.
       }
     }
   ],
-  "next_page_token": "eyJvZmZzZXQiOjMsImxpbWl0Ijo1MH0="
+  "next_page_token": "a1b2c3d4e5f6"
 }
 ```
 
@@ -342,19 +351,19 @@ Remove a single container instance (`Deployment` with cascading delete for
 
 #### GET /api/v1alpha1/health
 
-**Description:** Retrieve the health status for the Container Service Provider
-API.
+**Description:** Retrieve the health status for the Kubernetes Container Service
+Provider API.
 
 ### Status Reporting to DCM
 
-The Container SP uses a **layered monitoring approach** with two
+The K8s Container SP uses a **layered monitoring approach** with two
 `SharedIndexInformer` instances to watch both `Deployment` and `Pod` resources.
 This provides comprehensive visibility into both the desired state (Deployment)
 and actual runtime state (Pod), enabling accurate status reporting to DCM.
 
 #### Layered Monitoring Architecture
 
-The Container SP monitors Kubernetes resources at two levels:
+The K8s Container SP monitors Kubernetes resources at two levels:
 
 1. **Deployment Level**: Tracks creation, rollout status, and replica failures
 2. **Pod Level**: Tracks actual runtime state, IP addresses, and container
@@ -376,8 +385,8 @@ Both informers watch resources labeled with:
 
 #### Status Reconciliation Logic
 
-When either informer receives an event, the Container SP reconciles status from
-both resource types using the following precedence rules:
+When either informer receives an event, the K8s Container SP reconciles status
+from both resource types using the following precedence rules:
 
 1. **Pod status** (highest priority if Pod exists):
    - Pod.Status.Phase → DCM status mapping
@@ -404,15 +413,15 @@ both resource types using the following precedence rules:
 For detailed implementation of the `SharedIndexInformer` pattern (setup phase,
 event processing flow, pros and cons), see the
 [KubeVirt SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/kubevirt-sp/kubevirt-sp.md#status-reporting-to-dcm)
-section. The Container SP applies the same pattern with two informers instead of
-one.
+section. The K8s Container SP applies the same pattern with two informers
+instead of one.
 
 #### CloudEvents Format
 
 Status updates are published to the messaging system using the
 [CloudEvents](https://cloudevents.io/) specification (v1.0). This provides a
-standardized "fire-and-forget" mechanism that decouples the Container SP from
-the DCM backend.
+standardized "fire-and-forget" mechanism that decouples the K8s Container SP
+from the DCM backend.
 
 **Message Subject Hierarchy:**
 
@@ -420,14 +429,14 @@ Events are published to the following subject format:
 
 `dcm.providers.{providerName}.container.instances.{instanceId}.status`
 
-- `providerName`: Unique name of the Container Service Provider
+- `providerName`: Unique name of the Kubernetes Container Service Provider
 - `instanceId`: UUID of the container instance (from `dcm-instance-id` label)
 
 Events are published to the following type format:
 
 `dcm.providers.{providerName}.status.update`
 
-- `providerName`: Unique name of the Container Service Provider
+- `providerName`: Unique name of the Kubernetes Container Service Provider
 
 **Payload Structure:**
 
@@ -445,9 +454,9 @@ cloudevents "github.com/cloudevents/sdk-go/v2"
 
 event := cloudevents.NewEvent()
 event.SetID("event-123-456")
-event.SetSource("container-sp-prod")
-event.SetType("dcm.providers.container-sp.status.update")
-event.SetSubject("dcm.providers.container-sp.container.instances.abc-123.status")
+event.SetSource("k8s-container-sp-prod")
+event.SetType("dcm.providers.k8s-container-sp.status.update")
+event.SetSubject("dcm.providers.k8s-container-sp.container.instances.abc-123.status")
 event.SetData(cloudevents.ApplicationJSON, ContainerStatus{
     Status:  "RUNNING",
     Message: "Container is running successfully.",
@@ -461,8 +470,8 @@ for the complete CloudEvents contract and messaging system details.
 #### Status Mapping from Kubernetes to DCM
 
 The following table maps Kubernetes resource statuses to DCM generic statuses.
-The Container SP uses the **Priority Order** defined in the reconciliation logic
-above (Pod first, then Deployment, then resource not found).
+The K8s Container SP uses the **Priority Order** defined in the reconciliation
+logic above (Pod first, then Deployment, then resource not found).
 
 | DCM Status | Primary Source | Kubernetes Condition                             | Precedence |
 | ---------- | -------------- | ------------------------------------------------ | ---------- |
@@ -474,12 +483,7 @@ above (Pod first, then Deployment, then resource not found).
 | UNKNOWN    | Pod            | Pod.Phase = `Unknown` (node lost)                | 1          |
 | DELETED    | Both           | Neither Deployment nor Pod found in cluster      | 3          |
 
-> **Note**: The `SUCCEEDED` status defined in the
-> [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md)
-> specification is intentionally excluded from the Container SP. This status
-> only applies to Kubernetes resource types like Jobs that have a defined
-> completion state. The Container SP uses Deployments which are designed for
-> long-running services that continuously run and restart on failure.
+> **Note**: The `SUCCEEDED` status defined in the [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md) specification is intentionally excluded from the K8s Container SP. This status only applies to Kubernetes resource types like Jobs that have a defined completion state. The K8s Container SP uses Deployments which are designed for long-running services that continuously run and restart on failure.
 
 **Precedence Rules**:
 
@@ -490,11 +494,9 @@ above (Pod first, then Deployment, then resource not found).
 - **3 (Both)**: Resource cleanup complete - report `DELETED` when neither
   Deployment nor Pod exists
 
-See
-[Kubernetes Pod Phase](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase)
-and
-[Deployment Conditions](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#deployment-status)
-for official definitions.
+For official definitions, see 
+* [Kubernetes Pod Phase](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-phase)
+* [Deployment Conditions](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#deployment-status)
 
 ## Alternatives
 
