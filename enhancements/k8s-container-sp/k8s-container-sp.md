@@ -57,7 +57,7 @@ schema.
 - The Kubernetes Container Service Provider is connected to a Kubernetes cluster
   (OCP, KIND, Minikube, ...).
 - The Kubernetes Container Service Provider has the necessary RBAC permissions
-  to manage `Deployment` and `Service` resources across the cluster.
+  to manage `Deployment` and `Service` resources in its configured namespace.
 - The DCM Service Provider Registry is reachable for registration.
 - The Kubernetes Container Service Provider service has valid Kubernetes
   credentials (`kubeconfig` or in-cluster service account).
@@ -120,9 +120,11 @@ instances managed by the SP and cannot be overridden per-container.
 | createService      | boolean | true      | Create a Kubernetes Service for each container           |
 | defaultServiceType | string  | ClusterIP | Default Service type (ClusterIP, NodePort, LoadBalancer) |
 
-When `createService` is enabled, the SP automatically creates a Kubernetes
-Service for each container, providing a stable endpoint for accessing the
-application. Users can override these defaults per-container via
+When `createService` is enabled, the SP automatically creates a single
+Kubernetes Service for each container, providing a stable endpoint for accessing
+the application. The Service includes all ports defined in the container's
+`network.ports[]` array - one Service is created per container, not one Service
+per port. Users can override these defaults per-container via
 `providerHints.kubernetes.service` (see POST endpoint documentation).
 
 ### Registration Flow
@@ -247,7 +249,7 @@ created for that container.
     ]
   },
   "network": {
-    "ports": [{ "containerPort": 8080 }]
+    "ports": [{ "containerPort": 8080 }, { "containerPort": 9090 }]
   },
   "metadata": {
     "name": "web-app"
@@ -283,13 +285,19 @@ set to `PENDING` after the resource is created.
   },
   "service": {
     "clusterIP": "10.96.45.12",
-    "type": "LoadBalancer"
+    "type": "LoadBalancer",
+    "ports": [
+      { "port": 8080, "targetPort": 8080, "protocol": "TCP" },
+      { "port": 9090, "targetPort": 9090, "protocol": "TCP" }
+    ]
   }
 }
 ```
 
 > **Note**: The `service` field is included only when a Service is created. If
 > Service creation is disabled, this field is omitted from the response. The
+> `service.ports` array reflects all ports from the request's `network.ports[]`,
+> confirming that a single Service exposes all container ports. The
 > `metadata.namespace` field reflects the namespace configured in the SP
 > configuration file where the resources were created.
 
@@ -321,10 +329,8 @@ set to `PENDING` after the resource is created.
       "status": "RUNNING",
       "ip": "10.244.0.25",
       "ports": [
-        {
-          "containerPort": 8080,
-          "hostPort": 30080
-        }
+        { "containerPort": 8080, "hostPort": 30080 },
+        { "containerPort": 9090, "hostPort": 30090 }
       ],
       "metadata": {
         "namespace": "production"
@@ -332,7 +338,11 @@ set to `PENDING` after the resource is created.
       "service": {
         "clusterIP": "10.96.45.12",
         "type": "LoadBalancer",
-        "externalIP": "34.123.45.67"
+        "externalIP": "34.123.45.67",
+        "ports": [
+          { "port": 8080, "targetPort": 8080, "protocol": "TCP" },
+          { "port": 9090, "targetPort": 9090, "protocol": "TCP" }
+        ]
       }
     },
     {
@@ -340,18 +350,14 @@ set to `PENDING` after the resource is created.
       "name": "api-gateway",
       "status": "FAILED",
       "ip": "10.244.0.26",
-      "ports": [
-        {
-          "containerPort": 9090,
-          "hostPort": 30090
-        }
-      ],
+      "ports": [{ "containerPort": 3000, "hostPort": 30300 }],
       "metadata": {
         "namespace": "production"
       },
       "service": {
         "clusterIP": "10.96.45.13",
-        "type": "ClusterIP"
+        "type": "ClusterIP",
+        "ports": [{ "port": 3000, "targetPort": 3000, "protocol": "TCP" }]
       }
     },
     {
@@ -401,10 +407,8 @@ LoadBalancer type Services when an external IP has been assigned.
   "status": "RUNNING",
   "ip": "10.244.0.25",
   "ports": [
-    {
-      "containerPort": 8080,
-      "hostPort": 30080
-    }
+    { "containerPort": 8080, "hostPort": 30080 },
+    { "containerPort": 9090, "hostPort": 30090 }
   ],
   "metadata": {
     "namespace": "production"
@@ -412,14 +416,19 @@ LoadBalancer type Services when an external IP has been assigned.
   "service": {
     "clusterIP": "10.96.45.12",
     "type": "LoadBalancer",
-    "externalIP": "34.123.45.67"
+    "externalIP": "34.123.45.67",
+    "ports": [
+      { "port": 8080, "targetPort": 8080, "protocol": "TCP" },
+      { "port": 9090, "targetPort": 9090, "protocol": "TCP" }
+    ]
   }
 }
 ```
 
 > **Note**: The payload above is **only** an example. This will be updated when
 > the schema contract is finalized by DCM. The `service` field is omitted when
-> no Service was created for the container.
+> no Service was created for the container. The `service.ports` array shows all
+> ports exposed by the single Service created for this container.
 
 #### DELETE /api/v1alpha1/containers/{containerId}
 
