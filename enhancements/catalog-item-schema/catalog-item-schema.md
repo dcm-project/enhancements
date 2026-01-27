@@ -76,7 +76,7 @@ metadata:
   name: production-postgres
 spec:
   serviceType: database
-  schemaVersion: v1alpha1
+  serviceTypeSchema: v1alpha1
   fields:
     - path: "engine"
       default: "postgresql"
@@ -103,7 +103,7 @@ for complete schema definition.
 | :------------ | :------- | :----- | :---------------------------------------------------------------------------------------------------- |
 | apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                   |
 | serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                            |
-| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by DCM to generate the ServiceType payload |
+| serviceTypeSchema | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by DCM to generate the ServiceType payload |
 | fields        | Yes      | array  | List of field configurations (see below)                                                              |
 
 Each field in the _fields_ array has:
@@ -129,7 +129,7 @@ metadata:
   displayName: "Development VM"
 spec:
   serviceType: vm
-  schemaVersion: v1alpha1
+  serviceTypeSchema: v1alpha1
   fields:
     - path: "vcpu.count"
       displayName: "CPU Count"
@@ -157,15 +157,15 @@ CatalogItems use two version fields:
 
 - **`apiVersion`**: Versions the CatalogItem schema itself (e.g., `v1alpha1`).
   Enables evolution of the CatalogItem structure.
-- **`schemaVersion`**: Versions the referenced ServiceType schema (e.g.,
-  `1.0`). Creates a contract for ServiceType payload generation.
+- **`serviceTypeSchema`**: Versions the referenced ServiceType schema (e.g.,
+  `v1alpha1`). Creates a contract for ServiceType payload generation.
 
-The `schemaVersion` enables:
+The `serviceTypeSchema` enables:
 
-- **SP selection**: Policies may use the `serviceTypeVersion` set in the Service Providers alongside the `schemaVersion` to match Service Providers supporting the corresponding version
+- **SP selection**: Policies may use the `serviceTypeVersion` set in the Service Providers alongside the `serviceTypeSchema` to match Service Providers supporting the corresponding version
 - **Schema evolution**: New schema versions can add/modify fields while older
   catalog items continue working
-- **Common naming**: All SPs serving the same `serviceType@schemaVersion` must
+- **Common naming**: All SPs serving the same `serviceType@serviceTypeSchema` must
   understand the same field names
 
 ## Design Details
