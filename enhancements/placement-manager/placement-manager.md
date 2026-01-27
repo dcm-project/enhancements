@@ -161,7 +161,7 @@ Example of payload for incoming VM catalog instance request
   "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
   "spec": {
     "serviceType": "vm",
-    "serviceTypeVersion": 1.0,
+    "serviceTypeVersion": "1.0.0",
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
     "guestOS": { "type": "fedora-39" },

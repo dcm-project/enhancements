@@ -144,7 +144,7 @@ flowchart BT
      [https://provider-1.local/api](https://provider-1.local/api))
   4. Service type this provider can fulfill (e.g., _"vm"_, _"container"_)
   5. Schema version of the service type (e.g., _"v1alpha1"_)
-  6. Service type version (numeric, e.g., _1.0_, _2.0_) for version-based
+  6. Service type version (string, e.g., _"1.0.0"_, _"2.0.0"_) for version-based
      routing. The Policy Engine uses this to match requests to SPs that support
      the requested version.
   7. Metadata (optional: zone, region, resource constraints)
@@ -226,7 +226,7 @@ existing SP entry rather than creating a duplicate.
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
-  "serviceTypeVersion": 1.0,
+  "serviceTypeVersion": "1.0.0",
   "metadata": {
     "region": "us-east-1",
     "status": "healthy",
@@ -247,7 +247,7 @@ Response:
   "endpoint": "https://sp1.example.com/api/v1/vm",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
-  "serviceTypeVersion": 1.0,
+  "serviceTypeVersion": "1.0.0",
   "status": "registered",
   "metadata": { ... }
 }
@@ -264,7 +264,7 @@ Response:
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
-  "serviceTypeVersion": 1.0,
+  "serviceTypeVersion": "1.0.0",
   "metadata": { ... }
 }
 
@@ -274,7 +274,7 @@ Response:
   "name": "kubevirt-123",
   ...
   "schemaVersion": "v1alpha1",
-  "serviceTypeVersion": 1.0,
+  "serviceTypeVersion": "1.0.0",
   "status": "registered"
 }
 ```
@@ -290,7 +290,7 @@ Response:
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
-  "serviceTypeVersion": 1.0,
+  "serviceTypeVersion": "1.0.0",
   "metadata": {
     "region": "us-east-1",
     "zone": "datacenter-b"
@@ -302,7 +302,7 @@ Response:
   "id": "uuid-1234",
   "name": "kubevirt-123",
   "schemaVersion": "v1alpha1",
-  "serviceTypeVersion": 1.0,
+  "serviceTypeVersion": "1.0.0",
   ...
   "status": "updated"
 }
