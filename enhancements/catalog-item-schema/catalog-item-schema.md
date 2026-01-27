@@ -162,8 +162,10 @@ CatalogItems use two version fields:
 
 The `schemaVersion` enables:
 
-- **SP selection**: Version info can be used for placement decisions (e.g.,
-  excluding SPs that don't support a given schema version)
+- **SP selection**: Version info combined with `serviceTypeVersion` (numeric) is
+  used for placement decisions. The Policy Engine matches the request's
+  `serviceTypeVersion` against registered SPs, routing requests only to SPs that
+  support the requested version.
 - **Schema evolution**: New schema versions can add/modify fields while older
   catalog items continue working
 - **Common naming**: All SPs serving the same `serviceType@schemaVersion` must

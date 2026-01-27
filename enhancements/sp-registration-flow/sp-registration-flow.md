@@ -144,13 +144,17 @@ flowchart BT
      [https://provider-1.local/api](https://provider-1.local/api))
   4. Service type this provider can fulfill (e.g., _"vm"_, _"container"_)
   5. Schema version of the service type (e.g., _"v1alpha1"_)
-  6. Metadata (optional: zone, region, resource constraints)
-  7. Operations supported for this service type (optional, e.g., _"create"_,
+  6. Service type version (numeric, e.g., _1.0_, _2.0_) for version-based
+     routing. The Policy Engine uses this to match requests to SPs that support
+     the requested version.
+  7. Metadata (optional: zone, region, resource constraints)
+  8. Operations supported for this service type (optional, e.g., _"create"_,
      _"delete"_)
 - The Registration Handler processes and validates the metadata
 - The Registration Handler internally updates the Service Registry with:
   1. SP endpoint
-  1. metadata
+  2. metadata
+  3. serviceTypeVersion
 - When user requests a catalog offering, Control Plane matches it to registered
   SPs that can fulfill it based on configured policies and calls the selected SP
   endpoint (endpoint must be reachable)
@@ -222,6 +226,7 @@ existing SP entry rather than creating a duplicate.
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
+  "serviceTypeVersion": 1.0,
   "metadata": {
     "region": "us-east-1",
     "status": "healthy",
@@ -242,6 +247,7 @@ Response:
   "endpoint": "https://sp1.example.com/api/v1/vm",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
+  "serviceTypeVersion": 1.0,
   "status": "registered",
   "metadata": { ... }
 }
@@ -258,6 +264,7 @@ Response:
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
+  "serviceTypeVersion": 1.0,
   "metadata": { ... }
 }
 
@@ -267,6 +274,7 @@ Response:
   "name": "kubevirt-123",
   ...
   "schemaVersion": "v1alpha1",
+  "serviceTypeVersion": 1.0,
   "status": "registered"
 }
 ```
@@ -282,6 +290,7 @@ Response:
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
   "schemaVersion": "v1alpha1",
+  "serviceTypeVersion": 1.0,
   "metadata": {
     "region": "us-east-1",
     "zone": "datacenter-b"
@@ -293,6 +302,7 @@ Response:
   "id": "uuid-1234",
   "name": "kubevirt-123",
   "schemaVersion": "v1alpha1",
+  "serviceTypeVersion": 1.0,
   ...
   "status": "updated"
 }

@@ -68,7 +68,10 @@ Every policy may return one or more of the following outputs
    by providing a patch map.
 3. **Field Constraints:** Defining the mutability of fields for _subsequent_
    policies in the chain.
-4. **Service Provider Selection:** Policies may set a value and/or constraints
+4. **Service Provider Selection:** Policies may set a value and/or constraints.
+   The Policy Engine filters SPs based on `serviceTypeVersion` matching: only
+   SPs that support the requested `serviceTypeVersion` are eligible to receive
+   the request.
 
 ### Policy Scope & Hierarchy (Execution Order)
 
@@ -91,6 +94,7 @@ The input payload includes:
 - The current patched request payload
   - Assumption - While policies do not have to be specific for Service Types
     they will need to know the expected content
+  - Includes `serviceTypeVersion` from the user request
 - The current constraints
 - User information
   - User ID
@@ -98,6 +102,7 @@ The input payload includes:
 - The service provider (empty at first and populated while evaluating policies)
   - Value
   - Constraints
+  - Registered `serviceTypeVersion` (from Service Registry)
 
 #### Output
 
@@ -186,6 +191,7 @@ sequenceDiagram
     - All user policies must have unique names for their user
 - Policy Matching Criteria. Treated with AND.
   - ServiceType
+  - ServiceTypeVersion
   - Label Selector
 - Policy Type
   - Global, Tenant, User

@@ -61,8 +61,8 @@ operations within DCM core.
 - **Service Registry**:
   - Stores Service Provider's registration information
   - Used for retrieving SP details during instance creation
-  - SP info includes `endpoints`, `metadata`, `status` and `resource
-    capacity`
+  - SP info includes `endpoints`, `metadata`, `status`, `resource capacity`,
+    `serviceType`, and `serviceTypeVersion`
 - **Service Type Instance Records**:
   - Stores created service type instance information
   - Instance data includes `instanceId`, `providerName`, `serviceType`,
@@ -214,7 +214,7 @@ sequenceDiagram
 
     SPRM->>DB: Query SP by providerName
     activate DB
-    DB-->>SPRM: SP details (endpoint, metadata,<br/>status, resources, serviceType)
+    DB-->>SPRM: SP details (endpoint, metadata,<br/>status, resources, serviceType, serviceTypeVersion)
     deactivate DB
 
     alt SP not found
@@ -265,6 +265,7 @@ sequenceDiagram
     - Service Provider endpoint URL
     - SP metadata (region, providerName etc)
     - Current SP status (healthy, degraded, unavailable)
+    - `serviceTypeVersion` for version-based routing validation
   - If SP is not found, returns 404 error to Placement Manager
   - If SP status is degraded or unavailable, returns 503 error to Placement Manager
   - If `serviceType` is not supported, returns 400 Bad Request

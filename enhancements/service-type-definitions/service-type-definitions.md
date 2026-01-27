@@ -96,12 +96,13 @@ All service schemas share common fields defined once in
 
 ## Schema Structure
 
-| Field         | Required | Type                                   | Description                                                        |
-| :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- |
-| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) |
-| schemaVersion | Yes      | string                                 | Schema version (e.g., _v1alpha1_)                                  |
-| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  |
-| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    |
+| Field              | Required | Type                                   | Description                                                        |
+| :----------------- | :------- | :------------------------------------- | :----------------------------------------------------------------- |
+| serviceType        | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) |
+| schemaVersion      | Yes      | string                                 | Schema version (e.g., _v1alpha1_)                                  |
+| serviceTypeVersion | Yes      | number                                 | Numeric version for ordering and routing (e.g., _1.0_, _2.0_)      |
+| metadata           | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  |
+| providerHints      | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    |
 
 ### Metadata Object
 
