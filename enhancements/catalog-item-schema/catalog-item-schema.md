@@ -158,14 +158,11 @@ CatalogItems use two version fields:
 - **`apiVersion`**: Versions the CatalogItem schema itself (e.g., `v1alpha1`).
   Enables evolution of the CatalogItem structure.
 - **`schemaVersion`**: Versions the referenced ServiceType schema (e.g.,
-  `v1alpha1`). Creates a contract for ServiceType payload generation.
+  `1.0`). Creates a contract for ServiceType payload generation.
 
 The `schemaVersion` enables:
 
-- **SP selection**: Version info combined with `serviceTypeVersion` (numeric) is
-  used for placement decisions. The Policy Engine matches the request's
-  `serviceTypeVersion` against registered SPs, routing requests only to SPs that
-  support the requested version.
+- **SP selection**: Policies may use the `serviceTypeVersion` set in the Service Providers alongside the `schemaVersion` to match Service Providers supporting the corresponding version
 - **Schema evolution**: New schema versions can add/modify fields while older
   catalog items continue working
 - **Common naming**: All SPs serving the same `serviceType@schemaVersion` must

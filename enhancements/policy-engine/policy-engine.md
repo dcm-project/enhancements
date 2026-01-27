@@ -69,9 +69,8 @@ Every policy may return one or more of the following outputs
 3. **Field Constraints:** Defining the mutability of fields for _subsequent_
    policies in the chain.
 4. **Service Provider Selection:** Policies may set a value and/or constraints.
-   The Policy Engine filters SPs based on `serviceTypeVersion` matching: only
-   SPs that support the requested `serviceTypeVersion` are eligible to receive
-   the request.
+   Policies may filter SPs based on `serviceTypeVersion` matching: only
+   SPs that support the requested `serviceTypeVersion` are eligible to receive the request.
 
 ### Policy Scope & Hierarchy (Execution Order)
 
