@@ -100,6 +100,7 @@ dcm "github.com/dcm-project/service-provider-api/pkg/registration/client"
 request := &dcm.RegistrationRequest{
     Name: "kubevirt-sp",
     ServiceType: "vm",
+    ServiceTypeVersion: 1.0,
     DisplayName: "Kubevirt Service Provider",
     Endpoint:  fmt.Sprintf("%s/api/v1/vm", apiHost),
     Metadata: dcm.Metadata{
