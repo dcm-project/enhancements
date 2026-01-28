@@ -144,7 +144,7 @@ dcm "github.com/dcm-project/service-provider-api/pkg/registration/client"
 request := &dcm.RegistrationRequest{
     Name: "k8s-container-sp",
     ServiceType: "container",
-    ServiceTypeVersion: 1.0,
+    ServiceTypeVersion: "1.0.0",
     DisplayName: "Kubernetes Container Service Provider",
     Endpoint:  fmt.Sprintf("%s/api/v1alpha1/containers", apiHost),
     Metadata: dcm.Metadata{ # These are the metadata of the Kubernetes cluster on which the provider is running
