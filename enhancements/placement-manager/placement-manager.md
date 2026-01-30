@@ -173,13 +173,13 @@ Example of payload for incoming VM catalog instance request
 }
 ```
 
-Response payload: Return 202 Accepted if successful.
+Response payload: Returns 201 Created if successful.
 ```json
 {
-  "CatalogItemInstance": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-  "name": "fedora-vm",
+  "CatalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
+  "resource_name": "fedora-vm",
   "providerName": "kubevirt-sp",
-  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
 }
 ```
 **Note**: This is **only** an example of the payload.
