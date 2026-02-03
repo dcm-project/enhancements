@@ -99,12 +99,12 @@ for complete schema definition.
 
 #### CatalogItem components
 
-| Field         | Required | Type   | Description                                                                                           |
-| :------------ | :------- | :----- | :---------------------------------------------------------------------------------------------------- |
-| apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                   |
-| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                            |
+| Field                    | Required | Type   | Description                                                                                                      |
+| :----------------------- | :------- | :----- | :--------------------------------------------------------------------------------------------------------------- |
+| apiVersion               | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                              |
+| serviceType              | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                                       |
 | serviceTypeSchemaVersion | Yes      | string | Version of the serviceType definition schema (e.g., _v1alpha1_). Used by DCM to generate the ServiceType payload |
-| fields        | Yes      | array  | List of field configurations (see below)                                                              |
+| fields                   | Yes      | array  | List of field configurations (see below)                                                                         |
 
 Each field in the _fields_ array has:
 
@@ -157,16 +157,18 @@ CatalogItems use two version fields:
 
 - **`apiVersion`**: Versions the CatalogItem schema itself (e.g., `v1alpha1`).
   Enables evolution of the CatalogItem structure.
-- **`serviceTypeSchemaVersion`**: Versions the referenced ServiceType schema (e.g.,
-  `v1alpha1`). Creates a contract for ServiceType payload generation.
+- **`serviceTypeSchemaVersion`**: Versions the referenced ServiceType schema
+  (e.g., `v1alpha1`). Creates a contract for ServiceType payload generation.
 
 The `serviceTypeSchemaVersion` enables:
 
-- **SP selection**: Policies may use the `serviceTypeVersion` set in the Service Providers alongside the `serviceTypeSchemaVersion` to match Service Providers supporting the corresponding version
+- **SP selection**: Policies may use the `serviceTypeVersions` advertised by
+  Service Providers alongside the `serviceTypeSchemaVersion` to match Service
+  Providers supporting the corresponding version
 - **Schema evolution**: New schema versions can add/modify fields while older
   catalog items continue working
-- **Common naming**: All SPs serving the same `serviceType@serviceTypeSchemaVersion` must
-  understand the same field names
+- **Common naming**: All SPs serving the same
+  `serviceType@serviceTypeSchemaVersion` must understand the same field names
 
 ## Design Details
 

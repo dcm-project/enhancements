@@ -69,8 +69,9 @@ Every policy may return one or more of the following outputs
 3. **Field Constraints:** Defining the mutability of fields for _subsequent_
    policies in the chain.
 4. **Service Provider Selection:** Policies may set a value and/or constraints.
-   Policies may filter SPs based on `serviceTypeVersion` matching: only
-   SPs that support the requested `serviceTypeVersion` are eligible to receive the request.
+   Policies may filter SPs based on `serviceTypeVersion` matching: only SPs
+   whose `serviceTypeVersions` array includes the requested version are eligible
+   to receive the request.
 
 ### Policy Scope & Hierarchy (Execution Order)
 
@@ -101,7 +102,7 @@ The input payload includes:
 - The service provider (empty at first and populated while evaluating policies)
   - Value
   - Constraints
-  - Registered `serviceTypeVersion` (from Service Registry)
+  - Registered `serviceTypeVersions` (from Service Registry)
 
 #### Output
 
