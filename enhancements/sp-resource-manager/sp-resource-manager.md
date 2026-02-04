@@ -65,8 +65,7 @@ operations within DCM core.
     capacity`
 - **Service Type Instance Records**:
   - Stores created service type instance information
-  - Instance data includes `instanceId`, `providerName`, `serviceType`,
-    `status`.
+  - Instance data includes `instanceId`, `providerName`, `status`.
   - Maintains record of all created instances within DCM core
 
 ### API Endpoints
@@ -106,17 +105,12 @@ requestBody:
         type: object
         required:
           - providerName
-          - serviceType
           - spec
         properties:
           providerName:
             type: string
             description: The unique identifier of the target Service Provider
             example: "kubevirt-sp"
-          serviceType:
-            type: string
-            description: Type of service to create
-            example: "vm"
           spec:
             type: object
             description: |
@@ -129,7 +123,6 @@ Example of payload for incoming VM request
 ```json
 {
   "providerName": "kubevirt-sp",
-  "serviceType": "vm",
   "spec": {
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
@@ -148,21 +141,18 @@ Example of Response Payload
 ```json
 [
   {
-    "serviceType": "container",
     "name": "nginx-container",
     "providerName": "container-sp",
     "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
     "status": "PROVISIONING"
   },
   {
-    "serviceType": "database",
     "name": "postgres-001",
     "providerName": "postgres-sp",
     "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d",
     "status": "FAILED"
   },
   {
-    "serviceType": "vm",
     "name": "ubuntu-vm",
     "providerName": "kubevirt-sp",
     "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
@@ -177,7 +167,6 @@ Get a service type instance based on id.
 Example of Response Payload
 ```json
 {
-  "serviceType": "vm",
   "name": "ubuntu-vm",
   "providerName": "kubevirt-sp",
   "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
@@ -208,19 +197,12 @@ sequenceDiagram
     participant DB as Database
     participant SP as Service Provider
 
-    PS->>SPRM: POST /api/v1/service-type-instances<br/>{providerName, serviceType, spec}
+    PS->>SPRM: POST /api/v1/service-type-instances<br/>{providerName, spec}
     activate SPRM
 
 
-    SPRM->>DB: Query SP by providerName
-    activate DB
-    DB-->>SPRM: SP details (endpoint, metadata,<br/>status, resources, serviceType)
-    deactivate DB
-
     alt SP not found
         SPRM-->>PS: 404 Not Found
-    else Service type not supported
-        SPRM-->>PS: 400 Bad Request
     else SP Health Check fails
         SPRM-->>PS: 503 Service Unavailable       
 
@@ -233,7 +215,7 @@ sequenceDiagram
             SPRM-->>PS: Return SP error<br/>(SP creation failed)
         else SP creation succeeds
             SP-->>SPRM: Success response<br/>{instanceId, status, metadata}
-            SPRM->>DB: Create instance record<br/>{instanceId, providerName, serviceType, metadata}
+            SPRM->>DB: Create instance record<br/>{instanceId, providerName, metadata}
             activate DB
             
             alt DB record creation fails
@@ -258,7 +240,6 @@ sequenceDiagram
     - `providerName`: The unique identifier of the target Service Provider
     - `spec`: The detailed spec following any of service type 
        schema (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
-    - `serviceType`: The type of service instance requested
 - **Service Provider Lookup**
   - Queries the Service Registry database using the `providerName`
   - Retrieves:
@@ -267,7 +248,6 @@ sequenceDiagram
     - Current SP status (healthy, degraded, unavailable)
   - If SP is not found, returns 404 error to Placement Manager
   - If SP status is degraded or unavailable, returns 503 error to Placement Manager
-  - If `serviceType` is not supported, returns 400 Bad Request
 - **Service Provider Invocation**
   - Calls the Service Provider's API endpoint:
     `POST {SP_endpoint}/api/v1/services`
@@ -292,6 +272,6 @@ sequenceDiagram
 
 - **404 Not Found**: Service Provider with the given `providerName` is not
   registered
-- **400 Bad Request**: Invalid request schema or unsupported service type
+- **400 Bad Request**: Invalid request schema
 - **503 Service Unavailable**: Service Provider is not healthy
 - **500 Internal Server Error**: Unexpected error in SP Resource Manager
