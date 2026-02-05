@@ -37,7 +37,7 @@ Catalog Items wrap service specifications with validation rules and defaults,
 enabling administrators to create curated offerings. The design is both
 provider-agnostic and service type-agnostic — Catalog Items work with any
 service type defined in
-[Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/37ce03b1fec251aafd346edf9de8f6ebc7e2e5a1/enhancements/sp-registration-flow/sp-registration-flow.md)
+[Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md)
 
 ### Goals
 
@@ -53,7 +53,7 @@ service type defined in
 ### Non-Goals
 
 - Defining the service schemas themselves (see
-  [ADR - ServiceType](?tab=t.egv2hwot8psy) )
+  [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md) )
 
 ## Proposal
 
