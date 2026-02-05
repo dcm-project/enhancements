@@ -81,6 +81,8 @@ without breaking compatibility.
   directly with the compute specification. Future iterations may decouple these
   services, but the current principle is monolithic definition for simplified
   deployment.
+- Multiple service type schema versions. Initial release supports only the
+  current schema version; service type versioning deferred to future phases.
 
 ## Proposal
 
@@ -99,7 +101,6 @@ All service schemas share common fields defined once in
 | Field         | Required | Type                                   | Description                                                        |
 | :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- |
 | serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) |
-| schemaVersion | Yes      | string                                 | Schema version (e.g., _v1alpha1_)                                  |
 | metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  |
 | providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    |
 
@@ -181,7 +182,7 @@ native resource format" }
 For easier review, the schema is accessible here
 [vmspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/vmspec.yaml).  
 Plus
-common fields: _serviceType, schemaVersion, metadata, providerHints_
+common fields: _serviceType, metadata, providerHints_
 
 | Field   | Required | Type                          | Description                    |
 | :------ | :------- | :---------------------------- | :----------------------------- |
@@ -239,7 +240,7 @@ The following sections detail the Container schema architecture.
 For easier review, the schema is accessible here
 [containerspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/containerspec.yaml).  
 Plus
-common fields: _serviceType, schemaVersion, metadata, providerHints_
+common fields: _serviceType, metadata, providerHints_
 
 | Field     | Required | Type                                     | Description                   |
 | :-------- | :------- | :--------------------------------------- | :---------------------------- |
@@ -311,7 +312,7 @@ The following sections detail the Database schema architecture.
 For easier review, the schema is accessible here
 [databasespec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/databasespec.yaml).  
 Plus
-common fields: _serviceType, schemaVersion, metadata, providerHints_
+common fields: _serviceType, metadata, providerHints_
 
 | Field     | Required | Type                                    | Description                                                   |
 | :-------- | :------- | :-------------------------------------- | :------------------------------------------------------------ |
@@ -337,7 +338,7 @@ GKE, AKS, etc.
 For easier review, the schema is available here:
 [clusterspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/clusterspec.yaml).  
 Plus
-common fields: _serviceType, schemaVersion, metadata, providerHints_
+common fields: _serviceType, metadata, providerHints_
 
 | Field   | Required | Type                           | Description                               |
 | :------ | :------- | :----------------------------- | :---------------------------------------- |
@@ -369,14 +370,11 @@ common fields: _serviceType, schemaVersion, metadata, providerHints_
 | memory  | Yes      | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
 | storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
 
-### Upgrade / Downgrade Strategy
+### Schema Compatibility
 
-Schemas evolve over time as requirements change. Each catalog item carries a
-_schemaVersion_ field that tells providers which translation logic to use. This
-allows us to introduce new schema versions while maintaining backward
-compatibility (this means that older catalog items continue working with their
-original schema, newer items use enhanced versions). During transitions,
-providers support multiple versions simultaneously.
+DCM supports only the current API version for each service type. Service
+Providers must implement the latest schema definitions. Support for multiple
+service type versions is planned for future releases.
 
 ## Implementation History
 

@@ -76,7 +76,6 @@ metadata:
   name: production-postgres
 spec:
   serviceType: database
-  schemaVersion: v1alpha1
   fields:
     - path: "engine"
       default: "postgresql"
@@ -99,12 +98,11 @@ for complete schema definition.
 
 #### CatalogItem components
 
-| Field         | Required | Type   | Description                                                                                           |
-| :------------ | :------- | :----- | :---------------------------------------------------------------------------------------------------- |
-| apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                   |
-| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                            |
-| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by DCM to generate the ServiceType payload |
-| fields        | Yes      | array  | List of field configurations (see below)                                                              |
+| Field       | Required | Type   | Description                                                                         |
+| :---------- | :------- | :----- | :---------------------------------------------------------------------------------- |
+| apiVersion  | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution |
+| serviceType | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                          |
+| fields      | Yes      | array  | List of field configurations (see below)                                            |
 
 Each field in the _fields_ array has:
 
@@ -129,7 +127,6 @@ metadata:
   displayName: "Development VM"
 spec:
   serviceType: vm
-  schemaVersion: v1alpha1
   fields:
     - path: "vcpu.count"
       displayName: "CPU Count"
@@ -153,21 +150,8 @@ instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
 
 #### Versioning
 
-CatalogItems use two version fields:
-
-- **`apiVersion`**: Versions the CatalogItem schema itself (e.g., `v1alpha1`).
-  Enables evolution of the CatalogItem structure.
-- **`schemaVersion`**: Versions the referenced ServiceType schema (e.g.,
-  `v1alpha1`). Creates a contract for ServiceType payload generation.
-
-The `schemaVersion` enables:
-
-- **SP selection**: Version info can be used for placement decisions (e.g.,
-  excluding SPs that don't support a given schema version)
-- **Schema evolution**: New schema versions can add/modify fields while older
-  catalog items continue working
-- **Common naming**: All SPs serving the same `serviceType@schemaVersion` must
-  understand the same field names
+The **`apiVersion`** field versions the CatalogItem schema itself (e.g.,
+`v1alpha1`), enabling evolution of the CatalogItem structure.
 
 ## Design Details
 
