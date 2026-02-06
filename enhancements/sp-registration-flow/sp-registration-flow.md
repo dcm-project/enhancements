@@ -143,9 +143,8 @@ flowchart BT
   3. Endpoint URL (e.g.,
      [https://provider-1.local/api](https://provider-1.local/api))
   4. Service type this provider can fulfill (e.g., _"vm"_, _"container"_)
-  5. Schema version of the service type (e.g., _"v1alpha1"_)
-  6. Metadata (optional: zone, region, resource constraints)
-  7. Operations supported for this service type (optional, e.g., _"create"_,
+  5. Metadata (optional: zone, region, resource constraints)
+  6. Operations supported for this service type (optional, e.g., _"create"_,
      _"delete"_)
 - The Registration Handler processes and validates the metadata
 - The Registration Handler internally updates the Service Registry with:
@@ -221,7 +220,6 @@ existing SP entry rather than creating a duplicate.
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
-  "schemaVersion": "v1alpha1",
   "metadata": {
     "region": "us-east-1",
     "status": "healthy",
@@ -239,10 +237,9 @@ Response:
   "id": "uuid-1234",
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
-  "endpoint": "https://sp1.example.com/api/v1/vm",
-  "serviceType": "vm",
-  "schemaVersion": "v1alpha1",
-  "status": "registered",
+    "endpoint": "https://sp1.example.com/api/v1/vm",
+    "serviceType": "vm",
+    "status": "registered",
   "metadata": { ... }
 }
 ```
@@ -257,17 +254,15 @@ Response:
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
-  "schemaVersion": "v1alpha1",
   "metadata": { ... }
 }
 
 Response:
 {
   "id": "auto-generated-uuid",
-  "name": "kubevirt-123",
-  ...
-  "schemaVersion": "v1alpha1",
-  "status": "registered"
+    "name": "kubevirt-123",
+    ...
+    "status": "registered"
 }
 ```
 
@@ -281,7 +276,6 @@ Response:
   "name": "kubevirt-123",
   "displayName": "KubeVirt Service Provider",
   "serviceType": "vm",
-  "schemaVersion": "v1alpha1",
   "metadata": {
     "region": "us-east-1",
     "zone": "datacenter-b"
@@ -290,11 +284,10 @@ Response:
 
 Response:
 {
-  "id": "uuid-1234",
-  "name": "kubevirt-123",
-  "schemaVersion": "v1alpha1",
-  ...
-  "status": "updated"
+    "id": "uuid-1234",
+    "name": "kubevirt-123",
+    ...
+    "status": "updated"
 }
 ```
 
