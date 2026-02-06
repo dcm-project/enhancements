@@ -163,7 +163,6 @@ Example payload
   "access":
     { "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..." },
   "metadata": { "name": "fedora-vm" },
-  "schemaVersion": "v1alpha1",
   "serviceType": "vm"
 }
 ```

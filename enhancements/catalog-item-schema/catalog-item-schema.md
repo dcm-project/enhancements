@@ -37,7 +37,7 @@ Catalog Items wrap service specifications with validation rules and defaults,
 enabling administrators to create curated offerings. The design is both
 provider-agnostic and service type-agnostic — Catalog Items work with any
 service type defined in
-[Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/37ce03b1fec251aafd346edf9de8f6ebc7e2e5a1/enhancements/sp-registration-flow/sp-registration-flow.md)
+[Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md)
 
 ### Goals
 
@@ -53,7 +53,7 @@ service type defined in
 ### Non-Goals
 
 - Defining the service schemas themselves (see
-  [ADR - ServiceType](?tab=t.egv2hwot8psy) )
+  [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md) )
 
 ## Proposal
 
@@ -76,7 +76,6 @@ metadata:
   name: production-postgres
 spec:
   serviceType: database
-  schemaVersion: v1alpha1
   fields:
     - path: "engine"
       default: "postgresql"
@@ -99,12 +98,11 @@ for complete schema definition.
 
 #### CatalogItem components
 
-| Field         | Required | Type   | Description                                                                                           |
-| :------------ | :------- | :----- | :---------------------------------------------------------------------------------------------------- |
-| apiVersion    | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution                   |
-| serviceType   | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                                            |
-| schemaVersion | Yes      | string | Version of the serviceType schema (e.g., _v1alpha1_). Used by DCM to generate the ServiceType payload |
-| fields        | Yes      | array  | List of field configurations (see below)                                                              |
+| Field       | Required | Type   | Description                                                                         |
+| :---------- | :------- | :----- | :---------------------------------------------------------------------------------- |
+| apiVersion  | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_). Enables CatalogItem schema evolution |
+| serviceType | Yes      | string | Type of service (e.g., _vm, container, database, cluster_)                          |
+| fields      | Yes      | array  | List of field configurations (see below)                                            |
 
 Each field in the _fields_ array has:
 
@@ -129,7 +127,6 @@ metadata:
   displayName: "Development VM"
 spec:
   serviceType: vm
-  schemaVersion: v1alpha1
   fields:
     - path: "vcpu.count"
       displayName: "CPU Count"
@@ -153,21 +150,8 @@ instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
 
 #### Versioning
 
-CatalogItems use two version fields:
-
-- **`apiVersion`**: Versions the CatalogItem schema itself (e.g., `v1alpha1`).
-  Enables evolution of the CatalogItem structure.
-- **`schemaVersion`**: Versions the referenced ServiceType schema (e.g.,
-  `v1alpha1`). Creates a contract for ServiceType payload generation.
-
-The `schemaVersion` enables:
-
-- **SP selection**: Version info can be used for placement decisions (e.g.,
-  excluding SPs that don't support a given schema version)
-- **Schema evolution**: New schema versions can add/modify fields while older
-  catalog items continue working
-- **Common naming**: All SPs serving the same `serviceType@schemaVersion` must
-  understand the same field names
+The **`apiVersion`** field versions the CatalogItem schema itself (e.g.,
+`v1alpha1`), enabling evolution of the CatalogItem structure.
 
 ## Design Details
 
