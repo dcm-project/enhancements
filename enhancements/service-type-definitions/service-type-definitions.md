@@ -190,7 +190,7 @@ common fields: _serviceType, metadata, providerHints_
 | memory  | Yes      | [Memory](#vm-memory-object)   | Memory configuration           |
 | storage | Yes      | [Storage](#vm-storage-object) | Storage configuration          |
 | guestOS | Yes      | [GuestOS](#vm-guestos-object) | Operating system specification |
-| access  | Yes      | [Access](#vm-access-object)   | VM access configuration        |
+| access  | No       | [Access](#vm-access-object)   | VM access configuration        |
 
 #### VM vcpu Object
 
