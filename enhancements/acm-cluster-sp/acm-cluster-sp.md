@@ -176,7 +176,7 @@ seconds. See documentation for
   `dcm.providers.{providerName}.cluster.instances.{instanceId}.status`
 - See documentation for
   [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
-- Use `SharedIndexInformer` to watch `ClusterDeployment` and `HostedCluster`
+- Use `SharedIndexInformer` to watch `HostedCluster`
   resources.
 
 ### SP Configuration
