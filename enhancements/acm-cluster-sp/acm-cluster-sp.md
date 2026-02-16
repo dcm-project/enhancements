@@ -176,8 +176,7 @@ seconds. See documentation for
   `dcm.providers.{providerName}.cluster.instances.{instanceId}.status`
 - See documentation for
   [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
-- Use `SharedIndexInformer` to watch `HostedCluster`
-  resources.
+- Use `SharedIndexInformer` to watch `HostedCluster` resources.
 
 ### SP Configuration
 
@@ -412,7 +411,6 @@ translates these abstract specifications to platform-specific instance types.
       "baseDomain": "example.com"
     }
   },
-  "schemaVersion": "v1alpha1",
   "serviceType": "cluster"
 }
 ```
@@ -450,7 +448,6 @@ translates these abstract specifications to platform-specific instance types.
       }
     }
   },
-  "schemaVersion": "v1alpha1",
   "serviceType": "cluster"
 }
 ```
