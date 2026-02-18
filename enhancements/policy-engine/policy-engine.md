@@ -273,7 +273,7 @@ sequenceDiagram
 
 #### Pseudo API
 
-##### POST /api/v1/engine/evaluate
+##### POST /api/v1alpha1/policies:evaluateRequest
 
 ###### Payload
 
