@@ -88,29 +88,32 @@ higher priority._
 
 The input payload includes:
 
-- The current patched request payload
+- `spec` - The current patched request payload
   - Assumption - While policies do not have to be specific for Service Types
     they will need to know the expected content
-- The current constraints
-- User information
-  - User ID
-  - Tenant ID
-- The service provider (empty at first and populated while evaluating policies)
-  - Value
-  - Constraints
+- `constraints` - The current constraints context (accumulated from prior
+  policies)
+- `provider` - The currently selected service provider (empty string initially,
+  populated as policies are evaluated)
+- `service_provider_constraints` - The current service provider constraints
+  (accumulated from prior policies)
 
 #### Output
 
 Following the policy responsibilities, the output should be comprised of the
 following elements
 
-- **Reject** - since requests are approved by default, policies may reject them.
-- **Service Provider** -
-  - Value - the name of the service provider chosen to fulfill the request
-  - Constraints - list of allowed SPs, can take a form of Allowlist of Regex
-- **Patch** - a dictionary of the corresponding service type for setting values.
-  Each internal key is optional
-- **Constraints** - follows
+- **rejected** (bool) - since requests are approved by default, policies may
+  reject them.
+- **rejection_reason** (string, optional) - reason for rejection
+- **selected_provider** (string, optional) - the name of the service provider
+  chosen to fulfill the request
+- **service_provider_constraints** (object, optional) -
+  - `allow_list` - list of allowed service provider names
+  - `patterns` - list of regex patterns for matching allowed providers
+- **patch** (map, optional) - a dictionary of the corresponding service type for
+  setting values. Each internal key is optional
+- **constraints** (map, optional) - follows
   [JSON Schema (draft 2020-12)](https://json-schema.org/draft/2020-12/json-schema-validation).
 
   This standard supports:
@@ -279,9 +282,8 @@ sequenceDiagram
 
 ###### Payload
 
-- Request Payload
-- User ID
-- Tenant ID
+- Service Instance
+  - spec - the service specification (flexible schema)
 
 ###### Execution Logic & Flow
 
@@ -302,13 +304,12 @@ evaluation; it calls pre-loaded modules in OPA.
   - Call `OPA`:
     - Invoke /v1/data/<P.PackageName>/main
     - Pass
-      - `CurrentRequestPayload`
-      - `ConstraintContext`
-      - `UserID`
-      - `TenantID`
-      - `ServiceProvider`
+      - `spec` - the current patched request payload
+      - `provider` - the currently selected service provider
+      - `constraints` - the accumulated constraint context (if any)
+      - `service_provider_constraints` - the accumulated SP constraints (if any)
   - Check `Reject`
-    - If `Reject` is `true`, ABORT IMMEDIATELY (Fail Fast). Return 403.
+    - If `Reject` is `true`, ABORT IMMEDIATELY (Fail Fast). Return 406.
   - Validate `Constraints`:
     - A lower-level policy cannot "unlock" a field locked by a higher-level
       policy.
@@ -322,11 +323,14 @@ evaluation; it calls pre-loaded modules in OPA.
   - Apply `Patch`
     - Update service_payload with valid patches.
   - Validate `ServiceProvider`
-    - If Policy P returned a `ServiceProvider` and `ServiceProviderConstraints`
-      exists, validate it.
+    - If Policy P returned a `selected_provider` and
+      `service_provider_constraints` exist, validate the selected provider
+      against the constraints.
 
-- Finalize: Return the final `CurrentRequestPayload` and `ServiceProvider` to
+- Finalize: Return the final payload, selected provider, and status to
   Placement Manager.
+  - Status is `APPROVED` if the payload was not modified, `MODIFIED` if any
+    patches were applied.
 
 ###### _Constraint Validation Example_
 
