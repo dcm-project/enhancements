@@ -91,7 +91,8 @@ graph TB
     SP1 -->|status events| MSG
     SP2 -->|status events| MSG
     SP3 -->|status events| MSG
-    MSG -->|status updates| PM
+    MSG -->|status updates| SPRM
+    SPRM -->|status updates| CM
 ```
 
 ---
