@@ -64,6 +64,7 @@ The DCM system is composed of the following core components:
 ```mermaid
 graph TB
     User([User])
+    Admin[Admin]
     CM[Catalog Manager]
     CDB[(Catalog DB)]
     PM[Placement Manager]
@@ -78,6 +79,8 @@ graph TB
     SP3[ACM Cluster SP]
 
     User --> CM
+    Admin --> CM
+    Admin --> POL
     CM --> CDB
     CM --> PM
     PM --> POL
