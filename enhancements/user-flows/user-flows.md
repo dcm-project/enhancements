@@ -380,7 +380,7 @@ spec:
 
 ### 4.2 CatalogItem to ServiceType Translation
 
-When a user requests a service from a CatalogItem, the system merges user input with CatalogItem defaults and validates against the field schemas, producing a ServiceType payload.
+When a user orders an item from a CatalogItem, the system merges user input with CatalogItem defaults and validates against the field schemas, producing a ServiceType payload.
 
 ```mermaid
 sequenceDiagram
