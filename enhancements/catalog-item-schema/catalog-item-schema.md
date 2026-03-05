@@ -113,6 +113,41 @@ Each field in the _fields_ array has:
 | editable         | No       | boolean | false   | Whether users can modify this field                            |
 | default          | No       | any     | -       | Default value for this field                                   |
 | validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)                   |
+| dependsOn        | No       | object  | -       | Conditional options derived from another field (single option when read-only) |
+
+The `dependsOn` object specifies conditional options for this field based on another
+field's value. It has:
+
+| Field         | Required | Type   | Description                                                              |
+| :------------ | :------- | :----- | :------------------------------------------------------------------------ |
+| path          | Yes      | string | JSON path of the field this one depends on (e.g., `region`)               |
+| allowedValues | Yes      | object | If the field at path equals key K, this field's options are the array at |
+|               |          |        | `allowedValues[K]`.                                                      |
+
+When `dependsOn` is set, the field's options are derived from the field at path.
+Each `allowedValues` entry is the list of options for that key (one or more).
+If the field at path has a value with no corresponding key in `allowedValues`,
+there are no value restrictions for this field. UIs use this to show the right
+options; the chosen or derived values are sent when ordering the catalog item.
+
+Object keys are always strings. When the field at path is a boolean or number,
+use the JSON string representation as the key.
+
+For example, to model `backup.retention_days` (retention in days) depending on
+`backup.enabled`:
+
+```yaml
+- path: backup.retention_days
+  displayName: Retention (days)
+  editable: true
+  dependsOn:
+    path: backup.enabled
+    allowedValues:
+      "true": ["7", "30", "90"]
+      "false": ["0"]
+```
+
+When backup is disabled, retention is 0; when enabled, the user selects 7, 30, or 90 days.
 
 Fields not listed are neither editable nor have default values. The catalog item
 owner must ensure all mandatory fields are listed.
