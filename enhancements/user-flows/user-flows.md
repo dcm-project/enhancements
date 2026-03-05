@@ -259,6 +259,8 @@ ServiceTypes define provider-agnostic schemas for infrastructure resources. They
 
 ServiceTypes are defined as JSON Schemas that describe the shape of a service request. All ServiceTypes share a common structure with `serviceType`, `metadata`, and optional `providerHints`.
 
+In V1, dynamic registration of `ServiceType` is not supported
+
 ```mermaid
 graph LR
     subgraph CommonFields[Common Fields]
