@@ -255,7 +255,7 @@ request := &dcm.RegistrationRequest{
       Capabilities: dcm.ProviderCapabilities{
           SupportedPlatforms:         []string{"kubevirt", "baremetal"},
           SupportedProvisioningTypes: []string{"hypershift"},
-          SupportedVersions:          []string{"4.16", "4.17", "4.18"},
+          KubernetesSupportedVersions: []string{"1.29", "1.30", "1.31"},
       },
     },
     Operations: []string{"CREATE", "DELETE", "READ"},
@@ -272,7 +272,7 @@ provisioning types, and Kubernetes versions before making requests.
 | -------------------------- | -------- | ----------------------------------------------------- |
 | supportedPlatforms         | []string | Platforms this SP can provision (kubevirt, baremetal) |
 | supportedProvisioningTypes | []string | Provisioning methods available (hypershift for v1)    |
-| supportedVersions          | []string | OpenShift versions available via ClusterImageSets     |
+| kubernetesSupportedVersions | []string | Kubernetes versions supported by this SP              |
 
 The SP populates these values based on:
 
@@ -280,8 +280,12 @@ The SP populates these values based on:
   the ACM hub cluster (KubeVirt infrastructure and/or Agent/InfraEnv resources).
 - **supportedProvisioningTypes**: For v1, this is always `["hypershift"]` as
   Hive-based provisioning is not supported in this version.
-- **supportedVersions**: Available `ClusterImageSet` resources on the ACM hub
-  cluster. The SP queries these at startup and may refresh periodically.
+- **kubernetesSupportedVersions**: Kubernetes versions that this SP supports.
+  A Cluster SP must advertise the Kubernetes versions it supports, not the
+  platform-specific versions (e.g., OpenShift versions). The SP maintains an
+  internal compatibility matrix to translate between Kubernetes versions and
+  platform-specific versions. The implementation of this matrix (static
+  configuration, dynamic discovery, or hybrid) is left to the SP.
 
 If a user requests an unsupported platform or provisioning type, the SP returns
 `422 Unprocessable Entity`.
@@ -363,19 +367,22 @@ Users specify the provisioning method and platform configuration using
 
 **Version Field Handling:**
 
-The `version` field in the request specifies the desired Kubernetes/OpenShift
-version. The following rules apply:
+The `version` field in the request specifies the desired Kubernetes version.
+The following rules apply:
 
 - **Format**: Accepts either minor version (`1.29`) or full semantic version
   (`1.29.4`). If only minor version is specified, the SP selects the latest
-  available patch version from the ACM hub's `ClusterImageSet` resources.
-- **Validation**: The SP validates that the requested version exists as a
-  `ClusterImageSet` on the ACM hub cluster. If not available, returns
+  available patch version.
+- **Translation**: The SP translates the requested Kubernetes version to the
+  corresponding platform-specific version (e.g., OpenShift `ClusterImageSet`)
+  using its internal compatibility matrix.
+- **Validation**: The SP validates that the requested Kubernetes version can be
+  mapped to a platform-specific version. If no mapping exists, returns
   `422 Unprocessable Entity` with a message indicating the version is not
   supported.
-- **Discovery**: Available versions are advertised in the SP's registration
-  metadata (`Capabilities.SupportedVersions`). Users can query the DCM registry
-  to discover supported versions before making requests.
+- **Discovery**: Supported Kubernetes versions are advertised in the SP's
+  registration metadata (`Capabilities.KubernetesSupportedVersions`). Users can
+  query the DCM registry to discover supported versions before making requests.
 
 **Node Specification to Instance Type Mapping:**
 
@@ -712,13 +719,18 @@ event.SetData(cloudevents.ApplicationJSON, ClusterStatus{
 
 The following table maps HyperShift `HostedCluster` conditions to DCM statuses:
 
-| DCM Status   | HostedCluster Condition           | Description                         |
-| ------------ | --------------------------------- | ----------------------------------- |
-| PENDING      | Progressing=Unknown               | Cluster creation initiated          |
-| PROVISIONING | Progressing=True, Available=False | Control plane being provisioned     |
-| READY        | Available=True, Progressing=False | Cluster is fully operational        |
-| FAILED       | Degraded=True                     | Cluster is in degraded/failed state |
-| DELETED      | N/A                               | HostedCluster not found             |
+| DCM Status   | HostedCluster Condition           | Description                                    |
+| ------------ | --------------------------------- | ---------------------------------------------- |
+| FAILED       | Degraded=True                     | Cluster is in degraded/failed state            |
+| READY        | Available=True, Progressing=False | Cluster is fully operational                   |
+| PROVISIONING | Progressing=True, Available=False | Control plane being provisioned                |
+| UNAVAILABLE  | Available=False, Progressing=False | Cluster is not available and not progressing   |
+| PENDING      | Progressing=Unknown               | Cluster creation initiated                     |
+| DELETED      | N/A                               | HostedCluster not found                        |
+
+> **Note**: Statuses are evaluated in precedence order (top to bottom). For
+> example, if `Degraded=True`, the status is FAILED regardless of other
+> conditions.
 
 See
 [Hypershift HostedCluster API](https://github.com/openshift/hypershift/blob/main/api/hypershift/v1beta1/hostedcluster_types.go)
@@ -730,7 +742,8 @@ When the informer receives an event for a `HostedCluster` resource, the ACM
 Cluster SP applies the status mapping and publishes updates:
 
 1. Extract `HostedCluster` status conditions.
-2. Map conditions to DCM status using the table above.
+2. Evaluate conditions in precedence order (FAILED > READY > PROVISIONING >
+   UNAVAILABLE > PENDING > DELETED) and map to the first matching DCM status.
 3. Publish status update to DCM via CloudEvents.
 
 ## Alternatives
