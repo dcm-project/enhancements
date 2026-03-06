@@ -450,19 +450,18 @@ sequenceDiagram
 
 DCM polls each registered Service Provider's `/health` endpoint at a configurable interval (default: every 10 seconds). Health status determines whether a provider can receive new requests.
 
+#### Health State Diagram
 ```mermaid
 stateDiagram-v2
-    [*] --> Ready: Registration successful
+    [*] --> Ready: Registered
 
-    Ready --> Ready: Health check OK (HTTP 200)
-    Ready --> FailureCount: Health check failed
-    FailureCount --> Ready: Health check OK (reset counter)
-    FailureCount --> FailureCount: Failure count below threshold
-    FailureCount --> NotReady: Failure count at or above threshold (default 3)
-    NotReady --> Ready: Health check OK (single success)
-    NotReady --> NotReady: Health check failed
+    Ready --> FailureCount: Failed
+    FailureCount --> Ready: OK (reset)
+    FailureCount --> NotReady: Threshold reached
+    NotReady --> Ready: OK (recover)
 ```
 
+#### Health Check Sequence Diagram
 ```mermaid
 sequenceDiagram
     participant DCM as DCM Health Checker
