@@ -120,14 +120,15 @@ sequenceDiagram
 
 ### 2. Message system Subject Hierarchy
 
-Providers must publish events with type formatted as follow to allow for
-granular subscriptions:
+Providers must publish messages to a subject based on the service type:
 
-`dcm.providers.{providerName}.{serviceType}.instances.{instanceId}.status`
+`dcm.{serviceType}`
 
-- `providerName`: Unique name of the Service Provider.
-- `serviceType`: Unique name of the Service Type.
-- `instanceId`: Unique UUID of the service.
+- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`).
+
+The service type determines the message schema and is the only routing-relevant
+token. All other context — provider identity, instance identifier, timestamps —
+is carried in the CloudEvent envelope attributes (see section 3).
 
 ### 3. CloudEvents Format
 
@@ -143,6 +144,7 @@ type VmStatus struct {
 
 ```golang
 type ContainerStatus struct {
+  Id string  `json:"id"`
   Status string `json:"status"`
   Message string `json:"message"`
 }
@@ -154,15 +156,17 @@ type ContainerStatus struct {
 cloudevents "github.com/cloudevents/sdk-go/v2"
 
 type VmStatus struct {
+  Id string  `json:"id"`
   Status string `json:"status"`
   Message string `json:"message"`
 }
 
 event := cloudevents.NewEvent()
 event.SetID("event-123-456")
-event.SetSource("{providerName}-{environmentName}")
-event.SetType("dcm.providers.{providerName}.{serviceType}.instances.{instanceId}.status")
-event.SetData(cloudevents.ApplicationJSON, VmStatus{Status: "Running", Message: "VM is running."})
+event.SetSource("dcm/providers/{providerName}")
+event.SetType("dcm.status.vm")
+event.SetSubject("dcm.{serviceType}")
+event.SetData(cloudevents.ApplicationJSON, VmStatus{Id, "123-123", Status: "Running", Message: "VM is running."})
 ```
 
 ### 4. Status mapping
