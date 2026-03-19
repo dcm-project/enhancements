@@ -98,11 +98,17 @@ All service schemas share common fields defined once in
 
 ## Schema Structure
 
-| Field         | Required | Type                                   | Description                                                        |
-| :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- |
-| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) |
-| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  |
-| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    |
+| Field         | Required | Type                                        | Description                                                                          | ReadOnly |
+|:--------------|:---------|:--------------------------------------------|:-------------------------------------------------------------------------------------|:---------|
+| serviceType   | Yes      | string                                      | Service type identifier (_vm_, _container_, _database_, _cluster_)                   | No       |
+| metadata      | Yes      | [Metadata](#metadata-object)                | Service identification and labels                                                    | No       |
+| providerHints | No       | [ProviderHints](#providerhints-object)      | Platform-specific configuration                                                      | No       |
+| id            | No       | string                                      | Unique identifier for the resource                                                   | Yes      |
+| status        | No       | string                                      | Current state of the resource                                                        | Yes      |
+| path          | No       | string                                      | Resource path or location                                                            | Yes      |
+| statusMessage | No       | string                                      | Message providing details about the current status                                   | Yes      |
+| createTime    | No       | date-time                                   | Timestamp when the resource was created                                              | Yes      |
+| updateTime    | No       | date-time                                   | Timestamp when the resource was last updated                                         | Yes      |
 
 ### Metadata Object
 
