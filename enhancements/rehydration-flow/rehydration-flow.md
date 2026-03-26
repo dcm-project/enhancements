@@ -22,8 +22,8 @@ see-also:
 ## Summary
 
 Rehydration is the process of recreating an existing resource from its original
-request (intent). The flow deletes the current resource and creates a new one by
-re-evaluating policies against the stored intent. This allows the system to
+request (intent). The flow re-evaluates policies against the stored intent and
+creates a new resource before deleting the old one. This allows the system to
 absorb changes in policies and environment that occurred since the original
 resource was provisioned.
 
@@ -63,14 +63,28 @@ CatalogItem. Instead, it uses the original intent stored in the Placement DB to
 ensure that only policy and environment changes are reflected, not changes to the
 underlying ServiceType or CatalogItem definitions.
 
+#### ID Separation
+
+The CatalogItemInstance ID used by the Catalog Manager is separate from the
+InstanceID used by the Placement Manager and SP Resource Manager. During the
+initial create flow, the Catalog Manager generates a InstanceID and passes it
+downstream. The Catalog Manager maintains a mapping between its
+CatalogItemInstance ID and the InstanceID. This separation is critical for
+rehydration: it allows the Catalog Manager to generate a **new** InstanceID for
+the recreated resource while the old InstanceID is still in use, avoiding ID
+conflicts in the downstream services.
+
 The high-level flow is:
 
 1. User triggers rehydration on a CatalogItemInstance via the Catalog Manager
-2. Catalog Manager calls the Placement Manager rehydrate endpoint
-3. Placement Manager instructs SP Resource Manager to delete the existing
-   resource
+2. Catalog Manager generates a new InstanceID and calls the Placement Manager
+   rehydrate endpoint with both the current and the new InstanceID
+3. Placement Manager retrieves the original intent using the current InstanceID
 4. Placement Manager re-evaluates policies against the original intent
 5. Placement Manager instructs SP Resource Manager to create the new resource
+   using the new InstanceID
+6. Once the new resource is provisioned, Placement Manager instructs SP Resource
+   Manager to delete the old resource using the old InstanceID
 
 ### System Architecture
 
@@ -83,7 +97,7 @@ flowchart TD
 
         PE["Policy Manager<br/>Re-evaluate Policies"]
 
-        SPRM["SP Resource Manager<br/>Delete Old Instance<br/>Create New Instance<br/>Deferred Cleanup"]
+        SPRM["SP Resource Manager<br/>Create New Instance<br/>Delete Old Instance<br/>Deferred Cleanup"]
 
         PM_DB[("Placement DB<br/>Original Intent<br/>Validated Request")]
     end
@@ -105,8 +119,9 @@ flowchart TD
 **POST /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate**
 
 Triggers rehydration of an existing CatalogItemInstance. The Catalog Manager does
-**not** regenerate the ServiceType payload. It delegates directly to the
-Placement Manager rehydrate endpoint.
+**not** regenerate the ServiceType payload. It generates a new InstanceID and
+delegates to the Placement Manager rehydrate endpoint, passing both the current
+InstanceID and the new InstanceID.
 
 Response: Returns `202 Accepted` if the rehydration process has started.
 
@@ -114,13 +129,20 @@ Response: Returns `202 Accepted` if the rehydration process has started.
 
 | Method | Endpoint                                  | Description                       |
 |--------|-------------------------------------------|-----------------------------------|
-| POST   | /api/v1/resources/{resourceId}:rehydrate  | Rehydrate an existing resource    |
+| POST   | /api/v1/resources/{instanceId}:rehydrate  | Rehydrate an existing resource    |
 
-**POST /api/v1/resources/{resourceId}:rehydrate**
+**POST /api/v1/resources/{instanceId}:rehydrate**
 
 Triggers the rehydration of an existing resource. The Placement Manager retrieves
-the original intent from the Placement DB and orchestrates deletion and
-recreation.
+the original intent from the Placement DB and orchestrates creation of the new
+resource followed by deletion of the old one.
+
+Request body:
+```json
+{
+  "newInstanceId": "<new-instance-id>"
+}
+```
 
 Response: Returns `202 Accepted` if the rehydration process has started.
 
@@ -141,36 +163,15 @@ sequenceDiagram
     participant SP as Service Provider
 
     User->>CM: POST /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate
-    CM->>PM: POST /api/v1/resources/{resourceId}:rehydrate
+    CM->>CM: Generate newInstanceId
+    CM->>PM: POST /api/v1/resources/{instanceId}:rehydrate<br/>{newInstanceId}
 
     activate PM
 
-    PM->>DB: Retrieve original intent
+    PM->>DB: Retrieve original intent by instanceId
     activate DB
-    DB-->>PM: {originalRequest, providerName, instanceId}
+    DB-->>PM: {originalRequest, providerName, oldInstanceId}
     deactivate DB
-
-    %% Delete existing resource
-    PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
-    activate SPRM
-    SPRM->>SR: Lookup provider by name
-    SR-->>SPRM: {endpoint, metadata, healthStatus}
-
-    alt Service Provider available
-        SPRM->>SP: DELETE {endpoint}/api/v1/{serviceType}/{instanceId}
-        alt Deletion succeeded
-            SP-->>SPRM: 200 OK (deleted)
-            SPRM-->>PM: 200 OK
-        else Deletion failed
-            SP-->>SPRM: Error
-            SPRM->>SPRM: Record pending cleanup<br/>{instanceId, providerName}
-            SPRM-->>PM: 200 OK (deletion deferred)
-        end
-    else Service Provider unavailable
-        SPRM->>SPRM: Record pending cleanup<br/>{instanceId, providerName}
-        SPRM-->>PM: 200 OK (deletion deferred)
-    end
-    deactivate SPRM
 
     %% Re-evaluate policies on original intent
     PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {originalSpec}}
@@ -183,13 +184,13 @@ sequenceDiagram
     else Policy approves
         PE-->>PM: 200 OK<br/>{evaluatedServiceInstance, selectedProvider, status}
 
-        PM->>DB: Update validated request<br/>{validatedPayload, new providerName}
+        PM->>DB: Store validated request with newInstanceId<br/>{validatedPayload, new providerName}
         activate DB
         DB-->>PM: Updated
         deactivate DB
 
-        %% Create new resource
-        PM->>SPRM: POST /api/v1/service-type-instances<br/>{providerName, spec}
+        %% Create new resource with new InstanceID
+        PM->>SPRM: POST /api/v1/service-type-instances<br/>{newInstanceId, providerName, spec}
         activate SPRM
 
         SPRM->>SR: Lookup provider by name
@@ -201,13 +202,37 @@ sequenceDiagram
             CM-->>User: Rehydration failed
         else Provider healthy
             SPRM->>SP: POST {endpoint}/api/v1/{serviceType}<br/>{spec}
-            SP-->>SPRM: {instanceId, status: PROVISIONING}
-            SPRM-->>PM: 202 Accepted {instanceId, status}
-            PM->>DB: Update instance metadata
-            PM-->>CM: 202 Accepted {instanceId, status}
-            CM-->>User: Rehydration started<br/>{instanceId, status: PROVISIONING}
+            SP-->>SPRM: {newInstanceId, status: PROVISIONING}
+            SPRM-->>PM: 202 Accepted {newInstanceId, status}
         end
         deactivate SPRM
+
+        %% Delete old resource after new one is created
+        PM->>SPRM: DELETE /api/v1/service-type-instances/{oldInstanceId}
+        activate SPRM
+        SPRM->>SR: Lookup provider by name
+        SR-->>SPRM: {endpoint, metadata, healthStatus}
+
+        alt Service Provider available
+            SPRM->>SP: DELETE {endpoint}/api/v1/{serviceType}/{oldInstanceId}
+            alt Deletion succeeded
+                SP-->>SPRM: 200 OK (deleted)
+                SPRM-->>PM: 200 OK
+            else Deletion failed
+                SP-->>SPRM: Error
+                SPRM->>SPRM: Record pending cleanup<br/>{oldInstanceId, providerName}
+                SPRM-->>PM: 200 OK (deletion deferred)
+            end
+        else Service Provider unavailable
+            SPRM->>SPRM: Record pending cleanup<br/>{oldInstanceId, providerName}
+            SPRM-->>PM: 200 OK (deletion deferred)
+        end
+        deactivate SPRM
+
+        PM->>DB: Update resource mapping<br/>{newInstanceId}
+        PM-->>CM: 202 Accepted {newInstanceId, status}
+        CM->>CM: Update InstanceID mapping
+        CM-->>User: Rehydration started<br/>{status: PROVISIONING}
     end
     deactivate PM
 ```
@@ -219,28 +244,18 @@ sequenceDiagram
    - Catalog Manager does **not** regenerate the ServiceType payload from the
      CatalogItem. This ensures that only policy and environment changes are
      applied, not changes to the underlying CatalogItem or ServiceType
+   - Catalog Manager generates a new InstanceID for the downstream services
    - Catalog Manager forwards the request to the Placement Manager rehydrate
-     endpoint
+     endpoint with the current InstanceID (in the URL) and the new InstanceID
+     (in the request body)
 
 2. **Intent Retrieval**
    - Placement Manager retrieves the original intent (the user's original
-     request) from the Placement DB
+     request) from the Placement DB using the current InstanceID
    - The original intent includes the spec, the current providerName, and the
-     instanceId
+     old InstanceID
 
-3. **Delete Existing Resource**
-   - Placement Manager requests SP Resource Manager to delete the existing
-     resource
-   - SP Resource Manager looks up the Service Provider in the Service Registry
-   - If the Service Provider is available and deletion succeeds, the resource is
-     deleted normally
-   - If the deletion fails for any reason (Service Provider unavailable, Service
-     Provider returns an error, etc.), the deletion is deferred (see
-     [Handling Unavailable Service Providers](#handling-deletion-failures))
-   - In all cases, SP Resource Manager returns success to allow the flow to
-     continue
-
-4. **Policy Re-evaluation**
+3. **Policy Re-evaluation**
    - Placement Manager sends the original intent to the Policy Manager for
      evaluation against the current policy set
    - Policy Manager evaluates the request through the full policy chain
@@ -250,25 +265,42 @@ sequenceDiagram
    - If the policy approves, the Placement Manager receives the evaluated
      payload and the newly selected Service Provider
 
-5. **Resource Recreation**
+4. **Resource Creation**
    - Placement Manager stores the new validated request in the Placement DB
+     with the new InstanceID
    - Placement Manager delegates instance creation to SP Resource Manager with
-     the new providerName and evaluated spec
+     the new InstanceID, the new providerName, and the evaluated spec
+   - Since the new InstanceID is different from the old one, there is no ID
+     conflict in SP Resource Manager
    - Standard creation flow applies (SP lookup, health check, instance creation)
    - On success, the resource enters `PROVISIONING` state
 
+5. **Delete Old Resource**
+   - Once the new resource is created, Placement Manager requests SP Resource
+     Manager to delete the old resource using the old InstanceID
+   - SP Resource Manager looks up the Service Provider in the Service Registry
+   - If the Service Provider is available and deletion succeeds, the resource is
+     deleted normally
+   - If the deletion fails for any reason (Service Provider unavailable, Service
+     Provider returns an error, etc.), the deletion is deferred (see
+     [Handling Deletion Failures](#handling-deletion-failures))
+   - In all cases, SP Resource Manager returns success to allow the flow to
+     continue
+   - Placement Manager updates the resource mapping in the Placement DB and
+     returns success to the Catalog Manager
+   - Catalog Manager updates its CatalogItemInstance to point to the new
+     InstanceID
+
 ### Handling Deletion Failures
 
-A core requirement of rehydration is the ability to proceed even when the
-deletion of the original resource fails. This can happen when the Service
-Provider is unavailable, or when the Service Provider is available but returns
-an error. Since the same resource ID is used throughout the pipeline, a failed
-deletion would normally block recreation. To support this, the SP Resource
-Manager implements the following behavior:
+Deletion of the old resource is performed after the new resource has been
+successfully created. However, the deletion may still fail if the Service
+Provider is unavailable or returns an error. To handle these cases gracefully,
+the SP Resource Manager implements the following behavior:
 
 #### Deferred Deletion
 
-When the SP Resource Manager fails to delete the original resource during
+When the SP Resource Manager fails to delete the old resource during
 a rehydration request (whether because the Service Provider is unreachable or
 because it returned an error):
 
@@ -278,9 +310,7 @@ because it returned an error):
    - `providerName`: The Service Provider that hosts the instance
    - `serviceType`: The type of the service
    - `timestamp`: When the deletion was requested
-2. The SP Resource Manager removes the instance record from its database so
-   that the same ID can be reused for the new resource
-3. The SP Resource Manager returns success to the Placement Manager, allowing
+2. The SP Resource Manager returns success to the Placement Manager, allowing
    the rehydration flow to continue
 
 #### Cleanup Mechanism
@@ -338,19 +368,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Receive rehydrate request<br/>for resourceId] --> B[Retrieve original intent<br/>from Placement DB]
+    A[Receive rehydrate request<br/>for instanceId with newInstanceId] --> B[Retrieve original intent<br/>from Placement DB]
     B --> C{Intent found?}
     C -->|No| D[Return 404 Not Found]
-    C -->|Yes| E[Request SP Resource Manager<br/>to delete existing resource]
-    E --> F[Send original intent to<br/>Policy Manager for evaluation]
+    C -->|Yes| F[Send original intent to<br/>Policy Manager for evaluation]
     F --> G{Policy approved?}
     G -->|No| H[Update record in Placement DB]
     H --> I[Return error to Catalog Manager]
-    G -->|Yes| J[Store validated request<br/>in Placement DB]
-    J --> K[Forward to SP Resource Manager<br/>with new providerName and spec]
+    G -->|Yes| J[Store validated request<br/>with newInstanceId in Placement DB]
+    J --> K[Forward to SP Resource Manager<br/>with newInstanceId, providerName, and spec]
     K --> L{Creation succeeded?}
     L -->|No| I
-    L -->|Yes| M[Return 202 Accepted<br/>to Catalog Manager]
+    L -->|Yes| M[Request SP Resource Manager<br/>to delete old resource]
+    M --> N[Update resource mapping<br/>in Placement DB]
+    N --> O[Return 202 Accepted<br/>to Catalog Manager]
 ```
 
 ### Key Characteristics
@@ -358,12 +389,18 @@ flowchart TD
 - **Intent Preservation**: Rehydration operates on the original user intent, not
   the current CatalogItem or ServiceType definitions. This ensures that only
   policy and environment changes are reflected
+- **Create-before-Delete**: The new resource is created before the old one is
+  deleted. This ensures the system is never left without a running resource
+  during the rehydration process
+- **ID Separation**: The CatalogItemInstance ID is separate from the InstanceID
+  used downstream. This allows the Catalog Manager to issue a new InstanceID
+  for the recreated resource, avoiding ID conflicts in downstream services
 - **Policy Re-evaluation**: Every rehydration re-evaluates the full policy
   chain, potentially selecting a different Service Provider or applying different
   mutations
-- **Graceful Degradation**: The flow continues even when deletion of the
-  original resource fails (whether the Service Provider is unavailable or returns
-  an error), with a cleanup mechanism to handle deferred deletions
+- **Graceful Degradation**: The flow continues even when deletion of the old
+  resource fails (whether the Service Provider is unavailable or returns an
+  error), with a cleanup mechanism to handle deferred deletions
 - **Idempotent Rehydration**: Rehydrating an already-rehydrated resource works
-  the same way; the current resource is deleted and recreated from the original
-  intent
+  the same way; a new resource is created from the original intent and the
+  current resource is deleted afterward
