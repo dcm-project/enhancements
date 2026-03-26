@@ -229,9 +229,9 @@ sequenceDiagram
         end
         deactivate SPRM
 
-        PM->>DB: Update resource mapping<br/>{newInstanceId}
+        PM->>DB: Remove old instance record
         PM-->>CM: 202 Accepted {newInstanceId, status}
-        CM->>CM: Update InstanceID mapping
+        CM->>CM: Update InstanceID reference to newInstanceId
         CM-->>User: Rehydration started<br/>{status: PROVISIONING}
     end
     deactivate PM
@@ -286,9 +286,11 @@ sequenceDiagram
      [Handling Deletion Failures](#handling-deletion-failures))
    - In all cases, SP Resource Manager returns success to allow the flow to
      continue
-   - Placement Manager updates the resource mapping in the Placement DB and
-     returns success to the Catalog Manager
-   - Catalog Manager updates its CatalogItemInstance to point to the new
+   - Placement Manager removes the old instance record from the Placement DB
+     and returns success to the Catalog Manager
+
+6. **Update Reference**
+   - Catalog Manager updates its CatalogItemInstance reference to the new
      InstanceID
 
 ### Handling Deletion Failures
@@ -380,7 +382,7 @@ flowchart TD
     K --> L{Creation succeeded?}
     L -->|No| I
     L -->|Yes| M[Request SP Resource Manager<br/>to delete old resource]
-    M --> N[Update resource mapping<br/>in Placement DB]
+    M --> N[Remove old instance record<br/>from Placement DB]
     N --> O[Return 202 Accepted<br/>to Catalog Manager]
 ```
 
