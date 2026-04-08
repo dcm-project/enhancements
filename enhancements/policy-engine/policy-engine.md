@@ -29,7 +29,14 @@ Management (DCM) application responsible for governing service creation and
 modification (e.g., VirtualMachines, Containers). It enables Admins,
 Tenant-Admins, and Users to inject logic that validates (Approve/Reject),
 mutates (Defaulting/Altering) and assigns Service Providers to request payloads
-using Open Policy Agent (OPA) and Rego.
+using an embedded [Open Policy Agent (OPA)](https://www.openpolicyagent.org/docs)
+engine and [Rego](https://www.openpolicyagent.org/docs/policy-language).
+
+OPA is embedded as a Go library within the Policy Engine process rather than
+deployed as a separate sidecar service. Rego source code is persisted in the
+database alongside policy metadata, ensuring policies survive service restarts.
+On startup, the engine recompiles all stored policies from the database,
+eliminating the persistence gap inherent in an external OPA deployment.
 
 ### Goal
 
@@ -43,8 +50,7 @@ Define the flow of how Policies are managed and used by the Policy Engine
   - Policy priority
   - Value immutability and constraints
 - Determine the enforcement engine and policy language
-  - For V1, [OPA](https://www.openpolicyagent.org/docs) and
-    [Rego](https://www.openpolicyagent.org/docs/policy-language)) will be used
+  - For V1, OPA (embedded as a Go library) and Rego will be used
   - Other alternatives may be considered in future versions
 - Define the input format
 - Define the output format
@@ -134,16 +140,17 @@ following elements
   of the policies
 - DCM Admins, Tenant-Admins and Users are responsible for the accuracy and
   performance of the policies
-- Trying to register a REGO code snipet that fails compilation will fail
+- Trying to register a REGO code snippet that fails compilation will fail
 
 ## System Architecture
 
 The Policy API serves two distinct functions:
 
-1. Management Plane: CRUD operations for Policy definitions and synchronization
-   with the Policy Engine.
-2. Execution Plane: Service requests evaluation against active policies using a
-   stored-policy model.
+1. Management Plane: CRUD operations for Policy definitions. Rego source code is
+   persisted in the database and the embedded OPA engine is recompiled after
+   every CRUD mutation.
+2. Execution Plane: Service requests evaluation against active policies using
+   the embedded OPA engine.
 
 ### Policy Management
 
@@ -154,7 +161,6 @@ sequenceDiagram
     participant User
     participant PolicyEngine
     participant Database
-    participant OPA
 
     User->>PolicyEngine: POST /api/v1/policies
     PolicyEngine->>Database: Check unique Name and Priority for policy type
@@ -162,16 +168,14 @@ sequenceDiagram
         PolicyEngine-->>User: Error response
     else Uniqueness check passed
         PolicyEngine->>PolicyEngine: Generate UUID
-        PolicyEngine->>PolicyEngine: Parse PackageName
-        PolicyEngine->>Database: Store policy metadata
-        Note right of Database: UUID, Name, PackageName,<br/>LabelSelector, Policy Type, Priority
-        PolicyEngine->>OPA: Push REGO code with UUID
+        PolicyEngine->>Database: Store policy metadata and Rego code
+        Note right of Database: UUID, Name, RegoCode,<br/>LabelSelector, Policy Type, Priority
+        PolicyEngine->>PolicyEngine: Recompile embedded OPA engine
         alt REGO compilation failed
-            OPA-->>PolicyEngine: Compilation error
+            PolicyEngine->>PolicyEngine: Preserve previous compiled state
             PolicyEngine->>Database: Rollback stored metadata
             PolicyEngine-->>User: Error response
         else REGO compilation succeeded
-            OPA-->>PolicyEngine: Success
             PolicyEngine-->>User: Return UUID
         end
     end
@@ -208,16 +212,16 @@ sequenceDiagram
 - Validate the Policy Name and Priority
   - If not unique return an error
 - Generate a UUID
-- Get the policy package name from the REGO code
 - Store the following information in the DB
   - UUID
   - Name
-  - Package Name
+  - Rego Code
   - Policy Type
   - Priority
   - Label Selector
-- Push the REGO code to OPA
-  - Use the UUID for naming to avoid collisions
+- Recompile the embedded OPA engine with all stored policies
+  - The package name is resolved from the compiled AST
+  - Compilation is atomic: if it fails, the previous compiled state is preserved
   - If failed, rollback DB and return an error
 - Return UUID to caller
 
@@ -254,7 +258,6 @@ sequenceDiagram
     participant PlacementManager
     participant PolicyEngine
     participant Database
-    participant OPA
 
     User->>PlacementManager: Create Service request
     PlacementManager->>PolicyEngine: Validate Payload
@@ -262,8 +265,7 @@ sequenceDiagram
     Database-->>PolicyEngine: List of policies
 
     loop For each policy
-        PolicyEngine->>OPA: Evaluate policy
-        OPA-->>PolicyEngine: Policy result
+        PolicyEngine->>PolicyEngine: Evaluate policy (embedded OPA)
         PolicyEngine->>PolicyEngine: Enforce constraints
         PolicyEngine->>PolicyEngine: Mutate payload
         alt Policy rejected or constraint violation
@@ -287,8 +289,10 @@ sequenceDiagram
 
 ###### Execution Logic & Flow
 
-The Engine acts as an orchestrator. It does not send Rego code during
-evaluation; it calls pre-loaded modules in OPA.
+The Engine acts as an orchestrator. It evaluates policies using the embedded OPA
+engine, which holds all compiled Rego modules in memory. Evaluation is
+concurrent-safe via a read-write lock, allowing policy evaluation to proceed in
+parallel with policy management operations.
 
 ###### _Pipeline Logic (The "Chain of Responsibility")_
 
@@ -301,8 +305,8 @@ evaluation; it calls pre-loaded modules in OPA.
 - If no policies matching the request payload were found, the request will
   return successfully
 - Iterate for each policy P:
-  - Call `OPA`:
-    - Invoke /v1/data/<P.PackageName>/main
+  - Evaluate policy using the embedded OPA engine:
+    - Invoke the policy's package main rule
     - Pass
       - `spec` - the current patched request payload
       - `provider` - the currently selected service provider
