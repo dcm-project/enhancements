@@ -207,26 +207,11 @@ sequenceDiagram
         end
         deactivate SPRM
 
-        %% Delete old resource after new one is created
-        PM->>SPRM: DELETE /api/v1/service-type-instances/{oldInstanceId}
+        %% Delete old resource (deferred) after new one is created
+        PM->>SPRM: DELETE /api/v1/service-type-instances/{oldInstanceId}?deferred=true
         activate SPRM
-        SPRM->>SR: Lookup provider by name
-        SR-->>SPRM: {endpoint, metadata, healthStatus}
-
-        alt Service Provider available
-            SPRM->>SP: DELETE {endpoint}/api/v1/{serviceType}/{oldInstanceId}
-            alt Deletion succeeded
-                SP-->>SPRM: 200 OK (deleted)
-                SPRM-->>PM: 200 OK
-            else Deletion failed
-                SP-->>SPRM: Error
-                SPRM->>SPRM: Record pending cleanup<br/>{oldInstanceId, providerName}
-                SPRM-->>PM: 200 OK (deletion deferred)
-            end
-        else Service Provider unavailable
-            SPRM->>SPRM: Record pending cleanup<br/>{oldInstanceId, providerName}
-            SPRM-->>PM: 200 OK (deletion deferred)
-        end
+        SPRM->>SPRM: Record pending cleanup<br/>{oldInstanceId, providerName}
+        SPRM-->>PM: 200 OK (deletion deferred)
         deactivate SPRM
 
         PM->>DB: Remove old instance record
@@ -277,15 +262,12 @@ sequenceDiagram
 
 5. **Delete Old Resource**
    - Once the new resource is created, Placement Manager requests SP Resource
-     Manager to delete the old resource using the old InstanceID
-   - SP Resource Manager looks up the Service Provider in the Service Registry
-   - If the Service Provider is available and deletion succeeds, the resource is
-     deleted normally
-   - If the deletion fails for any reason (Service Provider unavailable, Service
-     Provider returns an error, etc.), the deletion is deferred (see
-     [Handling Deletion Failures](#handling-deletion-failures))
-   - In all cases, SP Resource Manager returns success to allow the flow to
-     continue
+     Manager to delete the old resource using the old InstanceID with the
+     `deferred` flag set to `true`
+   - SP Resource Manager immediately records the instance in the cleanup queue
+     for background deletion without contacting the Service Provider (see
+     [Deferred Deletion](#deferred-deletion))
+   - SP Resource Manager returns success to allow the flow to continue
    - Placement Manager removes the old instance record from the Placement DB
      and returns success to the Catalog Manager
 
@@ -293,18 +275,14 @@ sequenceDiagram
    - Catalog Manager updates its CatalogItemInstance reference to the new
      InstanceID
 
-### Handling Deletion Failures
-
-Deletion of the old resource is performed after the new resource has been
-successfully created. However, the deletion may still fail if the Service
-Provider is unavailable or returns an error. To handle these cases gracefully,
-the SP Resource Manager implements the following behavior:
+### Handling Deletion of the Old Resource
 
 #### Deferred Deletion
 
-When the SP Resource Manager fails to delete the old resource during
-a rehydration request (whether because the Service Provider is unreachable or
-because it returned an error):
+During rehydration, the deletion request is sent with the `deferred` flag set to
+`true`. When the SP Resource Manager receives a deferred deletion request, it
+does **not** attempt to contact the Service Provider. Instead, it immediately
+enqueues the instance for background cleanup:
 
 1. The SP Resource Manager records the pending deletion in a **cleanup queue**
    (persisted in the database) with the following information:
@@ -356,7 +334,8 @@ flowchart TD
 
 #### Key Characteristics
 
-- **Non-blocking**: Deletion failures do not block the rehydration flow
+- **Non-blocking**: Deferred deletion does not contact the Service Provider,
+  so the rehydration flow is never blocked by provider latency or availability
 - **Persistent**: The cleanup queue is stored in the database to survive
   restarts
 - **Automatic retry**: The cleanup process automatically retries deletions as
@@ -381,7 +360,7 @@ flowchart TD
     J --> K[Forward to SP Resource Manager<br/>with newInstanceId, providerName, and spec]
     K --> L{Creation succeeded?}
     L -->|No| I
-    L -->|Yes| M[Request SP Resource Manager<br/>to delete old resource]
+    L -->|Yes| M[Request SP Resource Manager<br/>to delete old resource<br/>with deferred flag]
     M --> N[Remove old instance record<br/>from Placement DB]
     N --> O[Return 202 Accepted<br/>to Catalog Manager]
 ```
@@ -400,9 +379,10 @@ flowchart TD
 - **Policy Re-evaluation**: Every rehydration re-evaluates the full policy
   chain, potentially selecting a different Service Provider or applying different
   mutations
-- **Graceful Degradation**: The flow continues even when deletion of the old
-  resource fails (whether the Service Provider is unavailable or returns an
-  error), with a cleanup mechanism to handle deferred deletions
+- **Deferred Cleanup**: Deletion of the old resource is always deferred during
+  rehydration. The SP Resource Manager enqueues the old instance for background
+  cleanup without contacting the Service Provider, ensuring the rehydration flow
+  is never blocked by provider availability or errors
 - **Idempotent Rehydration**: Rehydrating an already-rehydrated resource works
   the same way; a new resource is created from the original intent and the
   current resource is deleted afterward
