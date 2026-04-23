@@ -10,71 +10,71 @@ reviewers:
   - "@flocati"
   - "@pkliczewski"
   - "@gabriel-farache"
+  - "@ebichman"
 creation-date: 2026-01-09
+updated-date: 2026-04-23
 ---
 
 # Placement Manager
 
 ## Summary
 
-The Placement Manager orchestrates resource requests within DCM
-core. It receives user requests through the Catalog Manager, validates and 
-enriches them through the Policy Manager, and delegates instance creation 
-to the SP Resource Manager. The Placement Manager focuses on 
-request orchestration and coordination.
+The Placement Manager (dcm-placement-api) orchestrates resource requests within DCM
+core. It receives user requests through a REST API, validates and
+enriches them through Policy Engine, and delegates deployment creation
+to the Provider Service (k8s-service-provider). The Placement Manager focuses on
+request orchestration by the Policy Engine, and deployment coordination by zones.
 
 ## Motivation
 
 ### Goals
 
-- Define end-to-end flow of for creating resources
-- Define _Create_, _Read_, _Delete_ endpoints for Placement Manager
-- Define Placement Manager interacts with other services within DCM core
-  (Catalog Manager, Policy Manager, SP Resource Manager)
-- Define orchestration responsibilities for Placement Manager
+- Define end-to-end flow for creating application deployments
+- Define _Create_, _List_, _Delete_ endpoints for the Placement Manager
+- Define how the Placement Mananger interacts with other services within DCM core
+  (Catalog Manager, Policy Engine, Service Provider)
+- Define orchestration responsibilities including tier-based policy routing,
+  and multi-zone deployment
 
 ### Non-Goals
 
-- Define Update endpoint, as this is out of scope for the first version (v1).
+- Define Update endpoint, as this is out of scope for the first version (v1alpha1).
 
 ## Proposal
 
 ### System Architecture
 
-The Placement Manager acts as the central orchestration service within DCM core,
-coordinating between user requests (from Catalog), policy validation, 
-and catalog instance creation. 
+The Placement API acts as the central orchestration service within DCM core,
+coordinating between user requests (from the Catalog Manangement),  policy validation, and catalog instance creation.
 The following diagram illustrates the system architecture and
 component interactions.
 
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10, 'curve': 'linear'},}}%%
 flowchart TD
-    classDef catalogManager fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
-    classDef placementManager fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
-    classDef policyEngine fill:#2d2d2d,color:#ffffff,stroke:#ffb74d,stroke-width:2px
-    classDef spResourceManager fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
+    classDef placementApi fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
+    classDef opaEngine fill:#2d2d2d,color:#ffffff,stroke:#ffb74d,stroke-width:2px
+    classDef providerService fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
     classDef database fill:#2d2d2d,color:#ffffff,stroke:#f48fb1,stroke-width:2px
     classDef dcmCore fill:#FFFFFF,stroke:#bdbdbd,stroke-width:2px
+    classDef client fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
 
-    CM["**Catalog Manager**<br/>Send Request"]:::catalogManager
+    CLIENT["**Catalog Manager**<br/>Send Request"]:::client
 
     subgraph DCM_Core [ ]
-        PM["**Placement Manager**<br/>"]:::placementManager
-        
-        PE["**Policy Manager**<br/>Request Validation<br/>Payload Mutation<br/>SP Selection"]:::policyEngine
-        
-        SPRM["**SP Resource Manager**<br/>Create Instance<br/> Read Instances<br/> Delete Instances"]:::spResourceManager
+        PA["**Placement Manager**<br/>dcm-placement-api<br/>"]:::placementApi
 
-        PM_DB[("**Placement DB**<br/>Store Intent<br/>Store validated request")]:::database
+        OPA["**OPA Policy Engine**<br/>Tier-based Validation<br/>Zone Discovery<br/>"]:::opaEngine
 
+        PS["**Provider Service**<br/>k8s-service-provider<br/>Create Deployments<br/>Delete Deployments"]:::providerService
+
+        PA_DB[("**Placement DB**<br/>PostgreSQL<br/>Store Applications")]:::database
     end
 
-    CM --> PM
-    PM --> PE
-    PM --> PM_DB
-    PM --> SPRM
-    
+    CLIENT --> PA
+    PA --> OPA
+    PA --> PA_DB
+    PA --> PS
 
     class DCM_Core dcmCore
 ```
@@ -83,53 +83,67 @@ flowchart TD
 
 #### Catalog Service
 
-- Receives resource creation requests from users
-- Provides REST API endpoints for _create_, _read_, _delete_ operations on
-  catalog instances
-- Returns responses and error messages to users
+- Sends application creation, listing, and deletion requests directly via REST
+- Receives responses and error messages
 
-#### Policy Manager
+#### Policy Engine
 
-- Sends requests for validation via `POST /api/v1/engine/evaluate`
-- Receives validated/mutated payload and selected Service Provider
-- Receives policy rejections and constraint violations responses and forwards to
-  the users
+- Standard Open Policy Agent instance running the stock
+  `openpolicyagent/opa:latest-static` image
+- Placement API sends validation requests via `POST {DCM_OPA_SERVER}/v1/data/tier{N}`
+  (OPA's native Data API)
+- Tier number (1, 2, etc.) is derived from the application's `tier` field,
+  routing to different Rego policy packages (`tier1`, `tier2`)
+- OPA evaluates policies and returns `{valid, required_zones, failures}`
+- OPA policies perform runtime HTTP callouts to the Provider Service to discover
+  available zones/namespaces by label, making OPA an active participant in
+  placement decisions
+- Each tier has its own zone resolution strategy with production/backup label
+  fallback
 
-#### SP Resource Manager
+#### Provider Service (k8s-service-provider)
 
-- Delegates instance creation, read, and delete operations to SP Resource
-  Manager
-- Forwards validated requests with selected SP name
-- Receives responses and forwards to the users
+- Delegates deployment creation and deletion via REST API
+- Creates one deployment per zone via `POST {PROVIDER_SERVICE_URL}/deployments`
+- Deletes deployments via `DELETE {PROVIDER_SERVICE_URL}/deployments/{id}`
+- Supports two deployment kinds: `vm` and `container`
+- Each deployment includes metadata with name, namespace (zone), and labels
+  (app-id)
+- Infrastructure specifications come from an internal hardcoded catalog, not
+  from user input
 
-#### Database
+#### Database (PostgreSQL)
 
-- Stores the intent (original request) of the user request
-- Store validated request and enables rehydration process
-- Maintains record of all resources created through Placement Manager
+- Stores application records after successful policy validation
+- Maintains the application model: ID, name, service type, zones, tier,
+  and deployment IDs
+- Supports PostgreSQL (production) and SQLite (development) via GORM ORM
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the Catalog Manager to create and manage
-resources.
+The REST endpoints are consumed by the Catalog Manager to create and manage resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                       | Description                    |
-|--------|--------------------------------|--------------------------------|
-| POST   | /api/v1/resources              | Create a resource              |
-| GET    | /api/v1/resources              | List all resources             |
-| GET    | /api/v1/resources/{resourceId} | Get a resource                 |
-| DELETE | /api/v1/resources/{resourceId} | Delete a resource              |
-| GET    | /api/v1/health                 | Placement Manager health check |
+| Method | Endpoint              | Description                      |
+|--------|-----------------------|----------------------------------|
+| POST   | /applications         | Create an application            |
+| GET    | /applications         | List all applications            |
+| DELETE | /applications/{id}    | Delete an application            |
+| GET    | /health               | Placement Manager health check   |
 
-**POST /api/v1/resources - Create an resource.**
+*The API follows [AEP](https://aep.dev/) conventions, including canonical `path`
+fields on resources (e.g., `applications/{id}`). OpenAPI request validation
+middleware automatically validates all incoming requests against the spec.
+Swagger UI is available at `/swagger/index.html`.*
 
-The POST endpoint creates a resource that is supported by DCM. The resource 
-request is an instance of a catalog item and originates from the user (UI)
-through the Catalog Manager.
+**POST /applications - Create an application.**
 
-Snippet of the request body
+The POST endpoint creates an application. The service type determines the
+deployment kind (VM or container), and the tier determines which Open Policy Agent
+is evaluated.
+
+Snippet of the request body schema:
 
 ```yaml
 requestBody:
@@ -139,97 +153,114 @@ requestBody:
       schema:
         type: object
         required:
-          - CatalogItemInstance
-          - spec
+          - name
+          - service
         properties:
-          CatalogItemInstance:
+          name:
             type: string
-            description: The ID of the catalog item instance
-            example: "4baa35eb-e70d-4d37-867d-0f4efa21d05c"
-          spec:
-            type: object
-            description: |
-              Service specification following one of the supported service type
-              schemas (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec).
-            additionalProperties: true
+            description: Name of the application
+            example: "app-server-01"
+          service:
+            type: string
+            description: Service type of the application
+            enum:
+              - "webserver"
+              - "container"
+          zones:
+            type: array
+            items:
+              type: string
+            description: Optional zones for the application (validated against policy)
+            example: ["us-west-1", "us-west-2"]
+          tier:
+            type: integer
+            description: Policy tier (routes to different OPA policy packages)
+            default: 2
 ```
 
-Example of payload for incoming VM catalog instance request
+Example for a request payload:
 
 ```json
 {
-  "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-  "spec": {
-    "serviceType": "vm",
-    "memory": { "size": "2GB" },
-    "vcpu": { "count": 2 },
-    "guestOS": { "type": "fedora-39" },
-    "access": {
-      "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
+  "name": "my-app",
+  "service": "webserver",
+  "tier": 1
+}
+```
+
+Response payload: Returns `201 Created` if successful.
+
+```json
+{
+  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "path": "applications/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "name": "my-app",
+  "service": "webserver",
+  "zones": ["us-east-1", "us-east-2"],
+  "tier": 1
+}
+
+***Note**: This is **only** an example of the payload.*
+
+**GET /applications**
+List all applications with pagination following AEP standards.
+
+Query parameters:
+- `max_page_size` (integer, 1-100, default 100): Maximum items per page
+- `page_token` (string): Token for retrieving the next page
+
+Example response payload:
+
+```json
+{
+  "applications": [
+    {
+      "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "path": "applications/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "name": "my-app",
+      "service": "webserver",
+      "zones": ["us-east-1", "us-east-2"],
+      "tier": 1
     },
-    "metadata": { "name": "fedora-vm" }
-  }
+    {
+      "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "path": "applications/696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "name": "nginx-app",
+      "service": "container",
+      "zones": ["us-west-1"],
+      "tier": 2
+    }
+  ],
+  "next_page_token": "eyJpZCI6IjEyM2U0NTY3LWU4OWItMTJkMy1hNDU2LTQyNjYxNDE3NDAwMCJ9"
 }
 ```
 
-Response payload: Returns 201 Created if successful.
-```json
-{
-  "CatalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-  "resource_name": "fedora-vm",
-  "providerName": "kubevirt-sp",
-  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
-}
-```
-**Note**: This is **only** an example of the payload.
+**DELETE /applications/{id}**
+Delete an application and all its associated provider deployments.
+Returns `204 No Content` on success. Deployment deletions continue even if
+individual deletions fail (best-effort cascade).
 
-**GET /api/v1/resources**  
-List all resources according to AEP standards.
-
-Example of Response Payload
-
-```json
-[
-  {
-    "CatalogItemInstance": "52540146-6212-4514-b534-0c3127b2836f",
-    "name": "nginx-container",
-    "providerName": "container-sp",
-    "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0"
-  },
-  {
-    "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-    "name": "postgres-001",
-    "providerName": "postgres-sp",
-    "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d"
-  },
-  {
-    "CatalogItemInstance": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-    "name": "ubuntu-vm",
-    "providerName": "kubevirt-sp",
-    "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
-  }
-]
-```
-
-**GET /api/v1/resources/{resourceId}**  
-Get a resource based on id.
-
-Example of Response Payload
+**GET /health**
+Retrieve the health status of the Placement API.
 
 ```json
 {
-  "CatalogItemInstance": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
-  "name": "ubuntu-vm",
-  "providerName": "kubevirt-sp",
-  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+  "status": "healthy",
+  "path": "health"
 }
 ```
 
-**Delete /api/v1/resources/{resourceId}**  
-Delete a resource based on id.
+**Error Response Format**
 
-**GET /api/v1/health**  
-Retrieve the health status of Placement Manager.
+All error responses use the following schema:
+
+```json
+{
+  "type": "https://example.com/errors/bad-request",
+  "error": "Invalid request parameters - Validation Failed",
+  "code": 400
+}
+```
 
 ## Design Details
 
@@ -241,109 +272,173 @@ resources via the `POST /api/v1/resources` endpoint.
 ```mermaid
 sequenceDiagram
     autonumber
-    participant CM as Catalog Manager
-    participant PM as Placement Manager
-    participant DB as Placement DB
-    participant PE as Policy Manager
-    participant SPRM as SP Resource Manager
+    participant C as Catalog Manager
+    participant PA as Placement Manager
+    participant OPA as OPA Policy Engine
+    participant CAT as Service Catalog
+    participant PS as Provider Service
+    participant DB as PostgreSQL
 
-    CM->>PM: POST /api/v1/resources<br/>{CatalogItemInstance, spec}
-    activate PM
+    C->>PA: POST /applications<br/>{name, service, tier}
+    activate PA
 
-    PM->>DB: Store intent<br/>{originalRequest}
-    activate DB
-    DB-->>PM: Intent stored
-    deactivate DB
+    PA->>OPA: POST /v1/data/tier{N}<br/>{input: {name, zones}}
+    activate OPA
 
-    PM->>PE: POST /api/v1/engine/evaluate<br/>{requestPayload, userId, tenantId}
-    activate PE
+    Note over OPA,PS: Tier 1: POST :8081/api/v1/namespaces<br/>Tier 2: POST :8081/namespaces
+    OPA->>PS: POST /namespaces<br/>{labels: tier_labels}
+    PS-->>OPA: {namespaces: [{name: "zone-1"}, ...]}
 
-    PE-->>PM: Validated/mutated payload<br/>& selected providerName
-    deactivate PE
+    OPA-->>PA: {valid, required_zones, failures}
+    deactivate OPA
 
     alt Policy validation fails
-        PM-->>CM: Error response<br/>(Policy rejection)
-        deactivate PM
+        PA-->>C: 400 Bad Request<br/>{error: "validation failed: [failures]"}
     else Policy validation succeeds
 
-        PM->>DB: Store validated request<br/>{validatedPayload, providerName}
+        PA->>DB: Application.Create()<br/>{id, name, service, zones, tier}
         activate DB
-        DB-->>PM: Validated request stored
+        DB-->>PA: Application stored
         deactivate DB
 
-        PM->>SPRM: POST /api/v1/service-types/instances<br/>{providerName, serviceType, spec}
-        activate SPRM
+        loop For each required zone
+            PA->>CAT: GetCatalogVm() or GetContainerApp()
+            CAT-->>PA: Infrastructure spec
 
-        alt SP Resource Manager fails
-            SPRM-->>PM: Error response
-            PM-->>CM: Error response<br/>(Instance creation failed)
-            deactivate SPRM
+            PA->>PS: POST /deployments<br/>{kind, metadata: {name, namespace: zone, labels}, spec}
+            activate PS
 
-        else Instance creation succeeds
-            SPRM-->>PM: Success response<br/>{instanceId, status, metadata}
-            activate DB
-            deactivate DB
+            alt Deployment fails
+                PS-->>PA: Error response
+            else Deployment succeeds
+                PS-->>PA: {id: deploymentId}
+            end
+            deactivate PS
 
-            PM-->>CM: 202 Accepted<br/>{instanceId, status}
-
+            opt Rollback on failure
+                PA->>PS: DELETE /deployments/{id}<br/>(rollback previous deployments)
+                PA->>DB: Application.Delete()
+                PA-->>C: 400 Bad Request<br/>{error: "failed to create deployment"}
+            end
         end
+
+        PA->>DB: Application.Update()<br/>{deploymentIDs: [...]}
+        activate DB
+        DB-->>PA: Application updated
+        deactivate DB
+
+        PA-->>C: 201 Created<br/>{id, path, name, service, zones, tier}
     end
+    deactivate PA
 ```
 
 #### Flow Description
 
 1. **Request Reception**
 
-- Catalog Manager sends a POST request to Placement Manager with `CatalogItemInstance` and
-  `spec` (resource specification)
-- Placement Manager receives and processes the request
+- Catalog Manager sends sends a POST request to the Placement Manager with `name` (required),
+  `service` (required, enum: `webserver`|`container`), `tier` (optional,
+  default 2), and `zones` (optional)
 
-2. **Record Intent**
+2. **Policy Validation**
 
-- Placement Manager stores the original request (intent) in Placement DB
-- This enables rehydration and tracking of the user's original request
-- Intent is stored before any processing to ensure request persistence
+- Placement Manager constructs an Open Policy Agent input payload: `{input: {name, zones}}`
+- The tier field determines the Policy Engine endpoint:
+  `POST {DCM_OPA_SERVER}/v1/data/tier{N}` (e.g., `/v1/data/tier1`)
+- Each tier has its own Rego policy package (`tier1.rego`, `tier2.rego`) with
+  distinct zone resolution strategies
+- OPA policies perform HTTP callouts to the Provider Service to discover
+  available namespaces by label (production labels first, fallback to backup
+  labels)
+- Policy Engine returns:
+  - `valid` (boolean): Whether the request passes validation
+  - `required_zones` (string[]): Zones where deployments should be created
+  - `failures` (string[]): Failure messages if validation fails
+- If policy validation fails:
+  - Placement API returns error response with failure details to the client
+  - No database records are created
 
-3. **Policy Validation**
-- Placement Manager forwards the request to Policy Manager for validation
-- Policy Manager evaluates requests against policies
-- Policy Manager returns:
-  - Approved or rejected
-  - Validated and potentially mutated payload
-  - Selected Service Provider name (`providerName`)
-  - Policy constraints and patches applied
-- If policy validation fails (request rejected or constraint violation):
-  - Delete record from Placement DB
-  - Placement Manager returns error response to Catalog Manager
-  - Request processing stops
-- If policy validation succeeds:
-  - Placement Manager stores the validated request in Placement DB which
-    includes the validated/mutated payload and selected `providerName`
+3. **Application Persistence**
 
-4. **Instance Creation**
+- Only after successful Policy Engine validation, the Placement Manager creates an application
+  record in PostgreSQL with: ID, name, service, zones (from Open Policy Agent), tier, and
+  empty deployment IDs
+- There is no separate "intent" storage step; the application record is the
+  single source of truth
 
-- Placement Manager delegates instance creation to SP Resource Manager
-- Forwards the validated request with `providerName`, `serviceType`, and `spec`
-- SP Resource Manager handles SP lookup, health checks, and instance
-  provisioning
-- If SP Resource Manager fails to create the instance:
-  - Error response is returned to Placement Manager
-  - Delete record from Placement DB
-  - Placement Manager forwards the error to Catalog Manager
-  - Request processing stops
-- If instance creation succeeds:
-  - SP Resource Manager returns success response with `instanceId`, `status`
-  - Placement Manager returns 202 Accepted to Catalog Manager with `instanceId` and
-    `status`
-  - The resource is now in a `PROVISIONING` state
+4. **Multi-Zone Deployment**
 
-#### Key Characteristics/Notes
+- Placement API iterates over each zone from `required_zones`
+- For each zone, it resolves the infrastructure spec from the internal catalog:
+  - `webserver` -> VM spec (1 CPU, 1 GB RAM, Fedora)
+  - `container` -> Container spec (nginx:latest, port 80, 2 replicas)
+- Sends `POST {PROVIDER_SERVICE_URL}/deployments` with:
+  - `kind`: `"vm"` or `"container"`
+  - `metadata`: `{name, namespace: <zone>, labels: {"app-id": <appID>}}`
+  - `spec`: VMSpec or ContainerSpec from catalog
+- Each zone maps to a Kubernetes namespace in the provider
+- Collects all deployment IDs
 
-- **Intent Preservation**: Original user request is stored before processing for
-  audit and rehydration purposes
-- **Policy-Driven**: Service Provider selection and request validation are
-  handled by Policy Manager
-- **Error Handling**: Clear error paths for policy rejections and instance
-  creation failures
-- **State Management**: Both original intent and validated request are stored
-  for complete request lifecycle tracking and rehydration purposes
+5. **Rollback on Failure**
+
+- If any deployment fails mid-loop:
+  - All previously created deployments are deleted from the provider
+  - The application record is deleted from the database
+  - Error response is returned to the client
+- If the final database update (saving deployment IDs) fails:
+  - All deployments are deleted from the provider
+  - Error response is returned
+
+6. **Success Response**
+
+- Application record is updated with all deployment IDs
+- Returns `201 Created` synchronously with the application response
+- The entire create-validate-deploy flow is synchronous
+
+### Application Deletion Flow
+
+1. Retrieve the application from the database by ID
+2. Iterate over all deployment IDs and delete each from the provider service
+   - Failures are logged as warnings but do not stop the process (best-effort)
+3. Delete the application record from the database
+4. Return `204 No Content` with the deleted application details
+
+#### Key Characteristics
+
+- **Policy-Driven Zone Placement**: Policy Engine determines which zones require
+  deployments based on tier-specific policies with dynamic namespace discovery
+- **Multi-Zone Deployments**: One deployment per zone, each mapped to a
+  Kubernetes namespace
+- **Synchronous Processing**: All operations complete before returning `201
+  Created` to the client
+- **AEP Conventions**: API follows AEP standards with canonical `path` fields
+  and paginated list responses
+
+### Data Model
+
+The Placement API uses a single `Application` model persisted via GORM:
+
+| Field         | Type             | Description                          |
+|---------------|------------------|--------------------------------------|
+| ID            | UUID             | Primary key                          |
+| Name          | string           | Application name (required)          |
+| Service       | string           | Service type: "webserver"/"container" |
+| Zones         | text[]           | Zones where deployments exist        |
+| Tier          | int              | Policy tier (1, 2, etc.)             |
+| DeploymentIDs | text[]           | Provider deployment IDs              |
+| CreatedAt     | timestamp        | Record creation time (GORM managed)  |
+| UpdatedAt     | timestamp        | Last update time (GORM managed)      |
+| DeletedAt     | timestamp (null) | Soft delete time (GORM managed)      |
+
+### Deployment Topology
+
+The system runs as four containers orchestrated via Podman Compose:
+
+| Service              | Container Name            | Image                                           | Port |
+|----------------------|---------------------------|-------------------------------------------------|------|
+| Placement Manager        | placement-api             | quay.io/dcm-project/dcm-placement-api:latest| 8080 |
+| PostgreSQL 15        | placement-db              | quay.io/sclorg/postgresql-15-c9s:latest         | 5432 |
+| OPA Policy Engine    | placement-policy-engine   | docker.io/openpolicyagent/opa:latest-static     | 8181 |
+| Provider Service     | k8s-service-provider      | quay.io/dcm-project/k8s-service-provider:latest | ---- |
+
+All containers share a `placement-network` bridge network.
