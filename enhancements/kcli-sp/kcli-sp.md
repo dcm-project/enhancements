@@ -588,6 +588,17 @@ resolution logic applies (see VM section above).
 catalog `ClusterSpec` does not have a `cluster_type` field, `provider_hints` is
 the primary mechanism to select the type.
 
+**Node OS image:** kcli defaults to `centos9stream` for cluster node VMs. If
+this image is not locally available, kcli attempts to download it — which may
+fail depending on network access. Use `provider_hints.kcli.image` to override
+(e.g. `"fedora41"`). The catalog item should expose this as a user-configurable
+field with a sensible default matching the images available on the kweb host.
+
+**Additional kweb parameters:** Any key in `provider_hints.kcli` (except
+`cluster_type`, which is handled separately) is forwarded as-is to kweb's
+cluster creation API. This can be used for `image`, `nets`, `disk_size`, or
+any other kcli parameter.
+
 Example request payload (direct SP call with metadata):
 
 ```json
@@ -602,7 +613,7 @@ POST /api/v1alpha1/clusters?id=my-cluster-id
       "workers": { "count": 2 }
     },
     "provider_hints": {
-      "kcli": { "cluster_type": "k3s" }
+      "kcli": { "cluster_type": "k3s", "image": "fedora41" }
     }
   }
 }
@@ -1262,6 +1273,30 @@ On downgrade:
   resource instead of 409; (6) rollback failures on `store.Put` errors are now
   logged instead of silently swallowed. Added structured logger to handler
   layer.
+- 2026-04-23: Cluster kubeconfig and VM access info (`ssh_user`, `ip`) now
+  included in GET responses. Kubeconfig is base64-encoded and only returned when
+  cluster status is READY, following the ACM SP pattern.
+- 2026-04-24: Comprehensive adversarial due diligence review. Fixes: cluster
+  READY status gated on non-empty `vms` list, kubeconfig sanitized to single
+  cluster context, added `slog` structured logging throughout, removed dead
+  `getClusterKubeconfigErr` test mock. Documented multi-backend kweb table and
+  kweb's libvirt dependency caveats.
+- 2026-04-24: Addressed Piotr's PR review feedback: closed open questions,
+  aligned cluster status transitions with ACM SP, expanded kweb API reference,
+  added production disclaimer.
+- 2026-04-24: `mergeKcliHints()` — arbitrary parameters from
+  `provider_hints.kcli` (e.g. `image`, `nets`, `disk_size`) are now forwarded
+  to kweb's cluster/VM creation API. This fixes cluster creation failing when
+  the default `centos9stream` image is unavailable. Keys already handled
+  separately (`cluster_type` for clusters, `profile` for VMs) are excluded.
+- 2026-04-24: Added Traefik routes example for exposing kcli SP and the
+  placement manager's `/resources` endpoint through the gateway. Updated Rego
+  policy example to combined VM+cluster routing (avoids Rego conflict errors).
+- 2026-04-25: Updated cluster catalog item example with `provider_hints.kcli.image`
+  field (defaulting to `fedora41`) and node count fields for control plane and
+  workers.
+- 2026-04-25: Tagged **v0.1.1**. Container image:
+  `quay.io/pgarciaq/dcm-kcli-provider:v0.1.1`.
 
 ## Drawbacks
 
