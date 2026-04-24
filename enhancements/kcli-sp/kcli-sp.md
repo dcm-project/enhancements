@@ -22,14 +22,19 @@ see-also:
 
 ## Open Questions
 
-1. **kweb version pinning.** kweb has no versioned API contract. Should the SP
-   pin to a specific kcli release and test against it, or attempt to support
-   multiple kweb versions with feature detection?
+1. ~~**kweb version pinning.**~~ **Resolved.** kcli has no semver releases — it
+   has been at version `99.0.0` for ~6 years, with a new RPM build on every
+   commit (e.g. `99.0.0.git.202604230909.6534e7c`). Each SP release documents
+   the **kweb git commit** it was validated against (e.g. v0.1.0 was tested
+   against `6534e7c`). When kweb changes break or improve behavior, the SP
+   version is bumped and the validated commit is updated.
 
-2. **Multi-backend status mapping.** kweb VM status strings vary by backend
-   (libvirt returns `up`/`down`; vSphere adds `suspended`; OpenStack has
-   `error`). Should the SP implement per-backend mapping tables, or document
-   libvirt as the only supported backend for v1?
+2. ~~**Multi-backend status mapping.**~~ **Resolved.** The SP supports all kcli
+   backends (libvirt, vSphere, KubeVirt, AWS, Azure, OpenStack, etc.). It
+   normalizes kweb status strings to DCM's vocabulary (`RUNNING`, `STOPPED`,
+   `PROVISIONING`, `ERROR`). Status strings vary by backend (e.g. libvirt
+   returns `up`/`down`, vSphere adds `suspended`), but the SP maps known values
+   and maps unknowns to `ERROR`.
 
 3. **Cluster type `kind`.** kweb's `swagger.yml` lists `kind` as a valid cluster
    type, but the implementation has no handler for it (causing a runtime error).
@@ -45,13 +50,27 @@ machines and Kubernetes clusters through
 workloads. Unlike the existing KubeVirt SP and ACM Cluster SP — which interact
 directly with Kubernetes CRDs on a management cluster — the kcli SP communicates
 with a standalone kweb instance, enabling DCM to provision infrastructure on any
-hypervisor backend that kcli supports (primarily libvirt/KVM for homelab use).
+backend that kcli supports (libvirt/KVM, vSphere, KubeVirt, AWS, Azure,
+OpenStack, etc.).
 
 Because DCM registration is per service type, the kcli SP registers **twice**
 with the Service Provider Manager: once for the `vm` service type and once for
 the `cluster` service type. From DCM's perspective these appear as two
 independent providers (`kcli-vm` and `kcli-cluster`), but they share a single Go
-binary and a single kweb backend.
+binary and a single kweb backend. This dual registration is a workaround for the
+current SPM API; a future SPM enhancement should support multi-service-type
+registration in a single call.
+
+### Production Readiness
+
+> **This service provider is not intended for production use.** It is designed
+> for development, testing, and homelab environments. kweb has no
+> authentication, no TLS, no rate limiting, and no SLA guarantees. The kcli SP
+> inherits these limitations. For production workloads, use the
+> [KubeVirt SP](https://github.com/dcm-project/kubevirt-service-provider)
+> (VMs) or
+> [ACM Cluster SP](https://github.com/dcm-project/acm-cluster-service-provider)
+> (clusters).
 
 ## Motivation
 
@@ -155,13 +174,44 @@ workflows end-to-end without cloud infrastructure costs.
 - The DCM Service Provider Registry is reachable for registration.
 - The DCM messaging system (NATS) is reachable for status reporting.
 - Each kweb instance manages a single backend environment. Multi-environment
-  setups require one kweb + one kcli SP instance per environment.
+  setups require one kweb + one kcli SP instance per environment (see
+  Multi-Backend Deployments below).
+
+### Multi-Backend Deployments
+
+Each kcli SP instance connects to exactly one kweb instance, which is configured
+for one kcli backend. For environments with multiple backends (e.g. libvirt on
+one host, AWS in a cloud account), the admin deploys one kweb + SP pair per
+backend:
+
+| SP Instance | kweb Backend | Provider Name | Service Type |
+|---|---|---|---|
+| kcli SP #1 | kweb (libvirt on apollo) | `kcli-libvirt-apollo` | `vm`, `cluster` |
+| kcli SP #2 | kweb (AWS us-east) | `kcli-aws-useast` | `vm`, `cluster` |
+
+All instances register using the **standard** DCM service types (`vm`,
+`cluster`) — not provider-specific types. This preserves the SP abstraction
+where the catalog and placement layers are provider-agnostic.
+
+DCM's **Rego policy** in the placement manager routes requests to the correct
+provider based on `provider_hints`, labels, or provider name. Users select a
+backend by choosing the appropriate **catalog item** (e.g. "Apollo Lab VM" vs
+"AWS Dev VM"), not by specifying a backend in the API request.
 
 ### Integration Points
 
 #### kweb Integration
 
-The kcli SP communicates with kweb over HTTP using a hand-written thin client.
+The kcli SP communicates with kweb over HTTP using a hand-written thin client,
+configured via the `KWEB_URL` environment variable. The SP has **no dependency
+on Python, kcli, or kcli configuration files** — it only needs network access to
+kweb.
+
+kweb's backend is determined by the kcli configuration on the host where kweb
+runs — either `~/.kcli/config.yml`, `~/.kcli/config.yaml`, or the `KCLI_CONFIG`
+environment variable. Without explicit configuration, kweb defaults to the local
+libvirt/KVM backend (requires libvirt to be running on the kweb host).
+
 The SP does **not** rely on kweb's `swagger.yml` for client generation due to
 known spec drift (see Risks). The relevant kweb endpoints are:
 
@@ -195,7 +245,16 @@ known spec drift (see Risks). The relevant kweb endpoints are:
 
 kweb returns JSON responses for most endpoints. The notable exception is
 `GET /kubes/{name}/kubeconfig`, which returns **raw kubeconfig text**
-(`text/plain`), not JSON.
+(`text/plain`), not JSON. The SP consumes this endpoint internally — it is not
+proxied to DCM users. Instead, the SP follows the ACM Cluster SP pattern: when a
+cluster reaches `RUNNING` status, the SP fetches the kubeconfig from kweb,
+base64-encodes it, and embeds it in the `GET /clusters/{id}` response alongside
+an `api_endpoint` field extracted from the kubeconfig. This gives users
+everything they need to access their cluster from the standard DCM API.
+
+For VMs, `GET /vms/{id}` returns the VM's `ip` address and `ssh_user` (the
+default SSH user, e.g. `fedora`, `core`, `centos`) so users know how to connect
+(e.g. `ssh fedora@192.168.x.x`).
 
 VM creation is synchronous (the handler blocks until the VM is created or
 fails). Cluster creation is asynchronous (kweb spawns a background thread and
@@ -1000,8 +1059,11 @@ kubeconfigs without authentication. The `/vmconsole/{name}` endpoint returns
 VNC/SPICE passwords.
 
 **Mitigation:** On a trusted homelab network, the kubeconfig data is no more
-exposed than it would be via direct `kcli` CLI access. The SP does not proxy the
-kubeconfig endpoint in v1.
+exposed than it would be via direct `kcli` CLI access. The SP embeds
+base64-encoded kubeconfig in the `GET /clusters/{id}` response (following the
+ACM SP pattern), but does not proxy the raw kweb endpoint. For VMs, the SP
+returns IP address and default SSH user — no passwords or private keys are
+exposed. Console/VNC access via a dedicated endpoint is deferred to v2.
 
 #### kweb Concurrency Limitations
 
@@ -1219,8 +1281,9 @@ On downgrade:
   scalability guarantees of the KubeVirt and ACM providers.
 
 - **Backend-specific status mapping:** kweb returns different status strings per
-  backend. Only the libvirt mapping is fully specified for v1; other backends
-  will require additional mapping tables and testing.
+  backend. The SP normalizes all known status strings to DCM vocabulary
+  (`RUNNING`, `STOPPED`, `PROVISIONING`, `ERROR`) and maps unknown values to
+  `ERROR`.
 
 ## Alternatives
 
@@ -1256,6 +1319,9 @@ results.
   HTTP client.
 - **Subprocess overhead.** Each DCM operation spawns a Python process, adding
   latency and resource consumption.
+- **Only remaining option.** kcli previously offered a gRPC API, but it was
+  deprecated in favor of the kweb REST API. CLI wrapping is the only
+  non-HTTP integration path.
 
 #### Status
 
