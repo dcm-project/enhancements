@@ -19,7 +19,7 @@ updated-date: 2026-04-23
 
 ## Summary
 
-The Placement Manager (dcm-placement-api) orchestrates resource requests within DCM
+The Placement Manager (dcm-placement-manager) orchestrates resource requests within DCM
 core. It receives user requests through a REST API, validates and
 enriches them through Policy Engine, and delegates deployment creation
 to the Provider Service (k8s-service-provider). The Placement Manager focuses on
@@ -44,7 +44,7 @@ request orchestration by the Policy Engine, and deployment coordination by zones
 
 ### System Architecture
 
-The Placement API acts as the central orchestration service within DCM core,
+The Placement Manager acts as the central orchestration service within DCM core,
 coordinating between user requests (from the Catalog Manangement),  policy validation, and catalog instance creation.
 The following diagram illustrates the system architecture and
 component interactions.
@@ -52,7 +52,7 @@ component interactions.
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10, 'curve': 'linear'},}}%%
 flowchart TD
-    classDef placementApi fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
+    classDef placementManager fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
     classDef opaEngine fill:#2d2d2d,color:#ffffff,stroke:#ffb74d,stroke-width:2px
     classDef providerService fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
     classDef database fill:#2d2d2d,color:#ffffff,stroke:#f48fb1,stroke-width:2px
@@ -62,7 +62,7 @@ flowchart TD
     CLIENT["**Catalog Manager**<br/>Send Request"]:::client
 
     subgraph DCM_Core [ ]
-        PA["**Placement Manager**<br/>dcm-placement-api<br/>"]:::placementApi
+        PA["**Placement Manager**<br/>dcm-placement-manager<br/>"]:::placementManager
 
         OPA["**OPA Policy Engine**<br/>Tier-based Validation<br/>Zone Discovery<br/>"]:::opaEngine
 
@@ -90,7 +90,7 @@ flowchart TD
 
 - Standard Open Policy Agent instance running the stock
   `openpolicyagent/opa:latest-static` image
-- Placement API sends validation requests via `POST {DCM_OPA_SERVER}/v1/data/tier{N}`
+- Placement Manager sends validation requests via `POST {DCM_OPA_SERVER}/v1/data/tier{N}`
   (OPA's native Data API)
 - Tier number (1, 2, etc.) is derived from the application's `tier` field,
   routing to different Rego policy packages (`tier1`, `tier2`)
@@ -241,7 +241,7 @@ Returns `204 No Content` on success. Deployment deletions continue even if
 individual deletions fail (best-effort cascade).
 
 **GET /health**
-Retrieve the health status of the Placement API.
+Retrieve the health status of the Placement Manager.
 
 ```json
 {
@@ -355,7 +355,7 @@ sequenceDiagram
   - `required_zones` (string[]): Zones where deployments should be created
   - `failures` (string[]): Failure messages if validation fails
 - If policy validation fails:
-  - Placement API returns error response with failure details to the client
+  - Placement Manager returns error response with failure details to the client
   - No database records are created
 
 3. **Application Persistence**
@@ -368,7 +368,7 @@ sequenceDiagram
 
 4. **Multi-Zone Deployment**
 
-- Placement API iterates over each zone from `required_zones`
+- Placement Manager iterates over each zone from `required_zones`
 - For each zone, it resolves the infrastructure spec from the internal catalog:
   - `webserver` -> VM spec (1 CPU, 1 GB RAM, Fedora)
   - `container` -> Container spec (nginx:latest, port 80, 2 replicas)
@@ -416,7 +416,7 @@ sequenceDiagram
 
 ### Data Model
 
-The Placement API uses a single `Application` model persisted via GORM:
+The Placement Manager uses a single `Application` model persisted via GORM:
 
 | Field         | Type             | Description                          |
 |---------------|------------------|--------------------------------------|
@@ -436,7 +436,7 @@ The system runs as four containers orchestrated via Podman Compose:
 
 | Service              | Container Name            | Image                                           | Port |
 |----------------------|---------------------------|-------------------------------------------------|------|
-| Placement Manager        | placement-api             | quay.io/dcm-project/dcm-placement-api:latest| 8080 |
+| Placement Manager        | placement-manager             | quay.io/dcm-project/dcm-placement-manager:latest| 8080 |
 | PostgreSQL 15        | placement-db              | quay.io/sclorg/postgresql-15-c9s:latest         | 5432 |
 | OPA Policy Engine    | placement-policy-engine   | docker.io/openpolicyagent/opa:latest-static     | 8181 |
 | Provider Service     | k8s-service-provider      | quay.io/dcm-project/k8s-service-provider:latest | ---- |
