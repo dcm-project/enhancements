@@ -155,6 +155,7 @@ sequenceDiagram
     autonumber
     actor User
     participant CM as Catalog Manager
+    participant CM_DB as Catalog Manager DB    
     participant PM as Placement Manager
     participant DB as Placement DB
     participant PE as Policy Manager
@@ -163,14 +164,16 @@ sequenceDiagram
     participant SP as Service Provider
 
     User->>CM: POST /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate
-    CM->>CM: Generate newInstanceId
-    CM->>PM: POST /api/v1/resources/{instanceId}:rehydrate<br/>{newInstanceId}
+    CM->>CM: Generate newResourceId
+    CM->>CM_DB: Update resourceId reference to newResourceId
+
+    CM->>PM: POST /api/v1/resources/{resourceId}:rehydrate<br/>{newResourceId}
 
     activate PM
 
-    PM->>DB: Retrieve original intent by instanceId
+    PM->>DB: Retrieve original intent by resourceId
     activate DB
-    DB-->>PM: {originalRequest, providerName, oldInstanceId}
+    DB-->>PM: {originalRequest, providerName, oldResourceId}
     deactivate DB
 
     %% Re-evaluate policies on original intent
@@ -180,17 +183,18 @@ sequenceDiagram
         PE-->>PM: 406 Not Acceptable
         PM->>DB: Update record (policy rejected)
         PM-->>CM: Error (policy rejected)
+        CM->>CM_DB: Rollback resourceId to currentResourceId        
         CM-->>User: Rehydration failed (policy rejected)
     else Policy approves
         PE-->>PM: 200 OK<br/>{evaluatedServiceInstance, selectedProvider, status}
 
-        PM->>DB: Store validated request with newInstanceId<br/>{validatedPayload, new providerName}
+        PM->>DB: Store validated request with newResourceId<br/>{validatedPayload, new providerName}
         activate DB
         DB-->>PM: Updated
         deactivate DB
 
-        %% Create new resource with new InstanceID
-        PM->>SPRM: POST /api/v1/service-type-instances<br/>{newInstanceId, providerName, spec}
+        %% Create new resource with new ResourceId
+        PM->>SPRM: POST /api/v1/service-type-instances<br/>{newResourceId, providerName, spec}
         activate SPRM
 
         SPRM->>SR: Lookup provider by name
@@ -199,24 +203,24 @@ sequenceDiagram
         alt Provider not found or unhealthy
             SPRM-->>PM: Error response
             PM-->>CM: Error (provider unavailable)
+            CM->>CM_DB: Rollback resourceId to currentResourceId
             CM-->>User: Rehydration failed
         else Provider healthy
             SPRM->>SP: POST {endpoint}/api/v1/{serviceType}<br/>{spec}
-            SP-->>SPRM: {newInstanceId, status: PROVISIONING}
-            SPRM-->>PM: 202 Accepted {newInstanceId, status}
+            SP-->>SPRM: {newResourceId, status: PROVISIONING}
+            SPRM-->>PM: 202 Accepted {newResourceId, status}
         end
         deactivate SPRM
 
         %% Delete old resource (deferred) after new one is created
-        PM->>SPRM: DELETE /api/v1/service-type-instances/{oldInstanceId}?deferred=true
+        PM->>SPRM: DELETE /api/v1/service-type-instances/{oldResourceId}?deferred=true
         activate SPRM
-        SPRM->>SPRM: Record pending cleanup<br/>{oldInstanceId, providerName}
+        SPRM->>SPRM: Record pending cleanup<br/>{oldResourceId, providerName}
         SPRM-->>PM: 200 OK (deletion deferred)
         deactivate SPRM
 
         PM->>DB: Remove old instance record
         PM-->>CM: 202 Accepted {newInstanceId, status}
-        CM->>CM: Update InstanceID reference to newInstanceId
         CM-->>User: Rehydration started<br/>{status: PROVISIONING}
     end
     deactivate PM
@@ -229,10 +233,16 @@ sequenceDiagram
    - Catalog Manager does **not** regenerate the ServiceType payload from the
      CatalogItem. This ensures that only policy and environment changes are
      applied, not changes to the underlying CatalogItem or ServiceType
-   - Catalog Manager generates a new InstanceID for the downstream services
-   - Catalog Manager forwards the request to the Placement Manager rehydrate
-     endpoint with the current InstanceID (in the URL) and the new InstanceID
-     (in the request body)
+   - Catalog Manager reads the current resourceId from its database
+   - Catalog Manager generates a new resourceId for the downstream services
+   - Catalog Manager updates its database with the new resourceId **before**
+     calling Placement Manager (see [DB-First Update Order](#catalog-manager-db-first-update-order)).
+     The update uses compare-and-swap (CAS): it only succeeds if the resourceId
+     still matches the value read earlier, preventing concurrent rehydrates from
+     both proceeding
+   - Catalog Manager then forwards the request to the Placement Manager
+     rehydrate endpoint with the current resourceId (in the URL) and the new
+     resourceId (in the request body)
 
 2. **Intent Retrieval**
    - Placement Manager retrieves the original intent (the user's original
@@ -246,7 +256,8 @@ sequenceDiagram
    - Policy Manager evaluates the request through the full policy chain
      (Global, Tenant, User)
    - If the policy rejects the request, the Placement Manager updates the
-     record and returns an error
+     record and returns an error to Catalog Manager, which rolls back its
+     database to the original resourceId
    - If the policy approves, the Placement Manager receives the evaluated
      payload and the newly selected Service Provider
 
@@ -259,6 +270,8 @@ sequenceDiagram
      conflict in SP Resource Manager
    - Standard creation flow applies (SP lookup, health check, instance creation)
    - On success, the resource enters `PROVISIONING` state
+   - On failure, Catalog Manager rolls back its database to the original
+     resourceId
 
 5. **Delete Old Resource**
    - Once the new resource is created, Placement Manager requests SP Resource
@@ -270,10 +283,6 @@ sequenceDiagram
    - SP Resource Manager returns success to allow the flow to continue
    - Placement Manager removes the old instance record from the Placement DB
      and returns success to the Catalog Manager
-
-6. **Update Reference**
-   - Catalog Manager updates its CatalogItemInstance reference to the new
-     InstanceID
 
 ### Handling Deletion of the Old Resource
 
@@ -386,3 +395,23 @@ flowchart TD
 - **Idempotent Rehydration**: Rehydrating an already-rehydrated resource works
   the same way; a new resource is created from the original intent and the
   current resource is deleted afterward
+
+### Catalog Manager: DB-First Update Order
+
+The Catalog Manager uses a **DB-first** approach when updating the
+`resource_id` during rehydration. The database is
+updated before calling Placement Manager, and rolled back if the PM call fails.
+
+#### Why DB-First?
+
+The alternative approach (PM-first) would call Placement Manager before updating
+the database. While this ensures the database always points to a resource that
+exists in PM, it introduces a significant risk: **orphaned resources**.
+
+| Approach | Tradeoff |
+|----------|----------|
+| **PM-first** | DB always points to something real, but if the DB update fails, PM has provisioned a resource that the DB doesn't reference. These orphans are invisible to the system and silently leak infrastructure. |
+| **DB-first** | DB may briefly point to a `resource_id` that PM hasn't provisioned yet (a window of milliseconds), but we rollback immediately on PM failure, and any inconsistency is easily detected. |
+
+The key insight: **DB inconsistencies are cheap to detect and fix; PM orphans
+leak real infrastructure silently.**
