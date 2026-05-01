@@ -56,8 +56,8 @@ The DCM Control Plane will act as the "prober." It will maintain a list of regis
     * **Ready:** If response is `200 OK` and body `status` is `healthy`, reset failure counter and mark as `Ready`.
     * **Unhealthy:** If response is `200 OK` and body `status` is `unhealthy`, mark as `Unhealthy`. The service provider is reachable but the backing provider is unavailable.
     * **Failure:** If timeout or non-200 response, increment failure counter.
-    * **Threshold:** If failures exceed the `FailureThreshold` (default: 3), transition provider to `NotReady`.
-4.  **Recovery:** A single `200 OK` with `status` `healthy` transitions an `Unhealthy` or `NotReady` provider back to `Ready`.
+    * **Threshold:** If failures exceed the `FailureThreshold` (default: 3), transition provider to `Unavailable`.
+4.  **Recovery:** A single `200 OK` with `status` `healthy` transitions an `Unhealthy` or `Unavailable` provider back to `Ready`.
 
 ## Design Details
 
@@ -99,4 +99,4 @@ The `status` field indicates the health of the backing provider:
 |---|---|---|
 | `200 OK` | `healthy` | **Ready** |
 | `200 OK` | `unhealthy` | **Unhealthy** |
-| Non-200 / Timeout | N/A | **NotReady** (after exceeding `FailureThreshold`) |
+| Non-200 / Timeout | N/A | **Unavailable** (after exceeding `FailureThreshold`) |
