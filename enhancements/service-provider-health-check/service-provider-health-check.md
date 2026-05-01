@@ -18,7 +18,7 @@ creation-date: 2025-12-15
 # Service Provider Health Check
 
 ## Summary
-This enhancement proposes a mechanism for the DCM control plane to actively monitor the health of service providers. Instead of providers pushing heartbeats, the DCM control plane will poll a `/health` endpoint on the service provider to verify liveness.
+This enhancement proposes a mechanism for the DCM control plane to actively monitor the health of service providers. Instead of providers pushing heartbeats, the DCM control plane will poll a `/health` endpoint on the service provider to verify liveness and backing provider health.
 
 ## Motivation
 Define the DCM control plane way to determine if a service provider is accessible. Without an active check, the control plane might attempt to schedule services on providers that are down.
@@ -53,10 +53,11 @@ The DCM Control Plane will act as the "prober." It will maintain a list of regis
 1.  **DCM Controller:** Iterates through the list of active providers in the database.
 2.  **Probing:** For each provider, DCM executes: `GET http://<provider-ip>:<port>/health`.
 3.  **State Machine:**
-    * **Success:** If response is `200 OK`, reset failure counter and mark as `Ready`.
+    * **Ready:** If response is `200 OK` and body `status` is `healthy`, reset failure counter and mark as `Ready`.
+    * **Unhealthy:** If response is `200 OK` and body `status` is `unhealthy`, mark as `Unhealthy`. The service provider is reachable but the backing provider is unavailable.
     * **Failure:** If timeout or non-200 response, increment failure counter.
     * **Threshold:** If failures exceed the `FailureThreshold` (default: 3), transition provider to `NotReady`.
-4.  **Recovery:** A single successful `200 OK` transitions a `NotReady` provider back to `Ready`.
+4.  **Recovery:** A single `200 OK` with `status` `healthy` transitions an `Unhealthy` or `NotReady` provider back to `Ready`.
 
 ## Design Details
 
@@ -70,10 +71,32 @@ The Service Provider must expose a lightweight unauthenticated (or internally se
 
 **Expected Response:**
 * **Code:** `200 OK`
-* **Body:** (Optional) 
+* **Body:**
 ```json
 {
-  "status": "pass",
+  "status": "healthy",
   "version": "v1.2.3",
   "uptime": 3600
 }
+```
+
+The `status` field indicates the health of the backing provider:
+* `healthy` — The service provider and its backing provider are operational. DCM marks the provider as **Ready**.
+* `unhealthy` — The service provider is reachable but the backing provider is unavailable. DCM marks the provider as **Unhealthy**.
+
+**Unhealthy Response Example:**
+```json
+{
+  "status": "unhealthy",
+  "version": "v1.2.3",
+  "uptime": 3600
+}
+```
+
+#### Provider State Summary
+
+| HTTP Response | `status` field | DCM State |
+|---|---|---|
+| `200 OK` | `healthy` | **Ready** |
+| `200 OK` | `unhealthy` | **Unhealthy** |
+| Non-200 / Timeout | N/A | **NotReady** (after exceeding `FailureThreshold`) |
