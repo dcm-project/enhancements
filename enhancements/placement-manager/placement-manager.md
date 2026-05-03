@@ -134,25 +134,19 @@ Snippet of the request body
 
 ```yaml
 requestBody:
-  required: true
-  content:
-    application/json:
-      schema:
-        type: object
-        required:
-          - catalogItemInstanceId
-          - spec
-        properties:
-          catalogItemInstanceId:
-            type: string
-            description: The ID of the catalog item instance
-            example: "4baa35eb-e70d-4d37-867d-0f4efa21d05c"
-          spec:
-            type: object
-            description: |
-              Service specification following one of the supported service type
-              schemas (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec).
-            additionalProperties: true
+  schemas:
+    Resource:
+      type: object
+      description: Full resource representation
+      x-aep-resource:
+        type: placement.dcm.io/resource
+        singular: resource
+        plural: resources
+        patterns:
+          - resources/{resource_id}
+      required:
+        - catalog_item_instance_id
+        - spec
 ```
 
 Example of payload for incoming VM catalog instance request
@@ -161,28 +155,79 @@ Example of payload for incoming VM catalog instance request
 {
   "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
   "spec": {
-    "serviceType": "vm",
-    "memory": { "size": "2GB" },
-    "vcpu": { "count": 2 },
-    "guestOS": { "type": "fedora-39" },
-    "access": {
-      "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
-    },
-    "metadata": { "name": "fedora-vm" }
-  }
-}
+    "cpu": 2,    
+    "memory": "2GB"
+  }               
+}  
 ```
 
 Response payload: Returns 201 Created if successful.
 ```json
 {
+  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "provider_name": "kubevirt-sp",
   "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-  "resource_name": "fedora-vm",
-  "providerName": "kubevirt-sp",
-  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+  "spec": {
+    "cpu": 2,
+    "memory": "2GB"
+  },                                
+  "approval_status": "pending",
+  "create_time": "2026-05-03T12:00:00Z",
+  "update_time": "2026-05-03T12:00:00Z"
 }
 ```
+
 **Note**: This is **only** an example of the payload.
+
+**POST /resources/{resourceId}:rehydrate**  
+
+The POST endpoint creates a resource that is supported by DCM. 
+Rehydrate re-evaluates an existing resource against current policies, provisions a new one with a new ID, and deletes the old one
+
+Snippet of the request body
+
+```yaml
+RehydrateRequest:
+  type: object
+  description: Request body for resource rehydration
+  required:
+    - new_resource_id
+  properties:
+    new_resource_id:
+      type: string
+      description: The new resource ID to use for the rehydrated resource
+      pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+      minLength: 1
+      maxLength: 63
+```
+
+Example of payload for incoming VM catalog instance request
+
+```bash
+{
+  "new_resource_id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+}
+```
+
+Example of Response Payload
+
+```bash
+{
+  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",          
+  "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "provider_name": "kubevirt-sp",
+  "catalogItemInstanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+  "spec": {
+    "cpu": 2,
+    "memory": "2GB"
+  },
+  "approval_status": "approved",
+  "create_time": "2026-05-03T12:05:00Z",
+  "update_time": "2026-05-03T12:05:00Z"
+}
+```
+
 
 **GET /api/v1/resources**  
 List all resources according to AEP standards.
@@ -190,26 +235,24 @@ List all resources according to AEP standards.
 Example of Response Payload
 
 ```json
-[
+{
+ [ 
   {
-    "catalogItemInstanceId": "52540146-6212-4514-b534-0c3127b2836f",
-    "name": "nginx-container",
-    "providerName": "container-sp",
-    "instanceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0"
-  },
-  {
-    "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-    "name": "postgres-001",
-    "providerName": "postgres-sp",
-    "instanceId": "c66be104-eea3-4246-975c-e6cc9b32d74d"
-  },
-  {
-    "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-    "name": "ubuntu-vm",
-    "providerName": "kubevirt-sp",
-    "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+    "id": "52540146-6212-4514-b534-0c3127b2836f",
+    "path": "resources/52540146-6212-4514-b534-0c3127b2836f",
+    "provider_name": "container-sp",
+    "catalogItemInstanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",   
+    "spec": {
+      "cpu": 2,
+      "memory": "2GB"
+    },  
+    "approval_status": "approved",
+    "create_time": "2026-05-03T12:00:00Z",
+    "update_time": "2026-05-03T12:30:00Z"   
   }
-]
+],                                
+"next_page_token": "eyJpZCI6IjEyM2U0NTY3LWU4OWItMTJkMy1hNDU2LTQyNjYxNDE3NDAwMCJ9"              
+}  
 ```
 
 **GET /api/v1/resources/{resourceId}**  
@@ -219,10 +262,17 @@ Example of Response Payload
 
 ```json
 {
+  "id": "d08aa81d1-a0d2-4d5f-a4df-b80addf07781",  
+  "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "provider_name": "kubevirt-sp",
   "catalogItemInstanceId": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
-  "name": "ubuntu-vm",
-  "providerName": "kubevirt-sp",
-  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+  "spec": {       
+    "cpu": 4,
+    "memory": "2GB"
+  },
+  "approval_status": "approved",
+  "create_time": "2026-05-03T12:00:00Z",
+  "update_time": "2026-05-03T12:30:00Z"
 }
 ```
 
@@ -231,6 +281,15 @@ Delete a resource based on id.
 
 **GET /api/v1/health**  
 Retrieve the health status of Placement Manager.
+
+Example of Response Payload
+
+```bash
+{
+  "status": "healthy",
+  "path": "health"    
+}
+```
 
 ## Design Details
 
