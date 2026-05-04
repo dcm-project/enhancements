@@ -45,7 +45,7 @@ see-also:
 
 The kcli Service Provider is a DCM Service Provider that manages virtual
 machines and Kubernetes clusters through
-[kcli](https://github.com/karmab/kcli)'s HTTP API (kweb). It is designed for
+[kcli](https://github.com/karmab/kcli)'s HTTP API ([kweb](https://kcli.readthedocs.io/en/latest/index.html#kweb)). It is designed for
 **development, testing, and homelab environments** — not for production
 workloads. Unlike the existing KubeVirt SP and ACM Cluster SP — which interact
 directly with Kubernetes CRDs on a management cluster — the kcli SP communicates
@@ -337,7 +337,7 @@ routing simple and aligns with the canonical contract.
 The kcli SP must successfully register with DCM for each service type it
 provides. During startup, after the HTTP server is ready, the SP uses the DCM
 registration client to send two requests to the SP API registration endpoint:
-`POST /api/v1alpha1/providers`.
+`POST /api/v1/providers`.
 
 See DCM
 [registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
