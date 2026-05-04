@@ -1186,7 +1186,7 @@ re-associating a handful of resources.
 
 ### Implementation Status
 
-141 Ginkgo specs across 8 suites, all passing with `--race`. The following items
+Ginkgo specs across 8 suites, all passing with `--race`. The following items
 were audited and intentionally deferred:
 
 #### Accepted as-is
