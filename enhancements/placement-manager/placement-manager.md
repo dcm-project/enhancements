@@ -140,10 +140,10 @@ requestBody:
       schema:
         type: object
         required:
-          - id
+          - catalogItemInstanceId
           - spec
         properties:
-            id:
+          catalogItemInstanceId:
             type: string
             description: The ID of the catalog item instance
             example: "4baa35eb-e70d-4d37-867d-0f4efa21d05c"
@@ -159,11 +159,12 @@ Example of payload for incoming VM catalog instance request
 
 ```json
 {
-  "id": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
+  "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
   "spec": {
     "serviceType": "vm",
+    "vcpu": { "count": 2 },
     "memory": { "size": "2GB" },
-    "cpu": { "count": 2 },
+    "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
     "guestOS": { "type": "fedora-39" },
     "access": {
       "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
@@ -178,11 +179,16 @@ Response payload: Returns 201 Created if successful.
 {
   "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
   "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "providerName": "kubevirt-sp",  
+  "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
+  "providerName": "kubevirt-sp",
   "spec": {
-    "cpu": 2,
-    "memory": "2GB"
-  },                                
+    "serviceType": "vm",
+    "vcpu": { "count": 2 },
+    "memory": { "size": "2GB" },
+    "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
+    "guestOS": { "type": "fedora-39" },
+    "metadata": { "name": "fedora-vm" }
+  },
   "approvalStatus": "pending",
   "createTime": "2026-05-03T12:00:00Z",
   "updateTime": "2026-05-03T12:00:00Z"
@@ -197,47 +203,62 @@ List all resources according to AEP standards.
 Example of Response Payload
 
 ```json
-[ 
-  {
-    "id": "52540146-6212-4514-b534-0c3127b2836f",
-    "name": "nginx-container",
-    "path": "resources/52540146-6212-4514-b534-0c3127b2836f",
-    "providerName": "nginx-container",    
-    "spec": {
-      "cpu": 2,
-      "memory": "2GB"
-    },  
-    "approvalStatus": "approved",
-    "createTime": "2026-05-03T12:00:00Z",
-    "updateTime": "2026-05-03T12:30:00Z"   
-  },
-  {
-    "id": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-    "name": "postgres-001",
-    "path": "resources/52540146-6212-4514-b534-0c3127b2836f",
-    "providerName": "postgres-sp",
-    "spec": {
-      "cpu": 2,
-      "memory": "2GB"
-    },  
-    "approvalStatus": "approved",
-    "createTime": "2026-05-03T12:00:00Z",
-    "updateTime": "2026-05-03T12:30:00Z"   
-  },
-  {
-    "id": "52540146-6212-4514-b534-0c3127b2836f",
-    "name": "ubuntu-vm",
-    "path": "resources/52540146-6212-4514-b534-0c3127b2836f",
-    "providerName": "kubevirt-sp",
-    "spec": {
-      "cpu": 2,
-      "memory": "2GB"
-    },  
-    "approvalStatus": "approved",
-    "createTime": "2026-05-03T12:00:00Z",
-    "updateTime": "2026-05-03T12:30:00Z"   
-  }
-] 
+{
+  "resources": [
+    {
+      "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "path": "resources/696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "catalogItemInstanceId": "52540146-6212-4514-b534-0c3127b2836f",
+      "providerName": "container-sp",
+      "spec": {
+        "serviceType": "container",
+        "image": { "reference": "docker.io/nginx:latest" },
+        "resources": {
+          "cpu": { "min": 1, "max": 2 },
+          "memory": { "min": "512MB", "max": "1GB" }
+        },
+        "metadata": { "name": "nginx-container" }
+      },
+      "approvalStatus": "approved",
+      "createTime": "2026-05-03T12:00:00Z",
+      "updateTime": "2026-05-03T12:30:00Z"
+    },
+    {
+      "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
+      "path": "resources/c66be104-eea3-4246-975c-e6cc9b32d74d",
+      "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
+      "providerName": "postgres-sp",
+      "spec": {
+        "serviceType": "database",
+        "engine": "postgresql",
+        "version": "15",
+        "resources": { "cpu": 2, "memory": "8GB", "storage": "100GB" },
+        "metadata": { "name": "postgres-001" }
+      },
+      "approvalStatus": "approved",
+      "createTime": "2026-05-03T12:00:00Z",
+      "updateTime": "2026-05-03T12:30:00Z"
+    },
+    {
+      "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
+      "providerName": "kubevirt-sp",
+      "spec": {
+        "serviceType": "vm",
+        "vcpu": { "count": 2 },
+        "memory": { "size": "2GB" },
+        "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
+        "guestOS": { "type": "ubuntu-22.04" },
+        "metadata": { "name": "ubuntu-vm" }
+      },
+      "approvalStatus": "approved",
+      "createTime": "2026-05-03T12:00:00Z",
+      "updateTime": "2026-05-03T12:30:00Z"
+    }
+  ],
+  "nextPageToken": ""
+}
 ```
 
 **GET /api/v1/resources/{resourceId}**  
@@ -247,13 +268,17 @@ Example of Response Payload
 
 ```json
 {
-  "id": "d08aa81d1-a0d2-4d5f-a4df-b80addf07781",  
-  "name": "ubuntu-vm",
+  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
   "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "providerName": "kubevirt-sp",  
-  "spec": {       
-    "cpu": 4,
-    "memory": "2GB"
+  "catalogItemInstanceId": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
+  "providerName": "kubevirt-sp",
+  "spec": {
+    "serviceType": "vm",
+    "vcpu": { "count": 4 },
+    "memory": { "size": "2GB" },
+    "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
+    "guestOS": { "type": "ubuntu-22.04" },
+    "metadata": { "name": "ubuntu-vm" }
   },
   "approvalStatus": "approved",
   "createTime": "2026-05-03T12:00:00Z",
@@ -269,10 +294,10 @@ Retrieve the health status of Placement Manager.
 
 Example of Response Payload
 
-```bash
+```json
 {
   "status": "healthy",
-  "path": "health"    
+  "path": "health"
 }
 ```
 
@@ -292,7 +317,7 @@ sequenceDiagram
     participant PE as Policy Manager
     participant SPRM as SP Resource Manager
 
-    CM->>PM: POST /api/v1/resources<br/>{id, spec}
+    CM->>PM: POST /api/v1/resources<br/>{catalogItemInstanceId, spec}
     activate PM
 
     PM->>DB: Store intent<br/>{originalRequest}
