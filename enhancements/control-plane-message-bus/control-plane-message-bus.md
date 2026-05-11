@@ -212,11 +212,16 @@ Documentation](https://www.rabbitmq.com/docs/).
 - Temporary dual paths (HTTP commands plus bus events) add operational surface
   until rollout stabilizes.
 
+The figure below shows **publish** from managers and Service Providers into the
+bus and **deliver** from the bus to subscribers (same convention as the target
+topology in Design Details). **PolicyManager to OPA** stays **HTTP**. **PlacementManager**
+is with the other managers. **Service Providers** use the bus like the as-is
+topology (for example status and lifecycle). Gateway and the rest of the manager
+HTTP chain stay in [Current Topology](#current-topology-as-is).
+
 ```mermaid
 flowchart TB
-  User -->|"HTTP"| ApiGateway
-
-  subgraph controlPlane [ControlPlaneManagers]
+  subgraph controlPlane [Control plane managers]
     CatalogManager["CatalogManager"]
     PlacementManager["PlacementManager"]
     PolicyManager["PolicyManager"]
@@ -225,21 +230,27 @@ flowchart TB
 
   subgraph infrastructure [Infrastructure]
     OPA["OPA"]
-    EventBus["EventBus (broker TBD per deployment)"]
+    EventBus["EventBus"]
   end
 
-  ApiGateway -->|"HTTP"| CatalogManager
-  ApiGateway -->|"HTTP"| PlacementManager
-  ApiGateway -->|"HTTP"| PolicyManager
-  ApiGateway -->|"HTTP"| ServiceProviderManager
-  CatalogManager -->|"Command HTTP"| PlacementManager
-  PlacementManager -->|"Command HTTP"| PolicyManager
-  PlacementManager -->|"Command HTTP"| ServiceProviderManager
+  subgraph providers [Providers]
+    ServiceProviders
+  end
+
+  subgraph subscribers [Subscribers]
+    Subscribers["Examples only"]
+  end
+
   PolicyManager -->|"HTTP"| OPA
-  CatalogManager -->|"Async domain events"| EventBus
-  PlacementManager -->|"Async domain events"| EventBus
-  PolicyManager -->|"Async domain events"| EventBus
-  ServiceProviderManager -->|"Async domain events"| EventBus
+
+  CatalogManager -->|"publish"| EventBus
+  PlacementManager -->|"publish"| EventBus
+  PolicyManager -->|"publish"| EventBus
+  ServiceProviderManager -->|"publish"| EventBus
+
+  ServiceProviders -->|"publish"| EventBus
+
+  EventBus -->|"deliver"| Subscribers
 ```
 
 
@@ -262,7 +273,7 @@ Extra nodes such as BillingConsumer, AuditConsumer, and AnalyticsConsumer are
 **examples** of possible bus subscribers (for instance billing, compliance, or
 observability). They are not a committed roadmap, a required set of services,
 or a fixed naming scheme. A real deployment may add different consumers, rename
-them, or have none beyond Service Provider Manager until new work lands. In the
+them, or have none beyond `Service Provider Manager` until new work lands. In the
 diagram, `publish` means async publication of domain events onto the bus, and
 `deliver` means async fan-out to subscribers (not HTTP request/response).
 
