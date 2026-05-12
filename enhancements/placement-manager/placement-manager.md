@@ -354,7 +354,7 @@ sequenceDiagram
             activate DB
             deactivate DB
 
-            PM-->>CM: 202 Accepted<br/>{instanceId, status}
+            PM-->>CM: 201 Created<br/>{Resource}
 
         end
     end
@@ -403,8 +403,8 @@ sequenceDiagram
   - Request processing stops
 - If instance creation succeeds:
   - SP Resource Manager returns success response with `instanceId`, `status`
-  - Placement Manager returns 202 Accepted to Catalog Manager with `instanceId` and
-    `status`
+  - Placement Manager returns 201 Created to Catalog Manager with a full `Resource`
+    object
   - The resource is now in a `PROVISIONING` state
 
 #### Key Characteristics/Notes
