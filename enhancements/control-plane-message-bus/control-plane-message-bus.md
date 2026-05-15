@@ -190,12 +190,12 @@ custom polling of each manager API.
 ### Proposed implementation: hybrid commands and events
 
 Managers and the API gateway keep **synchronous HTTP** for command submission,
-validation, and manager-to-manager chains (including PolicyManager to OPA).
+validation, and manager-to-manager chains (including `PolicyManager` to OPA).
 **Asynchronous domain events** (state and lifecycle) are published to a message
 bus so many consumers can subscribe without new point-to-point HTTP for every
 pair. Long-running work can complete behind the first HTTP response using status
-and events. The bus implementation is **pluggable**: NATS/JetStream, Kafka,
-RabbitMQ, or a customer-operated equivalent (see Open Question 4).
+and events. The bus implementation is **pluggable**: `NATS/JetStream`, `Kafka`,
+`RabbitMQ`, or a customer-operated equivalent (see Open Question 4).
 
 **Why not “everything on the bus.”** A broker-only design would force
 command-style flows into fire-and-forget patterns, reply routing, and duplicate
@@ -369,6 +369,7 @@ flowchart TB
 
   ServiceProviders -->|"publish"| InternalBus
 
+  InternalBus -->|"deliver"| PlacementManager
   InternalBus -->|"deliver"| ServiceProviderManager
   InternalBus -->|"deliver"| BillingConsumer
   InternalBus -->|"deliver"| AuditConsumer
