@@ -23,36 +23,49 @@ see-also:
    events?
 3. Do we need multi-cluster or cross-region event routing in the first phase?
 4. Should deployments prefer a customer-operated broker when one already exists
-   and meets DCM needs (reuse Kafka, RabbitMQ, or similar), and use a DCM-managed or
-   bundled internal broker only when the customer has no suitable messaging tier?
+   and meets DCM needs (reuse Kafka, RabbitMQ, or similar), and use a
+   DCM-managed or bundled internal broker only when the customer has no suitable
+   messaging tier?
 5. Should control-plane TLS (external APIs, internal manager HTTP, and broker
    connections) be defined in this enhancement or deferred to a dedicated TLS
    enhancement?
+6. **Broker Parity:** What is the minimum feature set required for a
+   "customer-provided" broker to be compatible (e.g., must support CloudEvents
+   attributes, headers, or persistence)? A draft baseline is in
+   [Customer-provided broker compatibility
+   (baseline)](#customer-provided-broker-compatibility-baseline) under Design
+   Details. Confirm or adjust before implementation lock-in.
+7. **Atomic commits / publication:** As soon as any manager commits authoritative
+   state to its internal DB and emits a matching internal bus event for the same
+   change, how should those two steps stay aligned so the event is not silently
+   lost? See [Manager bus publishers and commit
+   alignment](#manager-bus-publishers-and-commit-alignment). Should one pattern be
+   mandated for every new publisher and how do documented exceptions work (for
+   example non-critical telemetry)?
 
 ## Summary
 
-The **proposed implementation** is a **hybrid** control-plane communication
-model: keep synchronous HTTP for commands and immediate validation, and use a
-message bus for asynchronous internal lifecycle and state events. The concrete
-broker (for example NATS/JetStream, Kafka, or RabbitMQ) is not fixed in this
-document. It is chosen per deployment behind a stable event contract, with
-preference for reusing a customer-operated broker when one already fits DCM
-needs.
+This enhancement describes a **hybrid** control-plane messaging approach for
+DCM: **synchronous HTTP** for commands and validation, and an **internal message
+bus** for asynchronous lifecycle and state events. Phase one **does not** drop
+**REST-style HTTP** for commands; it **adds** bus publication alongside existing
+command and persistence patterns unless a later phase explicitly changes them.
 
-The **Alternatives** section compares **broker-centric** patterns only (all
-internal events on one product). Those are not the primary recommendation. They
-inform broker choice under the hybrid model and document why a bus-only layout
-is not adopted as the whole control plane story in one step.
+The concrete broker product (for example `NATS/JetStream`, `Kafka`, or
+`RabbitMQ`) is not fixed in this document but it is chosen **per deployment**
+behind a stable event contract, with preference for reusing a customer-operated
+broker when one already fits DCM needs.
 
-The goal is to reduce coupling between components, let one published event reach
-many downstream consumers without custom wiring, and keep operational complexity
-visible before implementation.
+The document presents **as-is** and **to-be** control-plane topologies with
+figures and narrative, evaluates **broker-centric** and **full gRPC**
+command-path alternatives, links verification to the [Test Plan](#test-plan),
+and tracks unresolved decisions in [Open Questions](#open-questions).
 
 ## Motivation
 
 Current DCM communication is mostly synchronous HTTP between managers, with
 event-driven status reporting already used for Service Providers through
-[NATS](https://docs.nats.io/) (Neural Autonomic Transport System) in the
+[NATS (Neural Autonomic Transport System)](https://docs.nats.io/) in the
 [Service Provider Status Reporting via messaging system by
 CloudEvents](../state-management/service-provider-status-reporting.md#summary)
 enhancement. That split is workable today, yet it does not scale evenly:
@@ -76,8 +89,10 @@ wider blast radius when any manager or API path becomes a bottleneck.
     reuse.
   - How representative products (NATS/JetStream, Kafka, RabbitMQ) map to those
     deployment models.
-- Define implementation verification criteria for functional and operational
-  behavior.
+- State which **automated tests**, **integration checks**, and **rollout signals**
+  (for example lag or error rates) prove the hybrid model in CI, integration
+  environments, and non-production rollout targets. Details live in [Test
+  Plan](#test-plan).
 
 ### Non-Goals
 
@@ -86,10 +101,10 @@ wider blast radius when any manager or API path becomes a bottleneck.
 - Requiring every customer to provision an additional DCM-only broker when they
   already operate a suitable enterprise messaging service that could be reused.
 - Defining transport security (TLS and mTLS), authentication, authorization, or
-  encryption policy for control-plane HTTP and message buses until Open Question 5
-  is closed. If the answer is to define TLS in this document, relax this non-goal
-  in a follow-up edit. If the answer is a dedicated TLS enhancement, keep that
-  material there and link it from see-also when the path exists.
+  encryption policy for control-plane HTTP and message buses until Open Question
+  5 is closed. If the answer is to define TLS in this document, relax this
+  non-goal in a follow-up edit. If the answer is a dedicated TLS enhancement,
+  keep that material there and link it from see-also when the path exists.
 - Changing Service Provider domain payload semantics or lifecycle status models.
 
 ## Proposal
@@ -99,10 +114,10 @@ wider blast radius when any manager or API path becomes a bottleneck.
 This proposal recommends evolving DCM to a **hybrid** model (detailed in
 [Proposed implementation](#proposed-implementation-hybrid-commands-and-events)
 below): synchronous HTTP for commands, asynchronous bus for events, phased
-rollout. [Current Topology](#current-topology-as-is) documents today’s shape
-first, then the proposed hybrid. [Alternatives](#alternatives) evaluate **full
-bus-centric** topologies per broker product. They support broker selection and
-tradeoff discussion, not a competing primary design.
+rollout. [Current Topology](#current-topology-as-is) section documents today’s
+shape first, then the proposed approach. [Alternatives](#alternatives) evaluate
+**full bus-centric** topologies per broker product, plus a **full gRPC
+migration** for the synchronous command path (replacing HTTP for those calls).
 
 ### Current Topology (As-Is)
 
@@ -141,7 +156,7 @@ flowchart TB
   ServiceProviders -->|"NATS/JetStream + CloudEvents"| MessageBus
 ```
 
-The key points are listed below:
+The key points:
 
 - Gateway and manager traffic is HTTP in local deployment.
 - Internal manager URLs are configured as `http://...`.
@@ -149,9 +164,7 @@ The key points are listed below:
   consumes status with JetStream and explicit ack handling.
 - Traefik reference stacks expose an unencrypted `web` entrypoint for local use.
 - Persistence paths (SQL/DB) are unchanged and intentionally omitted from these
-  diagrams for readability. Diagrams that show **all** manager event traffic on a
-  single broker product (NATS, Kafka, or RabbitMQ) sit under
-  [Alternatives](#alternatives) for comparison only.
+  diagrams for readability.
 
 ### User Stories
 
@@ -176,26 +189,27 @@ custom polling of each manager API.
 
 ### Proposed implementation: hybrid commands and events
 
-Managers and the API gateway keep **synchronous HTTP** for command
-submission, validation, and manager-to-manager chains (including PolicyManager
-to OPA). **Asynchronous domain events** (state and lifecycle) are published to
-a message bus so many consumers can subscribe without new point-to-point HTTP
-for every pair. Long-running work can complete behind the first HTTP response
-using status and events. The bus implementation is **pluggable**: NATS/JetStream,
-Kafka, RabbitMQ, or a customer-operated equivalent (see Open Question 4).
+Managers and the API gateway keep **synchronous HTTP** for command submission,
+validation, and manager-to-manager chains (including PolicyManager to OPA).
+**Asynchronous domain events** (state and lifecycle) are published to a message
+bus so many consumers can subscribe without new point-to-point HTTP for every
+pair. Long-running work can complete behind the first HTTP response using status
+and events. The bus implementation is **pluggable**: NATS/JetStream, Kafka,
+RabbitMQ, or a customer-operated equivalent (see Open Question 4).
 
 **Why not “everything on the bus.”** A broker-only design would force
 command-style flows into fire-and-forget patterns, reply routing, and duplicate
-handling without a clear gain for typical control-plane verbs. The hybrid
-split matches how callers need immediate accept or reject feedback while still
-gaining fan-out and decoupling for events.
+handling without a clear gain for typical control-plane verbs. The hybrid split
+matches how callers need immediate accept or reject feedback while still gaining
+fan-out and decoupling for events.
 
-Reference docs: [HTTP Semantics (RFC
-9110)](https://www.rfc-editor.org/rfc/rfc9110),
-[CloudEvents](https://cloudevents.io/), [NATS
-Documentation](https://docs.nats.io/), [Kafka
-Documentation](https://kafka.apache.org/documentation/), [RabbitMQ
-Documentation](https://www.rabbitmq.com/docs/).
+Reference docs: 
+- [HTTP Semantics (RFC9110)](https://www.rfc-editor.org/rfc/rfc9110),
+- [CloudEvents](https://cloudevents.io/)
+- [NATS](https://docs.nats.io/)
+- [Kafka](https://kafka.apache.org/documentation/)
+- [RabbitMQ](https://www.rabbitmq.com/docs/)
+- [gRPC](https://grpc.io/docs/)
 
 **Pros**
 
@@ -211,13 +225,41 @@ Documentation](https://www.rabbitmq.com/docs/).
 - Requires clear per-domain rules so teams do not mix patterns inconsistently.
 - Temporary dual paths (HTTP commands plus bus events) add operational surface
   until rollout stabilizes.
+- When managers **become** bus **publishers** after persisting authoritative
+  state (see [Manager bus publishers and commit
+  alignment](#manager-bus-publishers-and-commit-alignment)), each rollout must
+  decide how **commit** and **publish** stay aligned so events are not silently
+  lost after a successful transaction.
+
+#### Manager bus publishers and commit alignment
+
+**Today:** managers use **separate** databases and **HTTP** for commands. They
+**do not** publish internal domain events.
+
+**Hybrid intent:** managers **gain** a **publisher** role for **asynchronous
+domain events** (lifecycle and state) so one **publish** can **deliver** to many
+subscribers (other managers, automation, audit, billing) without new
+point-to-point HTTP for every pair. A meaningful SQL commit and a
+matching bus message can belong to the **same** logical change.
+
+**Implementation note:** As soon as any manager does SQL and a matching bus
+publish for the same change, define how those two steps cannot diverge. Pick
+among approaches such as [transactional
+outbox](https://microservices.io/patterns/data/transactional-outbox.html)
+versus publish-after-commit in-process (plus broker-specific hooks) and whether
+one choice is mandated with documented exceptions (for example: default to
+transactional outbox for every manager publisher, and keep a small explicit list
+of deviations—such as best-effort telemetry where occasional drops or duplicates
+are acceptable—each naming the component and the allowed pattern).
 
 The figure below shows **publish** from managers and Service Providers into the
-bus and **deliver** from the bus to subscribers (same convention as the target
-topology in Design Details). **PolicyManager to OPA** stays **HTTP**. **PlacementManager**
-is with the other managers. **Service Providers** use the bus like the as-is
-topology (for example status and lifecycle). Gateway and the rest of the manager
-HTTP chain stay in [Current Topology](#current-topology-as-is).
+bus and **deliver** to **PlacementManager**, **ServiceProviderManager**, and to
+the example external subscribers (same convention as the larger target figure in
+[Design Details](#design-details)). **PolicyManager to OPA** stays **HTTP**.
+**PlacementManager** is with the other managers. **Service Providers** use the
+bus like the as-is topology (for example status and lifecycle). Gateway and the
+rest of the manager HTTP chain stay in [Current
+Topology](#current-topology-as-is).
 
 ```mermaid
 flowchart TB
@@ -230,52 +272,61 @@ flowchart TB
 
   subgraph infrastructure [Infrastructure]
     OPA["OPA"]
-    EventBus["EventBus"]
+    InternalBus["InternalBus"]
+    BillingConsumer["BillingConsumer"]
+    AuditConsumer["AuditConsumer"]
+    AnalyticsConsumer["AnalyticsConsumer"]
   end
 
   subgraph providers [Providers]
     ServiceProviders
   end
 
-  subgraph subscribers [Subscribers]
-    Subscribers["Examples only"]
-  end
-
   PolicyManager -->|"HTTP"| OPA
 
-  CatalogManager -->|"publish"| EventBus
-  PlacementManager -->|"publish"| EventBus
-  PolicyManager -->|"publish"| EventBus
-  ServiceProviderManager -->|"publish"| EventBus
+  CatalogManager -->|"publish"| InternalBus
+  PlacementManager -->|"publish"| InternalBus
+  PolicyManager -->|"publish"| InternalBus
+  ServiceProviderManager -->|"publish"| InternalBus
 
-  ServiceProviders -->|"publish"| EventBus
+  ServiceProviders -->|"publish"| InternalBus
 
-  EventBus -->|"deliver"| Subscribers
+  InternalBus -->|"deliver"| PlacementManager
+  InternalBus -->|"deliver"| ServiceProviderManager
+  InternalBus -->|"deliver"| BillingConsumer
+  InternalBus -->|"deliver"| AuditConsumer
+  InternalBus -->|"deliver"| AnalyticsConsumer
 ```
 
 
 ## Design Details
 
-This figure matches the [proposed hybrid
-implementation](#proposed-implementation-hybrid-commands-and-events): same HTTP
-command scaffold as the as-is diagram, plus asynchronous publication to a logical
-bus.
+**Figures in this document:** [Proposed
+implementation](#proposed-implementation-hybrid-commands-and-events) shows the
+same **publish** / **deliver** convention in one compact diagram. The figure
+immediately below is the **full** hybrid target (HTTP command scaffold,
+`InternalBus`, example external subscribers). There is only this one `## Design
+Details` section, the rest lives under `###` headings.
 
 The diagram is **broker-agnostic** on purpose. The node `InternalBus` is the
 event channel from the hybrid proposal, not a product name. It generalizes the
 as-is `MessageBus` role (today mainly Service Provider status on NATS) to
 internal domain events from every manager and from Service Providers. Which
 physical broker backs that channel is a deployment choice (see Open Question 4,
-the [decision matrix](#decision-matrix-vs-current-implementation), and
-broker-centric options under [Alternatives](#alternatives)).
+the [decision matrix](#decision-matrix-vs-current-implementation), and options
+under [Alternatives](#alternatives) (broker-centric layouts and the full gRPC
+command migration option).
 
-Extra nodes such as BillingConsumer, AuditConsumer, and AnalyticsConsumer are
-**examples** of possible bus subscribers (for instance billing, compliance, or
-observability). They are not a committed roadmap, a required set of services,
-or a fixed naming scheme. A real deployment may add different consumers, rename
-them, or have none beyond `Service Provider Manager` until new work lands. In the
-diagram, `publish` means async publication of domain events onto the bus, and
-`deliver` means async fan-out to subscribers (not HTTP request/response).
+**PlacementManager** and **ServiceProviderManager** also appear on **deliver**
+when they consume cross-domain or aggregated bus events (not only the example
+BillingConsumer-style nodes). **Extra** nodes such as BillingConsumer,
+AuditConsumer, and AnalyticsConsumer are **examples** of possible bus
+subscribers (for instance billing, compliance, or observability). They are not a
+committed roadmap, a required set of services, or a fixed naming scheme. A real
+deployment may add different consumers, rename them, or omit some **deliver**
+edges until new work lands. In the diagram, `publish` means async publication of
+domain events onto the bus, and `deliver` means async fan-out to subscribers
+(not HTTP request/response).
 
 ```mermaid
 flowchart TB
@@ -324,8 +375,6 @@ flowchart TB
   InternalBus -->|"deliver"| AnalyticsConsumer
 ```
 
-## Design Details
-
 ### Communication Partitioning Model
 
 DCM communication should be partitioned by intent:
@@ -334,8 +383,7 @@ DCM communication should be partitioned by intent:
 - **Events (async):** state transitions and lifecycle notifications that may
   have multiple downstream consumers.
 
-**Why HTTP fits commands.** 
-The caller or upstream manager usually needs a
+**Why HTTP fits commands.** The caller or upstream manager usually needs a
 definitive outcome in the same interaction (accepted, rejected, or validation
 errors) so the API or next step in a chain can branch immediately. HTTP
 request/response maps directly to that model, carries structured status and
@@ -370,6 +418,15 @@ messaging,” not only “which new broker DCM ships.”
 | Migration effort | Baseline | Incremental from existing usage | Higher migration and ops change | Moderate migration and ops change | Lowest risk migration path |
 | Licensing and cost | No additional broker license | Open-source core, no paid hosted or enterprise lock-in | Open-source core, no paid proprietary platform features | Open-source core, no paid enterprise broker dependencies | Depends on selected broker and operating model |
 
+For **full gRPC migration** on the synchronous command path (replacing HTTP for
+those calls), see [Alternative
+4](#alternative-4-full-grpc-migration-for-synchronous-commands). It is
+orthogonal to the broker columns above.
+
+### Customer-provided broker compatibility (baseline)
+
+TBD
+
 ### Risks and Mitigations
 
 | Risk | Mitigation |
@@ -391,9 +448,9 @@ Implementation verification should include:
 
 - Roll out message-bus integrations one domain at a time, each gated by a
   configuration switch. While the switch is off, that domain keeps its current
-  behavior. Turning the switch on enables the bus path for that domain only,
-  and turning it off restores the previous path without requiring a full
-  redeploy of the control plane.
+  behavior. Turning the switch on enables the bus path for that domain only, and
+  turning it off restores the previous path without requiring a full redeploy of
+  the control plane.
 - Keep current synchronous APIs as fallback during rollout.
 - Allow per-domain rollback from async path to existing sync path.
 - Migrate domains one at a time to control blast radius.
@@ -405,21 +462,25 @@ Implementation verification should include:
 ## Drawbacks
 
 - Adds architectural and operational complexity compared to all-sync HTTP.
-- The team takes on more responsibility for cross-cutting messaging work:
-  event contracts (schema versions, compatibility rules, and subject or topic
-  naming so producers and consumers stay aligned) and broker posture (how the
-  messaging tier is run, whether that is one broker process, a replicated
-  deployment for availability, or a managed service, plus security, capacity,
-  upgrades, and observability). If we do not
-  keep investing there, contracts drift and broker changes can break consumers
-  in ways that are harder to trace than a single failing HTTP call.
+- The team takes on more responsibility for cross-cutting messaging work: event
+  contracts (schema versions, compatibility rules, and subject or topic naming
+  so producers and consumers stay aligned) and broker posture (how the messaging
+  tier is run, whether that is one broker process, a replicated deployment for
+  availability, or a managed service, plus security, capacity, upgrades, and
+  observability). Contracts drift and broker changes can break consumers in ways
+  that are harder to trace than a single failing HTTP call.
 - Introduces new failure modes (consumer lag, topic/subject drift, replay bugs).
 
 ## Alternatives
 
-The sections below are **broker-centric** reference designs: they assume
-**all** internal event traffic from managers uses one broker product in the
-diagram.
+The first three subsections are **broker-centric** reference designs: they
+assume **all** internal event traffic from managers uses one broker product in
+the diagram. The fourth subsection is different: it assumes **gRPC** for the
+**whole synchronous command** path (clients to gateway, gateway to managers, and
+manager-to-manager), with **gRPC-Web** or equivalent only where the edge cannot
+use native gRPC, instead of keeping HTTP for external callers while gRPC runs
+only inside the mesh. **Async events** stay on the hybrid bus model and the
+broker options above.
 
 ### Alternative 1: NATS/JetStream-Centered Internal Events
 
@@ -608,6 +669,98 @@ Deferred
 
 Useful for queue-driven integration patterns, but not preferred for DCM phase
 one compared to hybrid strategy with NATS/JetStream-first implementation.
+
+### Alternative 4: Full gRPC migration for synchronous commands
+
+#### Description
+
+[gRPC](https://grpc.io/docs/) is an RPC framework on **HTTP/2**, usually with
+**Protocol Buffers** for contracts. This alternative evaluates **replacing HTTP
+with gRPC end-to-end** on the **synchronous command** surface: external and
+first-party **clients to the API gateway**, **gateway to managers**, and
+**manager-to-manager** chains all speak gRPC, so there is no parallel "HTTP for
+some callers and gRPC only inside the mesh" split. **Asynchronous domain
+events** still use a message bus as in the hybrid proposal. Browser or other
+environments that cannot hold a native gRPC client are assumed to use
+**gRPC-Web** (or equivalent) at the gateway edge, still under the same protobuf
+contracts. Policy evaluation toward OPA may remain an **HTTP** integration
+unless or until that engine is fronted by a gRPC adapter.
+
+```mermaid
+flowchart TB
+  Clients["Clients"]
+  ApiGateway["ApiGateway"]
+
+  subgraph controlPlane [Control plane managers]
+    CatalogManager["CatalogManager"]
+    PlacementManager["PlacementManager"]
+    PolicyManager["PolicyManager"]
+    ServiceProviderManager["ServiceProviderManager"]
+  end
+
+  subgraph infrastructure [Infrastructure]
+    OPA["OPA"]
+    MessageBus["MessageBus"]
+  end
+
+  subgraph providers [Providers]
+    ServiceProviders
+  end
+
+  Clients -->|"gRPC or gRPC-Web"| ApiGateway
+
+  ApiGateway -->|"gRPC"| CatalogManager
+  ApiGateway -->|"gRPC"| PlacementManager
+  ApiGateway -->|"gRPC"| PolicyManager
+  ApiGateway -->|"gRPC"| ServiceProviderManager
+
+  CatalogManager -->|"gRPC"| PlacementManager
+  PlacementManager -->|"gRPC"| PolicyManager
+  PlacementManager -->|"gRPC"| ServiceProviderManager
+
+  PolicyManager -->|"HTTP"| OPA
+
+  CatalogManager -->|"publish"| MessageBus
+  PlacementManager -->|"publish"| MessageBus
+  PolicyManager -->|"publish"| MessageBus
+  ServiceProviderManager -->|"publish"| MessageBus
+
+  ServiceProviders -->|"publish"| MessageBus
+```
+
+#### Pros
+
+- One contract style (**protobuf** and generated stubs) from clients through
+  managers, fewer HTTP/JSON and OpenAPI drift paths to maintain for commands.
+- Strongly typed service definitions, efficient on-the-wire encoding, and good
+  latency for chained internal calls.
+- First-class streaming if a command path needs it without inventing a custom
+  HTTP pattern.
+
+#### Cons
+
+- **All** command callers must move together (including CI, SDKs, and partner
+  integrations), so the migration is a large coordinated cutover or a long
+  dual-stack period with double implementations.
+- DCM today is built around HTTP handlers, OpenAPI, and existing tests, so cost
+  and schedule risk are high.
+- Operational and security posture shifts (for example HTTP/2 routing, TLS, and
+  proxies) and must align with [Open Question 5](#open-questions) when that is
+  closed.
+- gRPC-Web and gateway translation still add operational detail at the edge even
+  when the control plane itself is fully gRPC behind that edge.
+
+#### Status
+
+Deferred
+
+#### Rationale
+
+Technically coherent as an **end-state** for synchronous control-plane traffic,
+but not bundled into the primary recommendation here because it is a **broad
+transport migration** orthogonal to the command-versus-event split and to broker
+selection. Worth comparing when the team is ready to size a **whole-program**
+move off HTTP for commands, not only an internal mesh tweak.
 
 ## Infrastructure Needed
 
