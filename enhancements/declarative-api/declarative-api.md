@@ -19,15 +19,14 @@ creation-date: 2026-05-12
 
 ## Open Questions
 
-1. Provision Queue: Should we introduce a Provision queue to hold 
-   requests consumed by the SPRM to create the resource. .
+1. Provision Queue: Introduced a Provision queue to holds requests 
+   published by Placement and consumed by the SPRM to creation operation.
+   Any objection/concerns/suggestion/alternative?
 2. State Queue: Should Placement also consume from the state queue? The state
    queue holds the messages published by the SPs and is currenly consumes by SPRM.
-3. Hybrid catalog plus freeform: Do we want to support both in the future?
+3. Hybrid support (catalog plus freeform): Do we want to support both in the future?
    Freeform might need RBAC implementation.
-4. Catalog Manager: Should catalog manager stores only user_values paths or a full
-   `resources[]` graph after catalog resolution?
-5. Placement Manager evaluates policy per single resource or whole graph or both?
+4. Placement Manager evaluates policy per single resource or whole graph or both?
 
 ## Summary
 
@@ -37,7 +36,7 @@ through a single declarative flow, whether the user chooses a catalog-backed
 `Application` (non referenced catalog). This approach uses
 [CEL](https://cel.dev/) for wiring values and a Direct Acyclic Graph (DAG) for
 dependency order and safe parallelism on the effective resource graph, whether
-produced by catalog resolution or authored as freeform (?).
+produced by catalog resolution or authored as freeform (_Open Question 3_).
 
 ## Motivation
 
