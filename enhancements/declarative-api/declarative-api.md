@@ -114,35 +114,33 @@ flowchart TD
     classDef user fill:#2d2d2d,color:#ffffff,stroke:#b0bec5,stroke-width:2px
     classDef dcmCore fill:#FFFFFF,stroke:#bdbdbd,stroke-width:2px
 
-    U["**User / GitOps**<br/>Submit CatalogItemInstance<br/>or Application"]:::user
+    U["User / GitOps<br/>Submit CatalogItemInstance<br/>or n-tier application"]:::user
 
-    CM["**Catalog Manager**<br/>**Catalog resolution** + params<br/>`POST /api/v1alpha1/catalog-item-instances`"]:::catalogManager
+    CM["Catalog Manager<br/>Catalog resolution + params<br/>`POST /api/v1alpha1/catalog-item-instances`"]:::catalogManager
 
     subgraph DCM_Core [ ]
-        PM["**Placement Manager**<br/>CEL + DAG compile · planner<br/>Policy gate · enqueue **provision queue** per DAG level"]:::placementManager
+        PM["Placement Manager<br/>Parse CEL<br/> Compile DAG <br/> Enqueue into provision queue per DAG level"]:::placementManager
 
-        PE["**Policy Manager**<br/>`POST …/policies:evaluateRequest`<br/>OPA / engine"]:::policyEngine
+        PE["Policy Manager<br/>Validate per resource<br/>"]:::policyEngine
 
-        SPRM["**Service Provider Manager (SPRM)**<br/>**provision queue** consumer<br/>registry · HTTP dispatch to Service Provider"]:::spResourceManager
+        SPRM["Service Provider Manager (SPRM)<br/>Provision queue consumer<br/>Dispatch request to Service Provider"]:::spResourceManager
 
-        PM_DB[("**Placement DB**<br/>intent · run · graph snapshot")]:::database
+        PM_DB[("Placement DB<br/>Persist resource graph")]:::database
+
+        ProvQ(("Provision queue<br/>Persisted resource messages<br/>One message per resource in the graph")):::messaging
     end
 
-    subgraph Provision_queue [ ]
-        ProvQ(("**Provision queue**<br/>durable persisted messages<br/>one per resource create in the graph")):::messaging
-    end
+    SP["Service Provider<br/>Process request from SPRM<br/>"]:::provider
 
-    SP["**Service Provider**<br/>create and lifecycle<br/>HTTP from SPRM"]:::provider
+    U --> CM
+    CM --> PM
 
-    U -->|HTTPS| CM
-    CM -->|HTTPS internal| PM
-
-    PM -->|HTTPS| PE
+    PM --> PE
     PM --> PM_DB
 
-    PM -->|enqueue resource creates| ProvQ
-    ProvQ -->|consume| SPRM
-    SPRM -->|HTTPS| SP
+    PM --> ProvQ
+    ProvQ --> SPRM
+    SPRM --> SP
 
     class DCM_Core dcmCore
     class Provision_queue dcmCore
