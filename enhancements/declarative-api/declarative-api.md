@@ -40,23 +40,25 @@ produced by catalog resolution or authored as freeform (_Open Question 3_).
 
 ## Motivation
 
-Operators and platform teams need a declarative, multi-tier flow that combines
-catalog governance (approved templates and constrained parameters) with freeform
-graphs where policy allows. Here an arbitrary graph means a
-developer-defined topology: which resource types appear, how many instances,
-how they are wired together (using `CEL` references with explicit requirements),
-and therefore what the dependency `DAG` looks like — without being limited to a
-single pre-published `CatalogItem` shape. The same engine must treat a freeform
-graph as a valid input when permitted, rather than forcing every workload into a
-one-size catalog.
-
-Without a documented orchestration contract, the risk grows for partial illegal
-graphs, unclear policy gates, and ad hoc duplication of DAG logic across
-services.
+Operators and platform teams need a declarative, multi-tier flow that combines 
+catalog governance (approved templates and constrained parameters) with
+orchestration that can provision more than one related resource 
+as part of a single application request.
+**Current limitations**: Creating resources today is oriented around
+one resource per request through catalog, placement, with policy and provisioning 
+invoked per call. There is no end-to-end flow defined for allowing and processing
+multiple resources within a single request.
+**Why this enhancement**: This proposal defines that flow. How a single request
+(via catalog resolution or freeform input) becomes an effective graph,
+how the platform validates and applies policy to the intended graph before 
+provisioning, and how dependency order drives which resources are
+created and when. It also establishes the contract needed if we later 
+support freeform graphs (_Open Question 3_). Freeform graphs are 
+application layouts developers define directly, not from a catalog template.
 
 ### Goals
 
-- Define the mechanism of supporting catalog items and freeform usage for
+- Define the mechanism of supporting multi-tier catalog items and freeform usage for
   Application.
 - Define end to end flow for requesting an n-tier application to evaluate how
   CEL parser, DAG build and policy work.
@@ -97,7 +99,7 @@ A developer submits `spec.resources` without a catalog reference. The system
 skips catalog fetch, validates params if present, then runs the same compile,
 policy, plan, and apply phases on the submitted graph.
 
-### System architecture
+### Proposed System Architecture
 
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 90, 'nodeSpacing': 28, 'curve': 'linear'},}}%%
