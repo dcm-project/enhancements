@@ -23,7 +23,7 @@ creation-date: 2026-05-12
    published by Placement and consumed by the SPRM to creation operation.
    Any objection/concerns/suggestion/alternative?
 2. State Queue: Should Placement also consume from the state queue? The state
-   queue holds the messages published by the SPs and is currenly consumes by SPRM.
+   queue holds the messages published by the SPs and is currently consumes by SPRM.
 3. Hybrid support (catalog plus freeform): Do we want to support both in the future?
    Freeform might need RBAC implementation.
 4. Placement Manager evaluates policy per single resource or whole graph or both?
@@ -68,9 +68,19 @@ application layouts developers define directly, not from a catalog template.
 ### Non-Goals
 
 - Define the resource types, catalog items and DAG engine.
-- Define state management for each resources within the Application
+- Define state management for each resources within the Application.
+- Choosing different environments per resource and validating network
+  connectivity between them those resources (environment 
+  based placement and overlay connectivity).
 
 ## Proposal
+
+### Assumptions
+- Each application run targets one placement context 
+  (no per-resource environment choice or cross-environment checks).
+- Dependent resources are provisioned in DAG order only. Placement/Policy does not
+  validate that assigned service providers are network reachable 
+  across providers until environment based placement is introduced.
 
 ### Overview
 
@@ -148,10 +158,14 @@ flowchart TD
 
 #### Flow Description
 
-1. User / GitOps → Catalog Manager 
-   Submit catalog-backed intent (for example
-   `POST /api/v1alpha1/catalog-item-instances`). For freeform, the same stages
-   apply once Placement Manager receives `spec.resources[]`.
+1. User/GitOps → Catalog Manager 
+   User submits catalog-backed intent (i.e`POST /api/v1alpha1/catalog-item-instances`). 
+   Catalog Manager resolves the blueprint and sends the effective graph
+   to Placement Manager. Placement runs orchestration on that graph
+   For freeform (_Open Question 3_), the client submits an application graph
+   through a user-facing API (maybe not directly to Placement, still yet to be determined).
+   Placement still receives an effective `spec.resources[]`
+   via an internal handoff and runs the same orchestration as the catalog path.
 
 2. Catalog Manager → Placement Manager 
    On the catalog path, catalog resolution turns blueprint plus params into `spec.resources[]`.
@@ -160,7 +174,8 @@ flowchart TD
 
 3. Placement Manager → Policy Manager
    Sends request to endpoint`POST {POLICY_ENGINE}/api/v1alpha1/policies:evaluateRequest` 
-   (same pattern as today's policy client). Orchestration must not call SPRM for creates until
+   (same pattern as today's [policy client)](https://github.com/dcm-project/policy-manager). 
+   Orchestration must not call SPRM for creates until
    this gate succeeds for the intended graph.
 
 4. Placement Manager → provision queue → SPRM 
@@ -241,7 +256,8 @@ sequenceDiagram
 
 4. Placement Manager → Policy Manager Sends
    `POST /api/v1alpha1/policies:evaluateRequest` for each resource or batch
-   until the full graph is authorized (same pattern as today's policy client).
+   until the full graph is authorized (same pattern as today's 
+   [policy client](https://github.com/dcm-project/policy-manager)).
    On deny, surface PolicyRejected with aggregate violations and do not invoke
    SPRM creates.
 
@@ -301,7 +317,7 @@ already known state (for example previously stored ids or outputs).
 During or after each create, resolve expressions that
 reference new outputs from dependencies as those values appear in state.
 
-Workers for level _L_ must not start until state shows Ready (and
+Workers for level _L_ must not start until state shows `Ready` (and
 required output fields) for dependencies at _L−1_. Expressions that only use
 schema and params can be evaluated earlier; expressions that need another
 resource’s outputs stay deferred until that resource is `Ready`.
@@ -320,15 +336,15 @@ so duplicate delivery cannot double create.
 
 Evaluation flow:
 
-1. Input: resolved `resources[]`, params snapshot, environment id,
-   tenant context, optional previous state.
+1. Input: resolved `resources[]`, params snapshot, environment label,
+   optional previous state.
 2. Per-resource: run policy (OPA) on each resource
    with graph context in the evaluate payload (neighbors, paths, or a
    bounded subgraph) so many cross-resource checks do not need a separate
    global pass. (Depends on how Policy will treat this, unclear here)
-3. Whole-graph rules (?): If a rule needs the entire graph at once,
+3. Whole-graph rules (_Open Question 4_): If a rule needs the entire graph at once,
    this flow is yet to be determined.
-4. Output: allow or deny per resource plus global denies (?);
+4. Output: allow or deny per resource and/or global denies (_Open Question 4_);
    aggregate violations for API responses.
 
 ### Risks and Mitigations
