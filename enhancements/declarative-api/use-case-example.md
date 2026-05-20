@@ -1,7 +1,7 @@
 # Use case example — Catalog-backed Application through orchestration
 
-This walkthrough mirrors
-`dcm-arch/docs/design/declarative-api/use-case-catalog-items.md` (same
+This walkthrough mirrors use-case example described
+[here](https://github.com/machacekondra/dcm-arch/blob/main/docs/design/declarative-api/use-case-catalog-items.md) (same
 CatalogItem and Application YAML) and traces how that Application moves through
 DCM orchestration: `catalog resolution → Placement → Policy → provision queue
 (wave by wave) → SPRM → Service Provider`, with Placement consuming a separate
@@ -363,7 +363,7 @@ Provider.
 
 ```json
 {
-  "uid": "run-7c9e2d1a-0001-4000-8000-000000000001:vpc:1", // could be combination of run id + randon str
+  "uid": "run-7c9e2d1a-0001-4000-8000-000000000001:vpc:1", // could be combination of run id + random str
   "serviceType": "network.virtual-network",
   "runId": "run-7c9e2d1a-0001-4000-8000-000000000001",
   "resourceName": "vpc",
