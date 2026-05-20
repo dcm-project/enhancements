@@ -23,9 +23,12 @@ and policy together; SPM stays its own service. See the glossary.
 
 ## Open questions
 
-1. **Option 1 vs option 2?** See
-   *Comparison for team discussion* and *Degraded mode* below. Input needed from
-   product and UI on whether partial reads when core is down matter.
+1. **Option 1 vs option 2?** With option 2, catalog/placement/policy can fail while SPM
+   still answers some GET APIs (providers, service-type-instances only; see *Degraded
+   mode*). With option 1, that split is not possible: if the single process is down,
+   the whole control plane API is down. Product and UI should say whether users must
+   keep those read APIs during a core outage, or whether full downtime is acceptable.
+   See also *Comparison for team discussion*.
 2. **Where does the public HTTP API listen after the merge?** Today Traefik (api-gateway
    stack) listens on the edge and forwards each `/api/v1alpha1/...` path to a different
    manager container. After merge there are fewer backends. Either keep
@@ -132,9 +135,9 @@ If the core process is down and SPM is up, Traefik routing (api-gateway repo) al
 | List/get service-type-instances | Policies |
 | | Create, delete, rehydrate (full flow) |
 
-**Discussion note:** open question 1 hinges on whether the partial API set above is
-worth a second process and deployable. There is no production load data yet to justify
-option 2 for scaling alone.
+**Discussion note:** option 2 only pays off for operations if that limited API set is a
+real requirement. There is no production load data yet to justify option 2 for scaling
+alone.
 
 ## Analysis of release and scaling
 
