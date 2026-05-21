@@ -368,15 +368,30 @@ Evaluation flow:
 
 #### Description
 
-Reuse the existing provider status subject for provisioning commands.
+Use a single NATS stream (or subject hierarchy) for both message types:
+status events from Service Providers (observed state, e.g. PENDING → RUNNING)
+and provision commands from Placement to SPRM (`create` work for graph
+resources). Provisioning would reuse the same stream or subjects already used
+for provider status reporting instead of introducing a dedicated provision queue.
 
 #### Pros
 
-- Fewer streams to operate initially.
+- Less messaging infrastructure to deploy and monitor at first (one stream to
+  configure, one consumer pattern).
+- Reuses an existing integration path that Service Providers already use for
+  status updates.
 
 #### Cons
 
-- Couples telemetry with commands; harder versioning and blast-radius control.
+- Commands and telemetry share one channel: Status traffic (high volume with
+  many publishers) and provision commands (control-plane, low volume, strict
+  ordering expectations) compete on the same stream.
+- Schema and versioning are tied together: Changes to status event shape or
+  provision payload format affect the same stream hence it is
+  harder to evolve independently.
+- Blast radius is larger: Misconfiguration, consumer bugs, or stream outages
+  affect both observation (status) and action (provision), not one concern in
+  isolation.
 
 #### Status
 
@@ -384,22 +399,41 @@ Rejected
 
 #### Rationale
 
-Status ingestion and provisioning work have different reliability and schema
-lifecycles; separate subjects or streams reduce coupling.
+Status ingestion and provisioning serve different roles: Status is high-volume,
+with provider-originated telemetry. Provisioning is control plane commands with
+stricter delivery and lifecycle needs. Separate streams or subjects keep
+versioning, scaling, and failure domains independent.
 
 ### Alternative 2 — Policy validates then provisions per resource (incremental)
 
 #### Description
 
-Approve and provision resource R before policy-checking later resources.
+Evaluate policy and start provisioning one resource at a time in graph order,
+without waiting for authorization of the full application graph. For each
+resource in DAG order, Placement calls Policy Manager for that resource only;
+on approval, it immediately enqueues or invokes SPRM create for that resource,
+then moves to the next resource and repeats policy evaluation there. Later
+resources are not validated by policy until earlier ones are approved 
+and provision has begun.
 
 #### Pros
 
-- Potential earlier partial feedback.
+- Resources at the front of the graph can start provisioning sooner, which
+  may shorten the wait until the first resource begins provisioning,
+  when policy is fast and graph-wide rules are simple or absent.
+- Failures surface per resource as each step completes, which can feel more
+  incremental to callers watching individual resources.
 
 #### Cons
 
-- Unsafe under graph-wide rules; partial illegal graphs and costly rollback.
+- Unsafe when policies depend on the whole graph. A resource approved and
+  provisioned early may later be invalidated by rules that apply to the full
+  application or to relationships between resources.
+- Allows partial illegal graphs: some resources may reach SPRM or the provider
+  before the run is rejected, requiring compensation, rollback, or cleanup.
+- Graph-wide deny rules cannot be enforced atomically at admission; the caller
+  may believe progress is valid while the run is ultimately invalid.
+- Duplicates policy invocation and complicates run-level success criteria.
 
 #### Status
 
@@ -407,4 +441,55 @@ Rejected
 
 #### Rationale
 
-Prefer full-graph policy before provision for atomic intent on new runs.
+The proposed flow runs policy on the intended graph before any SPRM create, so
+the run is either authorized as a whole or rejected before side effects. Incremental
+approve-then-provision fits single resource flows but conflicts with graph level
+policy and coordinated provider or placement rules planned for n-tier applications.
+
+### Alternative 3 — SPRM as provision-queue consumer and publisher (bulk enqueue, dependency requeue)
+
+#### Description
+
+Placement publishes all provision messages for the application graph at once
+(one message per resource, including every DAG level), then returns. SPRM is the
+sole orchestrator on the provision queue. It consumes `create` messages,
+checks whether each resource’s dependencies are in a `Ready` state (via SPRM
+instance status or the state queue). If dependencies are ready, SPRM
+call the Service Provider to provision the resource. If dependencies are
+not ready, it re-publishes/requeues the same message until dependencies are
+ready. SPRM acts as both consumer and publisher on the provision queue for
+deferred work. Placement does not walk DAG levels and does not consume the state
+queue for readiness.
+
+#### Pros
+
+- Placement admission stays simple: one bulk publish after policy validation,
+  no per-level enqueue loop or state-driven progression in Placement.
+- Dependency waiting and retries are centralized in SPRM, close to instance status.
+
+#### Cons
+
+- SPRM must understand graph dependencies or carry enough metadata on each
+  message to evaluate them, duplicating orchestration knowledge that otherwise
+  lives in Placement.
+- Requeue loops risk duplicate delivery, delayed visibility, and harder
+  debugging (“stuck” messages) without strict idempotency and backoff.
+- Expands SPRM beyond its core role: it must coordinate dependency order and
+  retries, not only create instances and record status.
+- Resources that share a DAG level may be provisioned in parallel: SPRM must
+  treat them as ready together once dependencies are met, or some peers may wait
+  indefinitely while others are retried.
+
+#### Status
+
+Considered
+
+#### Rationale
+
+The proposed flow keeps DAG progression in Placement (enqueue per level when
+dependencies are ready, using the state queue) and limits SPRM to consuming
+provision messages and executing resource provisioning.
+Publishing the full graph at once and deferring work in SPRM can simplify 
+Placement. But SPRM would own dependency ordering, retries, and requeues,
+and would need graph aware logic that Placement already holds, 
+adding operational overhead and duplicated orchestration rules.
