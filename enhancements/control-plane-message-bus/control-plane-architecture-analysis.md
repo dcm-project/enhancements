@@ -29,18 +29,22 @@ only in Git and CI layout.
 ## Open questions
 
 1. **Option 1 vs option 2 or 3?** With option 2 or 3, catalog/placement/policy can fail
-   while SPM still answers some GET APIs (providers, service-type-instances only; see
-   *Degraded mode*). With option 1, that split is not possible: if the single process is
-   down, the whole control plane API is down. Product and UI should say whether users
-   must keep those read APIs during a core outage, or whether full downtime is
-   acceptable. Option 2 is one monorepo; option 3 is two repos (same two processes).
-   See also *Comparison for team discussion*.
+   while SPM still serves a limited API set (provider registration and updates, reads of
+   service-type-instances; see [*Degraded mode*](#degraded-mode-options-2-and-3-only)).
+   Full catalog provision still needs core.
+   With option 1, that split is not possible: if the single process is down, the whole
+   control plane API is down. Product and UI should say whether the limited SPM-only
+   behavior during a core outage is required, or whether full downtime is acceptable.
+   Option 2 is one monorepo; option 3 is two repos (same two processes). See also
+   [*Comparison for team discussion*](#comparison-for-team-discussion).
 2. **Where does the public HTTP API listen after the merge?** Today Traefik (api-gateway
    stack) listens on the edge and forwards each `/api/v1alpha1/...` path to a different
-   manager container. After merge there are fewer backends. Either keep
-   Traefik in front of one or two services and keep path-based routing there,
-   or **expose HTTP from the merged server** so that process owns the API surface and
-   Traefik is optional.
+   manager container. After merge there are fewer backends. Choices:
+
+   - Keep Traefik in front of one or two services.
+   - Expose HTTP from the merged server directly (Traefik optional).
+   - Drop the separate api-gateway stack for now; add edge routing again when needed
+     (e.g. TLS termination or multi-backend routing).
 3. **Databases:** keep four separate databases vs merge schemas (see step 7 in the
    migration plan).
 
@@ -86,8 +90,8 @@ releases already move together.
 
 ## Analysis of the three end-state options
 
-Fewer deployables, aligned release, and in-process calls on the synchronous path
-instead of manager-to-manager HTTP.
+DCM is evaluating three ways to combine the four managers: fewer deployables, aligned
+release, and in-process calls on the synchronous path instead of manager-to-manager HTTP.
 
 ### Option 1: All managers in one process
 
@@ -149,7 +153,12 @@ that interim state is enough or runtime should merge further.
 
 ### Degraded mode (options 2 and 3 only)
 
-If the core process is down and SPM is up, Traefik routing (api-gateway repo) allows:
+When core is down and SPM is still up, operators get **provider admin** (list, create,
+update, delete providers) and **reads of service-type-instances**. They do **not** get
+catalog, policies, or catalog-item-instance create/delete/rehydrate. That is only useful
+if the product needs provider work to continue during a core outage.
+
+Traefik routing (api-gateway repo) allows:
 
 | Still works (SPM routes) | Does not work (core routes) |
 | --- | --- |
