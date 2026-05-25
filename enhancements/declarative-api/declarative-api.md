@@ -11,32 +11,20 @@ reviewers:
   - "@flocati"
   - "@pkliczewski"
   - "@gabriel-farache"
-  - "@ebichman-1 "
 creation-date: 2026-05-12
 ---
 
 # Declarative API — Catalog and orchestration
 
-## Open Questions
-
-1. Provision Queue: Introduced a Provision queue to holds requests 
-   published by Placement and consumed by the SPRM to creation operation.
-   Any objection/concerns/suggestion/alternative?
-2. State Queue: Should Placement also consume from the state queue? The state
-   queue holds the messages published by the SPs and is currently consumes by SPRM.
-3. Hybrid support (catalog plus freeform): Do we want to support both in the future?
-   Freeform might need RBAC implementation.
-4. Placement Manager evaluates policy per single resource or whole graph or both?
-
 ## Summary
 
 This proposal describes how DCM implements multi-tier (n-tier) applications
-through a single declarative flow, whether the user chooses a catalog-backed
-`Application` path (reference to a `CatalogItem`) or a freeform
-`Application` (non referenced catalog). This approach uses
-[CEL](https://cel.dev/) for wiring values and a Direct Acyclic Graph (DAG) for
-dependency order and safe parallelism on the effective resource graph, whether
-produced by catalog resolution or authored as freeform (_Open Question 3_).
+through a single declarative flow on the monolithic `dcm-platform` server,
+whether the user chooses a catalog-backed `Application` path (reference to a
+`CatalogItem`) or a freeform `Application` (non referenced catalog). This
+approach uses [CEL](https://cel.dev/) for wiring values and a Direct Acyclic
+Graph (DAG) for dependency order and safe parallelism on the effective resource
+graph, whether produced by catalog resolution or authored as freeform.
 
 ## Motivation
 
@@ -53,17 +41,18 @@ multiple resources within a single request.
 how the platform validates and applies policy to the intended graph before 
 provisioning, and how dependency order drives which resources are
 created and when. It also establishes the contract needed if we later 
-support freeform graphs (_Open Question 3_). Freeform graphs are 
-application layouts developers define directly, not from a catalog template.
+support freeform graphs. Freeform graphs are application layouts 
+developers define directly, not from a catalog template.
 
 ### Goals
 
-- Define the mechanism of supporting multi-tier catalog items and freeform usage for
-  Application.
+- Define the mechanism of supporting multi-tier catalog items 
+  and freeform usage for Application.
 - Define end to end flow for requesting an n-tier application to evaluate how
   CEL parser, DAG build and policy work.
-- Understand how declarative flow maps into the current architecture components
-  (Catalog Manager, Placement Manager, Policy Manager and SP Manager).
+- Understand how declarative flow maps into `dcm-control-plane` packages
+  (`internal/catalog`, `internal/placement`, `internal/policy`,
+  `internal/serviceprovider`) behind `cmd/dcm-server`.
 
 ### Non-Goals
 
@@ -114,43 +103,43 @@ policy, plan, and apply phases on the submitted graph.
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 90, 'nodeSpacing': 28, 'curve': 'linear'},}}%%
 flowchart TD
-    classDef catalogManager fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
-    classDef placementManager fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
+    classDef catalog fill:#2d2d2d,color:#ffffff,stroke:#90caf9,stroke-width:2px
+    classDef placement fill:#2d2d2d,color:#ffffff,stroke:#ce93d8,stroke-width:2px
     classDef policyEngine fill:#2d2d2d,color:#ffffff,stroke:#ffb74d,stroke-width:2px
-    classDef spResourceManager fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
+    classDef spResource fill:#2d2d2d,color:#ffffff,stroke:#81c784,stroke-width:2px
     classDef database fill:#2d2d2d,color:#ffffff,stroke:#f48fb1,stroke-width:2px
     classDef messaging fill:#2d2d2d,color:#ffffff,stroke:#aed581,stroke-width:2px
     classDef provider fill:#2d2d2d,color:#ffffff,stroke:#ffab91,stroke-width:2px
     classDef user fill:#2d2d2d,color:#ffffff,stroke:#b0bec5,stroke-width:2px
     classDef dcmCore fill:#FFFFFF,stroke:#bdbdbd,stroke-width:2px
 
-    U["User / GitOps<br/>Submit CatalogItemInstance<br/>or n-tier application"]:::user
-
-    CM["Catalog Manager<br/>Catalog resolution + params<br/>`POST /api/v1alpha1/catalog-item-instances`"]:::catalogManager
+    U["<b>User/GitOps</b><br/>Submit CatalogItemInstance<br/> or Freeform Application"]:::user
 
     subgraph DCM_Core [ ]
-        PM["Placement Manager<br/>Parse CEL<br/> Compile DAG <br/> Enqueue into provision queue per DAG level"]:::placementManager
+        CM["<b>Catalog</b><br/>Catalog resolution + params<br/>Send application request"]:::catalog
 
-        PE["Policy Manager<br/>Validate per resource<br/>"]:::policyEngine
+        PM["<b>Placement</b><br/>Parse CEL<br/> Compile DAG <br/> Enqueue into provision queue per DAG level"]:::placement
 
-        SPRM["Service Provider Manager (SPRM)<br/>Provision queue consumer<br/>Dispatch request to Service Provider"]:::spResourceManager
+        PE["<b>Policy</b><br/>Validate per resource<br/>"]:::policyEngine
 
-        PM_DB[("Placement DB<br/>Persist resource graph")]:::database
+        SPRM["<b>Service Provider Resource(SPR)</b><br/>Status queue consumer<br/>Dispatch request to Service Provider"]:::spResource
 
-        ProvQ(("Provision queue<br/>Persisted resource messages<br/>One message per resource in the graph")):::messaging
+        DB[("<b>DCM DB</b><br/>Persist resource graph")]:::database
+
+        ProvQ(("<b>Status queue</b><br/>Persist status messages")):::messaging
     end
 
-    SP["Service Provider<br/>Process request from SPRM<br/>"]:::provider
+    SP["<b>Service Provider</b><br/>Process request from SPRM<br/>"]:::provider
 
     U --> CM
     CM --> PM
 
     PM --> PE
-    PM --> PM_DB
+    PM --> DB
 
-    PM --> ProvQ
-    ProvQ --> SPRM
+    PM --> SPRM
     SPRM --> SP
+    ProvQ --> SPRM
 
     class DCM_Core dcmCore
     class Provision_queue dcmCore
@@ -158,35 +147,44 @@ flowchart TD
 
 #### Flow Description
 
-1. User/GitOps → Catalog Manager 
-   User submits catalog-backed intent (i.e`POST /api/v1alpha1/catalog-item-instances`). 
-   Catalog Manager resolves the blueprint and sends the effective graph
-   to Placement Manager. Placement runs orchestration on that graph
-   For freeform (_Open Question 3_), the client submits an application graph
-   through a user-facing API (maybe not directly to Placement, still yet to be determined).
-   Placement still receives an effective `spec.resources[]`
-   via an internal handoff and runs the same orchestration as the catalog path.
+1. User / GitOps → catalog package (`dcm-server`)
+   User submits catalog-backed intent (`POST /api/v1alpha1/catalog-item-instances`).
+   The catalog package resolves the blueprint and calls placement in-process with the
+   effective graph. For freeform, the client submits an application
+   graph through a user-facing API on the same server.
+   Placement receives `spec.resources[]` and runs the same
+   orchestration as the catalog path.
 
-2. Catalog Manager → Placement Manager 
-   On the catalog path, catalog resolution turns blueprint plus params into `spec.resources[]`.
-   Placement receives that handoff and builds the DAG (CEL edges, topological levels), 
-   plans against state, and persists intent and graph snapshots in Placement DB.
+2. internal/catalog → internal/placement
+   On the catalog path, resolution turns blueprint plus params into `spec.resources[]`.
+   Placement builds the DAG (CEL edges, topological levels), persists the run and
+   graph snapshot in the platform database, and coordinates policy and apply.
 
-3. Placement Manager → Policy Manager
-   Sends request to endpoint`POST {POLICY_ENGINE}/api/v1alpha1/policies:evaluateRequest` 
-   (same pattern as today's [policy client)](https://github.com/dcm-project/policy-manager). 
-   Orchestration must not call SPRM for creates until
-   this gate succeeds for the intended graph.
+3. internal/placement → internal/policy
+   Placement calls the policy package (graph or batch evaluate). 
+   Orchestration must not enqueue resources until this policy gate
+   succeeds for the intended graph. Placement returns `202` and `run_id` after
+   policy passes and DAG level 0 resources are sent to service provider.
 
-4. Placement Manager → provision queue → SPRM 
-   As Placement walks each DAG level, it enqueues one persisted message per resource 
-   with `create` operation for that node in `spec.resources[]`.
-   SPRM consumes from the provision queue so Placement is not blocked on long provider work.
+4. internal/placement → internal/serviceprovider
+   After policy approves the graph resources, the resource graph
+   s persisted and placement walks the DAG by level.
+   For each resource at the current level (including resources that may run
+   in parallel), placement calls the `internal/serviceprovider`
+   to create the resources.
+   Placement returns `202` and `run_id` after policy succeeds and level
+   0 `create` has been initiated.
 
-5. SPRM → Service Provider 
-   For each consumed item, SPRM resolves the service type in its registry 
-   and invokes the registered Service Provider over
-   HTTP to perform `create` or lifecycle for that instance.
+5. internal/serviceprovider → External Service Provider (HTTP)
+   For each instance creation from placement, SPRM resolves 
+   the provider in the registry and invokes the registered 
+   Service Provider over HTTP to perform create or lifecycle and 
+   persists the service type instance in the control-plane database
+
+6. status consumer → placement
+   The status consumer updates instance rows in the control-plane 
+   database and notifies placement (in-process) when a dependency
+   is in `Ready` state so placement can enqueue the next DAG level.
 
 
 ### Design Details
@@ -194,86 +192,88 @@ flowchart TD
 ```mermaid
 sequenceDiagram
   participant Dev as Developer or GitOps
-  participant CM as Catalog Manager
-  participant PM as Placement Manager
-  participant POL as Policy Manager engine
-  participant ProvQ as Provision queue
-  participant SPRM as Service Provider Manager
+  participant CM as Catalog
+  participant PM as Placement
+  participant POL as Policy
+  participant DB as Control-plane<br/> DB
+  participant SPkg as SPRM
   participant SP as Service Provider
+  participant NATS as Status Queue
 
-  Dev->>CM: POST /api/v1alpha1/catalog-item-instances
-  alt Catalog or instance rejected
-    CM-->>Dev: 4xx validation not found conflict or draft
+  Dev->>CM: POST <br/>/api/v1alpha1/catalog-item-instances
+  alt Catalog resolution failed
+    CM-->>Dev: 4xx validation
   else Catalog accepted
-    CM-->>PM: internal handoff Application after catalog resolution
-    PM->>PM: dag.Build plus compile CEL edges
-    alt Compile or DAG error
-      PM-->>Dev: error schema cycle or CEL bind failure
+    CM->>PM: AdmitRun
+    PM->>PM: dag.Build + <br/>compile CEL
+    alt CEL or DAG error
+      PM-->>Dev: compile error
     else Compile ok
-      alt Graph policy denied
-        PM->>POL: POST /policies:evaluateRequest
-        POL-->>PM: DENIED plus violations
-        PM-->>Dev: PolicyRejected no SPRM creates
-      else Graph policy approved
-        loop each resource or batch
-          PM->>POL: POST /policies:evaluateRequest
-          POL-->>PM: APPROVED plus provider
+      PM->>POL: EvaluateGraph
+      alt Policy denied
+        POL-->>PM: DENIED
+        PM-->>Dev: PolicyRejected
+      else Policy approved
+        PM->>DB: persist run + <br/> graph snapshot
+        loop each DAG <br/>level-0 resource
+          PM->>SPkg: ApplyCreate
+          SPkg->>SP: HTTP create
+          SP-->>SPkg: 202 PROVISIONING
+          SPkg->>DB: persist instance
         end
-        loop each DAG level per resource
-          PM->>ProvQ: enqueue one persisted create message per resource
-          ProvQ->>SPRM: SPRM consumer receives from provision queue
-          SPRM->>SP: HTTP to registered provider for that service type
-          alt Provider or dispatch error
-            SP-->>SPRM: error
-            SPRM-->>PM: provision failure correlation
-            PM-->>Dev: failure surfaced on run or callback
-          else Provider accepted
-            SP-->>SPRM: 200 or 202 work accepted
-          end
+        PM-->>Dev: 202 run_id
+        SP-)NATS: status event
+        NATS-)SPkg: status consumer
+        SPkg->>DB: update instance Ready
+        SPkg->>PM: OnResourceReady
+        loop each resource <br/>at next DAG level
+          PM->>SPkg: ApplyCreate
+          SPkg->>SP: HTTP create
+          SP-->>SPkg: 202 PROVISIONING
+          SPkg->>DB: persist instance
         end
       end
     end
   end
 ```
 
-#### Simulated flow (catalog-backed).
+#### Sequence flow description
 
-1. User / GitOps → Catalog Manager 
+1. Developer or GitOps → catalog
    Submit catalog-backed intent (`POST /api/v1alpha1/catalog-item-instances`)
-   with catalog item identity and user_values. 
+   with catalog item identity and user_values.
    Catalog Manager validates and persists the instance intent per
    its API contract.
 
-2. Catalog Manager → Placement Manager 
-   Catalog Manager resolves the blueprint and params into `spec.resources[]`. 
-   Placement receives an Application handoff after catalog resolution.
+2. Catalog → Placement
+   Catalog resolves the blueprint and params into `spec.resources[]`
+   and calls placement to admit the run.
 
-3. Placement Manager
-   Placement builds the DAG and compiles CEL edges on the
-   resolved graph (schema bind, cycle detection, classify plan-time versus
-   apply-time CEL), and records intent or run metadata in Placement DB as
-   designed.
+3. Placement  
+   This builds the DAG and compiles CEL and persists run 
+   and graph snapshot in the control-plane database.
 
-4. Placement Manager → Policy Manager Sends
-   `POST /api/v1alpha1/policies:evaluateRequest` for each resource or batch
-   until the full graph is authorized (same pattern as today's 
-   [policy client](https://github.com/dcm-project/policy-manager)).
-   On deny, surface PolicyRejected with aggregate violations and do not invoke
-   SPRM creates.
+4. Placement → Policy
+   Placement calls Policy to evaluates the full graph before 
+   any `create` is sent to SPRM.
+   On deny, return `PolicyRejected` and does not call SPRM.
 
-5. Placement Manager → provision queue → SPRM → Service Provider
-   For each resource in DAG order (parallel within a level when safe),
-   Placement enqueues one persisted message on the provision queue that 
-   tells SPRM to create a resource from the graph.
-   Payload should include enough identity for idempotency.
-   SPRM consumes the provision queue, records intent, resolves the service 
-   type in its registry, and invokes the registered Service Provider.
+5. Placement → SPRM → Service Provider (level 0)  
+   For each resource at DAG level 0 (in parallel within the level
+   when policy allows), placement calls SPRM. SPRM resolves the provider,
+   invokes HTTP create on the Service Provider, and persists the
+   instance row. Placement returns `202` and `run_id` after policy succeeds and
+   level-0 resources creation have been initiated.
 
+6. Status-driven DAG progression (level 1 and above)  
+   The SPRM status consumer receives events, updates instance
+   state in the database, and notifies placement when dependencies are
+   `Ready`. Placement calls SPRM again for each resource at the next DAG
+   level. Later levels stay in run state until their dependencies are `Ready`
 
-**Note**: Freeform Submission skips steps 1 and 2 above; the client sends an
-Application (or equivalent) with `spec.resources[]` directly to the
-orchestration entry Placement Manager uses today. Steps 3 through 5 apply
-unchanged on the submitted graph.
+**Note**: Freeform submission skips catalog resolution. The client submits
+`spec.resources[]` through a user-facing API on `dcm-server`.
+Steps 3 through 6 apply unchanged on the submitted graph.
 
 #### CEL and DAG
 
@@ -305,8 +305,10 @@ which resources may run in parallel at the same step.
 
 ##### Database Record Persistence
 
-The whole graph will be persisted so orchestration can be
-replayed, audited, and shown clearly in the UI.
+The whole graph, run state, provision jobs, and service type instances live in
+one platform database so orchestration can be replayed, audited, and shown in
+the UI. Catalog instances may reference `run_id`. Instance status used for
+`Ready` checks is read from the same database after the status consumer updates it.
 
 ##### Two-phase CEL
 
@@ -322,16 +324,6 @@ required output fields) for dependencies at _L−1_. Expressions that only use
 schema and params can be evaluated earlier; expressions that need another
 resource’s outputs stay deferred until that resource is `Ready`.
 
-#### Queuing
-
-The `provision` queue handles the requests between Placement and SPRM.
-Placement publishes one logical `create` per resource. SPRM acts a consumer
-from the queue and calls Service Providers.
-Also, Placement consumes messages from the `state` queue, to check the
-readiness of resources before the continues walking a DAG application.
-For Idempotency, resources are keyed by `runId` + `resourceName`
-so duplicate delivery cannot double create.
-
 #### Policy evaluation
 
 Evaluation flow:
@@ -342,25 +334,31 @@ Evaluation flow:
    with graph context in the evaluate payload (neighbors, paths, or a
    bounded subgraph) so many cross-resource checks do not need a separate
    global pass. (Depends on how Policy will treat this, unclear here)
-3. Whole-graph rules (_Open Question 4_): If a rule needs the entire graph at once,
-   this flow is yet to be determined.
-4. Output: allow or deny per resource and/or global denies (_Open Question 4_);
+3. Output: allow or deny per resource and/or global denies; 
    aggregate violations for API responses.
 
 ### Risks and Mitigations
 
-| Risk                                               | Mitigation                                                                                         |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Partial graphs after per-resource policy           | Enforce full-graph policy gate before any SPRM create; single orchestration success criterion. |
-| DAG sort mutates internal graph                    | Snapshot edges for policy and audit before topological ordering; rebuild if needed.                |
-| Catalog instance stores paths only, not full graph | Implement catalog resolution producing auditable effective resources[].                    |
+| Risk | Mitigation                                                                                                   |
+| ---- |--------------------------------------------------------------------------------------------------------------|
+| Partial graphs after per-resource policy | Enforce full-graph policy gate before any SPRM `create`; single run-level success criterion.                 |
+| DAG sort mutates internal graph | Snapshot edges for policy and audit before topological ordering; rebuild if needed.                          |
+| Partial failure within a DAG level (some resources created, others failed) | Per-resource status on the run; mark run failed or compensating cleanup.                                     |
+| Admission blocked on level-0 Service Provider HTTP | Call SPRM only for level 0 at admission; bound HTTP timeouts; optional bounded parallelism within the level. |
+| Status consumer fails to notify placement | Log and retry notification; periodic reconciliation of run state against instance rows.                      |
 
 ## Drawbacks
 
-- Later first mutation versus streaming per-resource approval when using a
-  full-graph policy gate—acceptable trade-off for safety with global rules.
-- Operational complexity when adopting pub/sub for apply—defer until load
-  warrants it.
+- Full-graph policy runs before any `create`: later feedback than incremental
+  approve-then-provision—acceptable trade-off for graph-wide rules.
+- Level-0 apply runs on the admission path: admission waits for policy plus
+  in-process SPRM calls (Service Provider accept per resource), not
+  for the entire graph to reach `RUNNING`.
+- No durable provision outbox in the proposed flow: a crash after `202` may leave
+  the run mid-level until reconciliation; a database-backed apply worker remains
+  an optional later improvement.
+- Placement carries orchestration complexity: DAG levels, per-resource loops,
+  and in-process coordination with SPRM and the status consumer.
 
 ## Alternatives
 
@@ -370,9 +368,9 @@ Evaluation flow:
 
 Use a single NATS stream (or subject hierarchy) for both message types:
 status events from Service Providers (observed state, e.g. PENDING → RUNNING)
-and provision commands from Placement to SPRM (`create` work for graph
+and provision commands from placement to SPRM (`create` work for graph
 resources). Provisioning would reuse the same stream or subjects already used
-for provider status reporting instead of introducing a dedicated provision queue.
+for provider status reporting instead of a database provision outbox.
 
 #### Pros
 
@@ -410,8 +408,8 @@ versioning, scaling, and failure domains independent.
 
 Evaluate policy and start provisioning one resource at a time in graph order,
 without waiting for authorization of the full application graph. For each
-resource in DAG order, Placement calls Policy Manager for that resource only;
-on approval, it immediately enqueues or invokes SPRM create for that resource,
+resource in DAG order, placement calls the policy package for that resource only;
+on approval, it immediately calls SPRM to create that resource,
 then moves to the next resource and repeats policy evaluation there. Later
 resources are not validated by policy until earlier ones are approved 
 and provision has begun.
@@ -441,44 +439,74 @@ Rejected
 
 #### Rationale
 
-The proposed flow runs policy on the intended graph before any SPRM create, so
-the run is either authorized as a whole or rejected before side effects. Incremental
-approve-then-provision fits single resource flows but conflicts with graph level
-policy and coordinated provider or placement rules planned for n-tier applications.
+The proposed flow runs policy on the intended graph before any SPRM
+`create`, so the run is either authorized as a whole or rejected before side
+effects. Incremental approve-then-provision fits single-resource flows but
+conflicts with graph-level policy and coordinated provider rules planned for
+n-tier applications.
 
-### Alternative 3 — SPRM as provision-queue consumer and publisher (bulk enqueue, dependency requeue)
+### Alternative 3 — SPRM as apply orchestrator (batch create)
 
 #### Description
 
-Placement publishes all provision messages for the application graph at once
-(one message per resource, including every DAG level), then returns. SPRM is the
-sole orchestrator on the provision queue. It consumes `create` messages,
-checks whether each resource’s dependencies are in a `Ready` state (via SPRM
-instance status or the state queue). If dependencies are ready, SPRM
-call the Service Provider to provision the resource. If dependencies are
-not ready, it re-publishes/requeues the same message until dependencies are
-ready. SPRM acts as both consumer and publisher on the provision queue for
-deferred work. Placement does not walk DAG levels and does not consume the state
-queue for readiness.
+Placement returns immediately after policy by handing the full graph to
+SPRM. SPRM checks dependencies in the control-plane database before each
+`create` and retries or defers until dependencies are `Ready`. 
+Placement does not walk DAG levels or call SPRM per level; 
+it does not receive `Ready` notifications to trigger the next level.
 
 #### Pros
 
-- Placement admission stays simple: one bulk publish after policy validation,
-  no per-level enqueue loop or state-driven progression in Placement.
-- Dependency waiting and retries are centralized in SPRM, close to instance status.
+- Placement admission is minimal after policy: no per-level loop at admission.
+- Dependency waiting sits entirely in SPRM, next to instance status.
 
 #### Cons
 
-- SPRM must understand graph dependencies or carry enough metadata on each
-  message to evaluate them, duplicating orchestration knowledge that otherwise
-  lives in Placement.
-- Requeue loops risk duplicate delivery, delayed visibility, and harder
-  debugging (“stuck” messages) without strict idempotency and backoff.
-- Expands SPRM beyond its core role: it must coordinate dependency order and
-  retries, not only create instances and record status.
-- Resources that share a DAG level may be provisioned in parallel: SPRM must
-  treat them as ready together once dependencies are met, or some peers may wait
-  indefinitely while others are retried.
+- SPRM must understand graph dependencies or carry rich metadata on
+  each `create`, duplicating orchestration knowledge that otherwise lives in placement.
+- Retry and defer logic risks duplicate creates, stuck applies, and harder
+  debugging without strict idempotency and backoff.
+- Expands SPRM beyond per instance create and status: it owns DAG
+  progression, not placement.
+- Resources at the same DAG level need consistent handling when dependencies
+  become `Ready`, or some peers may starve while others retry.
+
+#### Status
+
+Rejected
+
+#### Rationale
+
+The proposed flow keeps DAG progression in placement: per-level in-process
+calls to SPRM when a level is ready (level 0 at admission, later
+levels after the status consumer notifies placement). SPRM remains a
+per-resource factory and status sink, not the graph orchestrator.
+
+### Alternative 4 — Database provision outbox and apply worker
+
+#### Description
+
+After policy, placement inserts one provision job row per resource (when that
+DAG level is ready) into a control-plane table. A background worker in
+SPRM claims jobs, calls Service Providers over HTTP, and updates
+instance rows. Admission can return `202` as soon as jobs are persisted without
+waiting for level-0 Service Provider HTTP on the request path.
+
+#### Pros
+
+- Durable `create`: survives process restart (retries and backoff on provider errors).
+- Shorter admission path if returning `202` after job insert only.
+- Clear separation between orchestration (placement writes jobs) and execution
+  (worker claims jobs).
+
+#### Cons
+
+- Extra schema, worker lifecycle, and monitoring (stuck jobs, poison messages).
+- Duplicates the in-process path unless one model is chosen; two ways to apply
+  increases maintenance.
+- Placement still must advance DAG levels when dependencies are `Ready`; worker
+  alone does not replace placement orchestration without graph logic in
+  SPRM (see Alternative 3).
 
 #### Status
 
@@ -486,10 +514,9 @@ Considered
 
 #### Rationale
 
-The proposed flow keeps DAG progression in Placement (enqueue per level when
-dependencies are ready, using the state queue) and limits SPRM to consuming
-provision messages and executing resource provisioning.
-Publishing the full graph at once and deferring work in SPRM can simplify 
-Placement. But SPRM would own dependency ordering, retries, and requeues,
-and would need graph aware logic that Placement already holds, 
-adding operational overhead and duplicated orchestration rules.
+The proposed flow keeps DAG progression in placement (enqueue per level when
+dependencies are `Ready`, notified after the status consumer updates
+the database) and limits SPRM to claiming jobs and executing
+`create`. Batch job insert with worker-side requeue can simplify placement, but
+SPRM would own ordering, retries, and graph-aware logic that
+placement already holds, adding duplicated orchestration rules.
