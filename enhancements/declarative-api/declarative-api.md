@@ -180,13 +180,13 @@ flowchart TD
 
 4. Placement Manager → provision queue → SPRM 
    As Placement walks each DAG level, it enqueues one persisted message per resource 
-   with create operation for that node in `spec.resources[]`.
+   with `create` operation for that node in `spec.resources[]`.
    SPRM consumes from the provision queue so Placement is not blocked on long provider work.
 
 5. SPRM → Service Provider 
    For each consumed item, SPRM resolves the service type in its registry 
    and invokes the registered Service Provider over
-   HTTP to perform create or lifecycle for that instance.
+   HTTP to perform `create` or lifecycle for that instance.
 
 
 ### Design Details
@@ -262,10 +262,10 @@ sequenceDiagram
    SPRM creates.
 
 5. Placement Manager → provision queue → SPRM → Service Provider
-   For each resource in DAG order (parallel within a level when safe), Placement
-   enqueues one persisted message on the provision queue that tells SPRM
-   to create a resource from the graph (payload includes enough
-   identity for idempotency). 
+   For each resource in DAG order (parallel within a level when safe),
+   Placement enqueues one persisted message on the provision queue that 
+   tells SPRM to create a resource from the graph.
+   Payload should include enough identity for idempotency.
    SPRM consumes the provision queue, records intent, resolves the service 
    type in its registry, and invokes the registered Service Provider.
 
@@ -325,7 +325,7 @@ resource’s outputs stay deferred until that resource is `Ready`.
 #### Queuing
 
 The `provision` queue handles the requests between Placement and SPRM.
-Placement publishes one logical create per resource. SPRM acts a consumer
+Placement publishes one logical `create` per resource. SPRM acts a consumer
 from the queue and calls Service Providers.
 Also, Placement consumes messages from the `state` queue, to check the
 readiness of resources before the continues walking a DAG application.
