@@ -28,17 +28,18 @@ deployable.
 
 ## Open Questions
 
-1. **Databases:** keep four separate Postgres databases per domain in one process, or
-   plan a later schema merge (see migration step 6).
+1. **Databases:** keep four separate Postgres databases per domain in one
+   process, or plan a later schema merge (see migration step 6).
 
 ## Motivation
 
-Four deployables made sense for parallel work and separation of concerns. Releases
-already move together, and manager-to-manager HTTP adds latency, failure points, and
-contract overhead without clear benefit at current scale.
+Four deployables made sense for parallel work and separation of concerns.
+Releases already move together, and manager-to-manager HTTP adds latency,
+failure points, and contract overhead without clear benefit at current scale.
 
-A monolith runtime removes internal HTTP on create/delete/rehydrate, simplifies local
-and demo stacks, and matches how the synchronous path is actually used today.
+A monolith runtime removes internal HTTP on create/delete/rehydrate, simplifies
+local and demo stacks, and matches how the synchronous path is actually used
+today.
 
 ### Goals
 
@@ -50,10 +51,12 @@ and demo stacks, and matches how the synchronous path is actually used today.
 
 ### Non-Goals
 
-- Merging Postgres schemas in the first phase (can stay four databases in one process).
-- Changing provider-side NATS status flows or external Service Provider processes.
-- A separate api-gateway stack in the first phase (add edge routing when requirements
-  justify it).
+- Merging Postgres schemas in the first phase (can stay four databases in one
+  process).
+- Changing provider-side NATS status flows or external Service Provider
+  processes.
+- A separate api-gateway stack in the first phase (add edge routing when
+  requirements justify it).
 
 ## Proposal
 
@@ -85,13 +88,14 @@ dcm-platform/
 
 #### Operator deploys one control-plane image
 
-Operators run one manager container (plus Postgres, NATS, and providers as today)
-instead of four. Versioning and rollout use a single tag.
+Operators run one manager container (plus Postgres, NATS, and providers as
+today) instead of four. Versioning and rollout use a single tag.
 
 #### Developer traces a create request in one process
 
-A catalog-item-instance create runs catalog → placement → policy → service-provider
-without inter-manager HTTP. Logs and traces stay in one process with domain labels.
+A catalog-item-instance create runs catalog → placement → policy →
+service-provider without inter-manager HTTP. Logs and traces stay in one process
+with domain labels.
 
 ### Implementation Details/Notes/Constraints
 
@@ -109,22 +113,26 @@ Each manager has its own Postgres database.
 
 **Migration plan:**
 
-1. **Monorepo:** one Git tree, one root `go.mod`, domains under `internal/*` (for
-   example `internal/catalog/`). Shared Makefile, lint config, and CI entrypoint.
-   Keep unit and subsystem tests scoped per domain. CI runs separate jobs per domain
-   in parallel on every PR at first. If that becomes too slow, skip jobs for domains
-   whose paths did not change in the PR.
+1. **Monorepo:** one Git tree, one root `go.mod`, domains under `internal/*`
+   (for example `internal/catalog/`). Shared Makefile, lint config, and CI
+   entrypoint. Keep unit and subsystem tests scoped per domain. CI runs separate
+   jobs per domain in parallel on every PR at first. If that becomes too slow,
+   skip jobs for domains whose paths did not change in the PR.
 
 2. **Domain interfaces:** catalog → placement → policy → service-provider behind
    interfaces. HTTP implementations only during cutover.
-3. **Single binary:** `cmd/dcm-server` wires all domains. Service-provider routes and
-   the NATS consumer run in the same process. Remove internal manager URL env vars.
-4. **HTTP entrypoint:** clients and the [api-gateway](https://github.com/dcm-project/api-gateway)
-   `compose.yaml` stack call the monolith directly instead of Traefik on port 9080.
-   Document the monolith port. Reintroduce Traefik or cluster ingress later if TLS
+3. **Single binary:** `cmd/dcm-server` wires all domains. Service-provider
+   routes and the NATS consumer run in the same process. Remove internal manager
+   URL env vars.
+4. **HTTP entrypoint:** clients and the
+   [api-gateway](https://github.com/dcm-project/api-gateway) `compose.yaml`
+   stack call the monolith directly instead of Traefik on port 9080. Document
+   the monolith port. Reintroduce Traefik or cluster ingress later if TLS
    termination or multi-backend routing is needed.
-5. **CI and images:** one Containerfile, one Quay image. Deprecate four manager images.
-6. **Databases (later):** keep four databases initially. Evaluate schema merge separately.
+5. **CI and images:** one Containerfile, one Quay image. Deprecate four manager
+   images.
+6. **Databases (later):** keep four databases initially. Evaluate schema merge
+   separately.
 
 ### Risks and Mitigations
 
@@ -149,17 +157,18 @@ Each manager has its own Postgres database.
 
 ### Test Plan
 
-- Subsystem tests per domain inside the monorepo (existing suites moved or adapted).
+- Subsystem tests per domain inside the monorepo (existing suites moved or
+  adapted).
 - Integration tests for create/delete/rehydrate without inter-manager HTTP.
 - Local compose smoke tests against the monolith HTTP port (no api-gateway hop).
 - Contract tests not required between in-process manager domains.
 
 ### Upgrade / Downgrade Strategy
 
-- **Upgrade:** deploy monolith image, point clients and compose at monolith port, and
-  retire four manager deployments.
-- **Downgrade:** roll back to previous four-image layout via pinned image tags until
-  the deprecation window ends.
+- **Upgrade:** deploy monolith image, point clients and compose at monolith
+  port, and retire four manager deployments.
+- **Downgrade:** roll back to previous four-image layout via pinned image tags
+  until the deprecation window ends.
 
 ## Implementation History
 
@@ -178,9 +187,9 @@ Each manager has its own Postgres database.
 
 #### Description
 
-Catalog, placement, and policy in one process. `service-provider-manager` in another.
-One Git repo with two `cmd/` binaries and two images. HTTP contract between core and
-the service provider manager.
+Catalog, placement, and policy in one process. `service-provider-manager` in
+another. One Git repo with two `cmd/` binaries and two images. HTTP contract
+between core and the service provider manager.
 
 #### Pros
 
@@ -201,16 +210,18 @@ Rejected
 
 #### Rationale
 
-The proposed design optimizes for one deployable and in-process handoffs. A split
-runtime mainly helps when independent service provider manager rollout or partial
-APIs during core outage are priorities. Those were not chosen for the initial target.
+The proposed design optimizes for one deployable and in-process handoffs. A
+split runtime mainly helps when independent service provider manager rollout or
+partial APIs during core outage are priorities. Those were not chosen for the
+initial target.
 
 ### Alternative 2: Core and service provider manager separate (two repos)
 
 #### Description
 
-Same runtime as Alternative 1, but `dcm-control-plane` and `service-provider-manager`
-stay in separate Git repositories with independent CI pipelines.
+Same runtime as Alternative 1, but `dcm-control-plane` and
+`service-provider-manager` stay in separate Git repositories with independent CI
+pipelines.
 
 #### Pros
 
@@ -219,8 +230,8 @@ stay in separate Git repositories with independent CI pipelines.
 
 #### Cons
 
-- All cons of Alternative 1, plus cross-repo versioning and client modules between
-  core and the service provider manager.
+- All cons of Alternative 1, plus cross-repo versioning and client modules
+  between core and the service provider manager.
 
 #### Status
 
@@ -228,8 +239,8 @@ Rejected
 
 #### Rationale
 
-Same trade-off as Alternative 1. Independent CI does not outweigh a single monorepo
-and one synchronous path for the first merge.
+Same trade-off as Alternative 1. Independent CI does not outweigh a single
+monorepo and one synchronous path for the first merge.
 
 ### Alternative 3: Stay on four deployables
 
@@ -245,7 +256,8 @@ Keep four manager services, four repos, and manager-to-manager HTTP.
 #### Cons
 
 - HTTP latency and partial failure on every create.
-- Continued contract and retry burden with little release independence in practice.
+- Continued contract and retry burden with little release independence in
+  practice.
 
 #### Status
 
@@ -253,15 +265,15 @@ Rejected
 
 #### Rationale
 
-Interim layout only. Costs of the split (hops, glue, consistency) exceed benefits while
-releases stay lockstep.
+Interim layout only. Costs of the split (hops, glue, consistency) exceed
+benefits while releases stay lockstep.
 
 ### Alternative 4: Keep api-gateway (Traefik) after merge
 
 #### Description
 
-Keep the api-gateway stack in front of the monolith (or two backends if the service
-provider manager were split).
+Keep the api-gateway stack in front of the monolith (or two backends if the
+service provider manager were split).
 
 #### Pros
 
@@ -278,8 +290,9 @@ Rejected
 
 #### Rationale
 
-Start with one manager process exposing the API. Add edge routing when a concrete
-requirement appears (TLS, multiple backends, or shared ingress patterns).
+Start with one manager process exposing the API. Add edge routing when a
+concrete requirement appears (TLS, multiple backends, or shared ingress
+patterns).
 
 ## Infrastructure Needed
 
