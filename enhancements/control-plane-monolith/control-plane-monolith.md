@@ -23,13 +23,8 @@ The control plane monolith merges `catalog-manager`, `placement-manager`,
 `policy-manager`, and `service-provider-manager` into one Git repository, one
 runtime process, and one deployable image. Today those managers run as separate
 services with HTTP between them on the synchronous provision path. The monolith
-uses in-process calls instead. Service Providers and NATS remain outside this
-deployable.
-
-## Open Questions
-
-1. **Databases:** keep four separate Postgres databases per domain in one
-   process, or plan a later schema merge (see migration step 6).
+uses in-process calls instead. Control plane state lives in one Postgres database
+with a merged schema. Service Providers and NATS remain outside this deployable.
 
 ## Motivation
 
@@ -46,13 +41,12 @@ today.
 - One monorepo for `catalog-manager`, `placement-manager`, `policy-manager`, and
   `service-provider-manager`.
 - One control-plane deployment instead of four manager deployments.
+- One Postgres database with a merged schema for all manager domains.
 - In-process calls between those managers on the synchronous path.
 - Deprecate four manager images on a published timeline.
 
 ### Non-Goals
 
-- Merging Postgres schemas in the first phase (can stay four databases in one
-  process).
 - Changing provider-side NATS status flows or external Service Provider
   processes.
 - A separate api-gateway stack in the first phase (add edge routing when
@@ -67,6 +61,7 @@ today.
 | Git | One monorepo for the four managers |
 | Runtime | One process |
 | Ship | One control-plane image |
+| Data | One Postgres database, merged schema |
 | Public HTTP | Monolith serves `/api/v1alpha1`. No separate api-gateway deployable initially |
 | catalog ↔ placement ↔ policy ↔ service-provider | In-process |
 | Failure | One outage affects the whole control plane |
@@ -88,8 +83,9 @@ dcm-platform/
 
 #### Operator deploys one control-plane image
 
-Operators run one manager container (plus Postgres, NATS, and providers as
-today) instead of four. Versioning and rollout use a single tag.
+Operators run one manager container and one control-plane Postgres database
+(plus NATS and providers as today) instead of four manager containers and four
+databases. Versioning and rollout use a single tag.
 
 #### Developer traces a create request in one process
 
@@ -131,8 +127,10 @@ Each manager has its own Postgres database.
    termination or multi-backend routing is needed.
 5. **CI and images:** one Containerfile, one Quay image. Deprecate four manager
    images.
-6. **Databases (later):** keep four databases initially. Evaluate schema merge
-   separately.
+6. **Database:** merge the four manager schemas into one Postgres database and
+   one migration stream. Update api-gateway postgres init, compose, and subsystem
+   tests. We are not in production, so this is part of the first merge rather
+   than a follow-up migration.
 
 ### Risks and Mitigations
 
@@ -141,6 +139,7 @@ Each manager has its own Postgres database.
 | Blast radius: any fatal error affects whole plane | Domain boundaries in code, tests per package, trace labels per domain |
 | Longer CI when any domain changes | Accept for now. Split images rejected (see Alternatives) |
 | Large binary / memory footprint | Profile after merge. Scale replicas as a unit |
+| Schema merge across domains | Domain packages and migrations stay separated in code. Review FKs and naming in one schema |
 | No edge proxy at first | Add Traefik or ingress when TLS or multi-backend routing is required |
 
 ## Design Details
@@ -152,7 +151,7 @@ Each manager has its own Postgres database.
 | catalog, placement, policy | HTTP | In-process |
 | catalog to service-provider | HTTP (via placement) | In-process |
 | API entrypoint | Traefik to four backends | Monolith HTTP port |
-| Postgres per domain | Four separate databases | Four DBs in one process (initially) |
+| Postgres | Four separate databases | One database, merged schema |
 | OPA | HTTP from policy | Unchanged |
 
 ### Test Plan
@@ -161,18 +160,16 @@ Each manager has its own Postgres database.
   adapted).
 - Integration tests for create/delete/rehydrate without inter-manager HTTP.
 - Local compose smoke tests against the monolith HTTP port (no api-gateway hop).
+- Merged schema migrations apply cleanly on a fresh database.
 - Contract tests not required between in-process manager domains.
 
 ### Upgrade / Downgrade Strategy
 
-- **Upgrade:** deploy monolith image, point clients and compose at monolith
-  port, and retire four manager deployments.
+- **Upgrade:** deploy monolith image with merged schema migrations, point clients
+  and compose at monolith port, and retire four manager deployments and four
+  control-plane databases.
 - **Downgrade:** roll back to previous four-image layout via pinned image tags
   until the deprecation window ends.
-
-## Implementation History
-
-- 2026-05-07: Enhancement opened.
 
 ## Drawbacks
 
@@ -297,5 +294,6 @@ patterns).
 ## Infrastructure Needed
 
 - New or renamed monorepo (e.g. `dcm-platform`) with CI producing one image.
+- Merged Postgres schema and init scripts for local and test environments.
 - Compose and docs updated to call the monolith port instead of api-gateway.
 - Deprecation communication for four existing manager images on Quay.
