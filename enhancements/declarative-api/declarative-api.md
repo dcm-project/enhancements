@@ -18,13 +18,12 @@ creation-date: 2026-05-12
 
 ## Summary
 
-This proposal describes how DCM implements multi-tier (n-tier) applications
-through a single declarative flow on the monolithic `dcm-platform` server,
-whether the user chooses a catalog-backed `Application` path (reference to a
-`CatalogItem`) or a freeform `Application` (non referenced catalog). This
-approach uses [CEL](https://cel.dev/) for wiring values and a Direct Acyclic
-Graph (DAG) for dependency order and safe parallelism on the effective resource
-graph, whether produced by catalog resolution or authored as freeform.
+This proposal describes how DCM implements multi-tier (n-tier) **catalog-backed**
+applications through a single declarative flow on the monolithic `dcm-platform`
+server. A developer submits a `CatalogItemInstance` (catalog item plus params);
+catalog resolution produces an effective resource graph. This approach uses
+[CEL](https://cel.dev/) for wiring values and a Direct Acyclic Graph (DAG) for
+dependency order and safe parallelism on that graph.
 
 ## Motivation
 
@@ -36,20 +35,17 @@ as part of a single application request.
 one resource per request through catalog, placement, with policy and provisioning 
 invoked per call. There is no end-to-end flow defined for allowing and processing
 multiple resources within a single request.
-**Why this enhancement**: This proposal defines that flow. How a single request
-(via catalog resolution or freeform input) becomes an effective graph,
-how the platform validates and applies policy to the intended graph before 
-provisioning, and how dependency order drives which resources are
-created and when. It also establishes the contract needed if we later 
-support freeform graphs. Freeform graphs are application layouts 
-developers define directly, not from a catalog template.
+**Why this enhancement**: This proposal defines that flow for catalog-backed
+requests: how resolution becomes an effective graph, how the platform validates
+and applies policy to the intended graph before provisioning, and how dependency
+order drives which resources are created and when.
 
 ### Goals
 
-- Define the mechanism of supporting multi-tier catalog items 
-  and freeform usage for Application.
-- Define end to end flow for requesting an n-tier application to evaluate how
-  CEL parser, DAG build and policy work.
+- Define the mechanism for multi-tier **catalog item** instances (n-tier from
+  catalog resolution).
+- Define end-to-end flow for requesting an n-tier application from catalog to
+  evaluate how CEL parser, DAG build, and policy work.
 - Understand how declarative flow maps into `dcm-control-plane` packages
   (`internal/catalog`, `internal/placement`, `internal/policy`,
   `internal/serviceprovider`) behind `cmd/dcm-server`.
@@ -59,8 +55,8 @@ developers define directly, not from a catalog template.
 - Define the resource types, catalog items and DAG engine.
 - Define state management for each resources within the Application.
 - Choosing different environments per resource and validating network
-  connectivity between them those resources (environment 
-  based placement and overlay connectivity).
+  connectivity between them those resources (environment based placement
+  and overlay connectivity).
 
 ## Proposal
 
@@ -74,29 +70,22 @@ developers define directly, not from a catalog template.
 ### Overview
 
 The proposed solution is a single declarative graph (`spec.resources[]`) after
-catalog resolution (catalog path) or freeform input. CEL (`${…}`) expresses
-values and cross-resource wiring; the engine parses those expressions to infer
-dependencies alongside explicit `requirements`. A DAG is built from that graph
-so the platform knows valid order and safe parallelism (topological
-levels). Policy runs on the intended graph before provisioning.
-Placement then walks the DAG, resolving CEL against outputs as dependencies
-become ready.
+catalog resolution CEL (`${…}`) expresses values and cross-resource wiring; 
+the engine parses those expressions to infer dependencies alongside explicit 
+`requirements`. A DAG is built from that graph so the platform knows valid
+order and safe parallelism (topological levels). Policy runs on the intended
+graph before provisioning. Placement then walks the DAG, resolving CEL
+against outputs as dependencies become ready.
 
 ### User Stories
 
-#### Story 1 — Request from catalog
+#### Story — Request from catalog
 
-A developer submits an Application (or catalog item instance) that references a
-CatalogItem plus params. The system loads the blueprint, merges params,
-resolves the catalog into an effective resource graph, compiles CEL and the DAG,
-evaluates policy on the whole graph, then begins provisioning
-in DAG order, checks observable status until terminal success or failure.
-
-#### Story 2 — Freeform Application
-
-A developer submits `spec.resources` without a catalog reference. The system
-skips catalog fetch, validates params if present, then runs the same compile,
-policy, plan, and apply phases on the submitted graph.
+A developer submits a catalog item instance that references a CatalogItem plus
+params. The system loads the blueprint, merges params, resolves the catalog into
+an effective resource graph, compiles CEL and  DAG. Then it evaluates policy 
+on the whole graph, begins provisioning in DAG order and checks observable 
+status until terminal success or failure.
 
 ### Proposed System Architecture
 
@@ -113,7 +102,7 @@ flowchart TD
     classDef user fill:#2d2d2d,color:#ffffff,stroke:#b0bec5,stroke-width:2px
     classDef dcmCore fill:#FFFFFF,stroke:#bdbdbd,stroke-width:2px
 
-    U["<b>User/GitOps</b><br/>Submit CatalogItemInstance<br/> or Freeform Application"]:::user
+    U["<b>User/GitOps</b><br/>Submit CatalogItemInstance"]:::user
 
     subgraph DCM_Core [ ]
         CM["<b>Catalog</b><br/>Catalog resolution + params<br/>Send application request"]:::catalog
@@ -149,11 +138,8 @@ flowchart TD
 
 1. User / GitOps → catalog package (`dcm-server`)
    User submits catalog-backed intent (`POST /api/v1alpha1/catalog-item-instances`).
-   The catalog package resolves the blueprint and calls placement in-process with the
-   effective graph. For freeform, the client submits an application
-   graph through a user-facing API on the same server.
-   Placement receives `spec.resources[]` and runs the same
-   orchestration as the catalog path.
+   The catalog package resolves the blueprint and calls placement in-process with
+   the effective graph.
 
 2. internal/catalog → internal/placement
    On the catalog path, resolution turns blueprint plus params into `spec.resources[]`.
@@ -269,11 +255,7 @@ sequenceDiagram
    The SPRM status consumer receives events, updates instance
    state in the database, and notifies placement when dependencies are
    `Ready`. Placement calls SPRM again for each resource at the next DAG
-   level. Later levels stay in run state until their dependencies are `Ready`
-
-**Note**: Freeform submission skips catalog resolution. The client submits
-`spec.resources[]` through a user-facing API on `dcm-server`.
-Steps 3 through 6 apply unchanged on the submitted graph.
+   level. Later levels stay in run state until their dependencies are `Ready`.
 
 #### CEL and DAG
 
@@ -293,8 +275,7 @@ which resources may run in parallel at the same step.
 
 ##### Executable Flow
 
-1. Start from resolved `spec.resources[]` (after catalog resolution, or
-   from freeform input as-is).
+1. Start from resolved `spec.resources[]` after catalog resolution.
 2. Extract dependency pairs from CEL + `requirements` → build a directed
    graph (nodes = resources, edges = “must come before”).
 3. Detect cycles; if any cycle exists, the graph is invalid for a linear
@@ -520,3 +501,43 @@ the database) and limits SPRM to claiming jobs and executing
 `create`. Batch job insert with worker-side requeue can simplify placement, but
 SPRM would own ordering, retries, and graph-aware logic that
 placement already holds, adding duplicated orchestration rules.
+
+### Alternative 5 — Freeform application (no catalog reference)
+
+#### Description
+
+Allow developers to submit an application graph directly,`spec.resources[]`
+authored without a `CatalogItem` reference instead of only catalog item
+instances. The client would call a user-facing API on `dcm-server` (for example
+`POST /api/v1alpha1/applications`). Catalog resolution is
+skipped; placement receives the submitted graph and runs the same orchestration
+as the catalog path (DAG compile, graph policy, per-level apply, status-driven
+progression). May require RBAC and stronger governance because templates and
+parameter constraints are not enforced by a published catalog item.
+
+#### Pros
+
+- Supports workloads that do not fit a pre-published catalog shape when policy
+  allows ad hoc topologies.
+- Reuses the same placement, policy, and SPRM flow once an effective graph exists;
+  no second orchestration model.
+
+#### Cons
+
+- Weaker catalog governance: no blueprint approval path unless policy encodes
+  equivalent rules.
+- Entry API and auth model must be defined (who may submit freeform graphs).
+- Catalog package is no longer the sole user-facing create path; documentation
+  and UI must cover two submission modes.
+
+#### Status
+
+Considered
+
+#### Rationale
+
+This enhancement focuses on catalog-backed n-tier flows (`POST
+/api/v1alpha1/catalog-item-instances`). Freeform is deferred so resolution,
+instance model, and catalog governance stay in scope first. The orchestration
+contract defined here (graph, run, policy gate, DAG apply) is intended to extend
+to freeform later without redesign if a separate submit API is added.
