@@ -36,9 +36,9 @@ one resource per request through catalog, placement, with policy and provisionin
 invoked per call. There is no end-to-end flow defined for allowing and processing
 multiple resources within a single request.
 **Why this enhancement**: This proposal defines that flow for catalog-backed
-requests: how resolution becomes an effective graph, how the platform validates
-and applies policy to the intended graph before provisioning, and how dependency
-order drives which resources are created and when.
+requests: how resolution becomes an effective graph, how the platform runs
+policy on each resource before provisioning, and how dependency order drives
+which resources are created and when.
 
 ### Goals
 
@@ -57,6 +57,10 @@ order drives which resources are created and when.
 - Choosing different environments per resource and validating network
   connectivity between them those resources (environment based placement
   and overlay connectivity).
+- Graph-level (batch) policy evaluation in a single request with full-graph
+  context for cross-resource rules (see Future improvements and Alternative 6).
+- Freeform application submission without a catalog reference (see Future
+  improvements and Alternative 5).
 
 ## Proposal
 
@@ -81,11 +85,12 @@ against outputs as dependencies become ready.
 
 #### Story — Request from catalog
 
-A developer submits a catalog item instance that references a CatalogItem plus
+A developer submits a catalog item instance that references a `CatalogItem` plus
 params. The system loads the blueprint, merges params, resolves the catalog into
-an effective resource graph, compiles CEL and  DAG. Then it evaluates policy 
-on the whole graph, begins provisioning in DAG order and checks observable 
-status until terminal success or failure.
+an effective resource graph, compiles CEL and the DAG. Then it evaluates policy 
+on each resource in the graph (all must pass before any `create`), befores
+provisioning begins in DAG order. Afterward, it checks observable status 
+until terminal success or failure.
 
 ### Proposed System Architecture
 
@@ -147,14 +152,14 @@ flowchart TD
    graph snapshot in the platform database, and coordinates policy and apply.
 
 3. internal/placement → internal/policy
-   Placement calls the policy package (graph or batch evaluate). 
-   Orchestration must not enqueue resources until this policy gate
-   succeeds for the intended graph. Placement returns `202` and `run_id` after
-   policy passes and DAG level 0 resources are sent to service provider.
+   Placement calls the policy package once per resource in the resolved graph.
+   Every resource must pass before any provisioning starts. 
+   Orchestration must not call SPRM until all per-resource evaluations succeed. 
+   Placement returns `202` and `run_id` after policy passes for the 
+   full resource set and creating for DAG level 0 resources have been initiated.
 
 4. internal/placement → internal/serviceprovider
-   After policy approves the graph resources, the resource graph
-   s persisted and placement walks the DAG by level.
+   After all resources pass policy, placement walks the DAG by level.
    For each resource at the current level (including resources that may run
    in parallel), placement calls the `internal/serviceprovider`
    to create the resources.
@@ -195,12 +200,14 @@ sequenceDiagram
     alt CEL or DAG error
       PM-->>Dev: compile error
     else Compile ok
-      PM->>POL: EvaluateGraph
-      alt Policy denied
-        POL-->>PM: DENIED
-        PM-->>Dev: PolicyRejected
-      else Policy approved
-        PM->>DB: persist run + <br/> graph snapshot
+      loop each resource in graph
+        PM->>POL: EvaluateRequest<br/>(per resource)
+        alt resource denied
+          POL-->>PM: DENIED
+          PM-->>Dev: PolicyRejected
+        end
+      end
+      PM->>DB: persist run + <br/>graph snapshot
         loop each DAG <br/>level-0 resource
           PM->>SPkg: ApplyCreate
           SPkg->>SP: HTTP create
@@ -218,7 +225,6 @@ sequenceDiagram
           SP-->>SPkg: 202 PROVISIONING
           SPkg->>DB: persist instance
         end
-      end
     end
   end
 ```
@@ -240,11 +246,12 @@ sequenceDiagram
    and graph snapshot in the control-plane database.
 
 4. Placement → Policy
-   Placement calls Policy to evaluates the full graph before 
-   any `create` is sent to SPRM.
-   On deny, return `PolicyRejected` and does not call SPRM.
+   Placement calls policy once per resource in the resolved graph.
+   Every resource must pass before any `create` is sent to SPRM. 
+   On any deny, return `PolicyRejected` with aggregated 
+   violations and do not call SPRM.
 
-5. Placement → SPRM → Service Provider (level 0)  
+5. Placement → SPRM → Service Provider (level 0)
    For each resource at DAG level 0 (in parallel within the level
    when policy allows), placement calls SPRM. SPRM resolves the provider,
    invokes HTTP create on the Service Provider, and persists the
@@ -307,22 +314,22 @@ resource’s outputs stay deferred until that resource is `Ready`.
 
 #### Policy evaluation
 
-Evaluation flow:
+Evaluation uses the existing per-resource engine API.
 
-1. Input: resolved `resources[]`, params snapshot, environment label,
-   optional previous state.
-2. Per-resource: run policy (OPA) on each resource
-   with graph context in the evaluate payload (neighbors, paths, or a
-   bounded subgraph) so many cross-resource checks do not need a separate
-   global pass. (Depends on how Policy will treat this, unclear here)
-3. Output: allow or deny per resource and/or global denies; 
-   aggregate violations for API responses.
+1. Input per call: one resource's spec (map), plus catalog params snapshot as
+   needed for mutation/defaulting.
+2. Placement loops over every resource in the resolved graph at admission and
+   calls evaluate once per resource. All must return APPROVED or MODIFIED with a
+   selected provider before any SPRM `create`.
+3. Output per resource: allow or deny, optional spec mutation, selected provider.
+   Placement aggregates denials for the API response.
 
 ### Risks and Mitigations
 
 | Risk | Mitigation                                                                                                   |
 | ---- |--------------------------------------------------------------------------------------------------------------|
-| Partial graphs after per-resource policy | Enforce full-graph policy gate before any SPRM `create`; single run-level success criterion.                 |
+| Partial run after policy deny mid-loop | Evaluate every resource at admission before any SPRM `create`; fail the run on first deny; do not apply partial approvals. |
+| Cross-resource policy rules not expressible per resource | Document limitation; use catalog constraints until graph evaluate (Future improvements). |
 | DAG sort mutates internal graph | Snapshot edges for policy and audit before topological ordering; rebuild if needed.                          |
 | Partial failure within a DAG level (some resources created, others failed) | Per-resource status on the run; mark run failed or compensating cleanup.                                     |
 | Admission blocked on level-0 Service Provider HTTP | Call SPRM only for level 0 at admission; bound HTTP timeouts; optional bounded parallelism within the level. |
@@ -330,11 +337,11 @@ Evaluation flow:
 
 ## Drawbacks
 
-- Full-graph policy runs before any `create`: later feedback than incremental
-  approve-then-provision—acceptable trade-off for graph-wide rules.
-- Level-0 apply runs on the admission path: admission waits for policy plus
-  in-process SPRM calls (Service Provider accept per resource), not
-  for the entire graph to reach `RUNNING`.
+- Per-resource policy at admission: N evaluate calls for N resources; some
+  graph-wide rules cannot be enforced until graph-level evaluate exists.
+- Level-0 apply runs on the admission path: admission waits for all per-resource
+  policy evaluations plus in-process SPRM calls (Service Provider accept per
+  resource), not for the entire graph to reach `RUNNING`.
 - No durable provision outbox in the proposed flow: a crash after `202` may leave
   the run mid-level until reconciliation; a database-backed apply worker remains
   an optional later improvement.
@@ -383,17 +390,15 @@ with provider-originated telemetry. Provisioning is control plane commands with
 stricter delivery and lifecycle needs. Separate streams or subjects keep
 versioning, scaling, and failure domains independent.
 
-### Alternative 2 — Policy validates then provisions per resource (incremental)
+### Alternative 2 — Interleaved policy and provision (incremental)
 
 #### Description
 
 Evaluate policy and start provisioning one resource at a time in graph order,
-without waiting for authorization of the full application graph. For each
-resource in DAG order, placement calls the policy package for that resource only;
-on approval, it immediately calls SPRM to create that resource,
-then moves to the next resource and repeats policy evaluation there. Later
-resources are not validated by policy until earlier ones are approved 
-and provision has begun.
+without first evaluating every resource in the graph at admission. For each
+resource in DAG order, placement calls policy for that resource only; on
+approval, it immediately calls SPRM to create that resource, then moves to the
+next resource and repeats policy evaluation there.
 
 #### Pros
 
@@ -420,11 +425,10 @@ Rejected
 
 #### Rationale
 
-The proposed flow runs policy on the intended graph before any SPRM
-`create`, so the run is either authorized as a whole or rejected before side
-effects. Incremental approve-then-provision fits single-resource flows but
-conflicts with graph-level policy and coordinated provider rules planned for
-n-tier applications.
+The proposed flow evaluates every resource at admission (per-resource calls,
+all must pass) before any SPRM `create`. Interleaved approve-then-provision
+allows side effects before all resources are validated and conflicts with
+fail-fast admission for n-tier catalog runs.
 
 ### Alternative 3 — SPRM as apply orchestrator (batch create)
 
@@ -511,8 +515,8 @@ authored without a `CatalogItem` reference instead of only catalog item
 instances. The client would call a user-facing API on `dcm-server` (for example
 `POST /api/v1alpha1/applications`). Catalog resolution is
 skipped; placement receives the submitted graph and runs the same orchestration
-as the catalog path (DAG compile, graph policy, per-level apply, status-driven
-progression). May require RBAC and stronger governance because templates and
+as the catalog path (DAG compile, per-resource policy, per-level apply,
+status-driven progression). May require RBAC and stronger governance because templates and
 parameter constraints are not enforced by a published catalog item.
 
 #### Pros
@@ -532,12 +536,59 @@ parameter constraints are not enforced by a published catalog item.
 
 #### Status
 
-Considered
+Deferred
 
 #### Rationale
 
 This enhancement focuses on catalog-backed n-tier flows (`POST
 /api/v1alpha1/catalog-item-instances`). Freeform is deferred so resolution,
 instance model, and catalog governance stay in scope first. The orchestration
-contract defined here (graph, run, policy gate, DAG apply) is intended to extend
-to freeform later without redesign if a separate submit API is added.
+contract defined here (graph, run, per-resource policy, DAG apply) is intended to
+extend to freeform later without redesign if a separate submit API is added.
+
+### Alternative 6 — Graph-level policy evaluation
+
+#### Description
+
+Replace (or supplement) the per-resource evaluate loop with a single graph or
+batch API: one request carrying full `resources[]`, dependency edges, and
+optional platform context so OPA can approve or deny the run atomically and
+assign coordinated providers across resources (for example dependent resources
+that must land on compatible targets).
+
+#### Pros
+
+- One admission call for policy; clearer run-level allow or deny.
+- Supports graph-wide and cross-resource Rego rules without N round-trips.
+- Natural fit for coordinated provider or environment selection when that
+  metadata is added to the evaluate payload.
+
+#### Cons
+
+- New engine API, input schema, and policy authoring model beyond today's
+  `evaluateRequest` per resource.
+- More complex OPA bundles and testing for graph rules.
+- Does not remove the need for placement orchestration and DAG apply logic.
+
+#### Status
+
+Deferred
+
+#### Rationale
+
+This enhancement keeps per-resource evaluation to align with the v1 policy
+engine and minimize new policy surface area. Graph-level evaluate is deferred
+as a follow-on when cross-resource policy rules require it (see Future
+improvements).
+
+## Future improvements
+
+Freeform submission and graph-level policy evaluation are intentionally deferred
+until after catalog-backed n-tier flow and per-resource policy evaluation ship.
+
+- Graph-level policy evaluation: single batch or `evaluateGraph` request with
+  full `resources[]`, dependency edges, and optional environment or provider
+  metadata so policy engine can enforce coordinated provider selection 
+  and graph-wide denies without N separate calls.
+- Freeform applications: user-facing submit API for developer-authored
+  `spec.resources[]` without a catalog reference (see Alternative 5).
