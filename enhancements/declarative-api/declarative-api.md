@@ -18,12 +18,13 @@ creation-date: 2026-05-12
 
 ## Summary
 
-This proposal describes how DCM implements multi-tier (n-tier) **catalog-backed**
-applications through a single declarative flow on the monolithic `dcm-platform`
-server. A developer submits a `CatalogItemInstance` (catalog item plus params);
-catalog resolution produces an effective resource graph. This approach uses
-[CEL](https://cel.dev/) for wiring values and a Direct Acyclic Graph (DAG) for
-dependency order and safe parallelism on that graph.
+This proposal describes how DCM implements multi-tier (n-tier) 
+**catalog-backed** applications through a single declarative flow.
+A developer submits a `CatalogItemInstance` (catalog item plus params); 
+catalog resolution produces an effective resource graph. 
+This approach uses [CEL](https://cel.dev/) for wiring values 
+and a Direct Acyclic Graph (DAG) for dependency order and
+safe parallelism on that graph.
 
 ## Motivation
 
