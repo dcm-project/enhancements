@@ -24,14 +24,6 @@ creation-date: 2025-12-05
 This enhancement defines standardized schemas for DCM service types to enable
 cross-platform portability.
 
-<!-- ## Open Questions -->
-
-<!--
-Call out areas of the design that require closure before deciding to implement.
-Example:
-> 1. This requires exposing previously private resources. Can we do this?
--->
-
 ## Summary
 
 This ADR defines provider-agnostic schemas for DCM service types. These schemas
@@ -146,6 +138,10 @@ following serviceTypes:
 - Database  
   Fields common across all database types (SQL, NoSQL, search, time-series,
   etc.)
+
+Multi-resource stacks (for example database + container) are **not** a service type.
+They are defined as [composite catalog items](/enhancements/catalog-item-schema/catalog-item-schema.md#composite-catalog-item)
+with one primitive `serviceType` per resource in the blueprint.
 
 ### Virtual Machine
 
