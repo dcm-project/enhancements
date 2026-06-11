@@ -98,17 +98,17 @@ All service schemas share common fields defined once in
 
 ## Schema Structure
 
-| Field         | Required | Type                                        | Description                                                                          | ReadOnly |
-|:--------------|:---------|:--------------------------------------------|:-------------------------------------------------------------------------------------|:---------|
-| serviceType   | Yes      | string                                      | Service type identifier (_vm_, _container_, _database_, _cluster_)                   | No       |
-| metadata      | Yes      | [Metadata](#metadata-object)                | Service identification and labels                                                    | No       |
-| providerHints | No       | [ProviderHints](#providerhints-object)      | Platform-specific configuration                                                      | No       |
-| id            | No       | string                                      | Unique identifier for the resource                                                   | Yes      |
-| status        | No       | string                                      | Current state of the resource                                                        | Yes      |
-| path          | No       | string                                      | Resource path or location                                                            | Yes      |
-| statusMessage | No       | string                                      | Message providing details about the current status                                   | Yes      |
-| createTime    | No       | date-time                                   | Timestamp when the resource was created                                              | Yes      |
-| updateTime    | No       | date-time                                   | Timestamp when the resource was last updated                                         | Yes      |
+| Field         | Required | Type                                   | Description                                                        | ReadOnly |
+| :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- | :------- |
+| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) | No       |
+| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  | No       |
+| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    | No       |
+| id            | No       | string                                 | Unique identifier for the resource                                 | Yes      |
+| status        | No       | string                                 | Current state of the resource                                      | Yes      |
+| path          | No       | string                                 | Resource path or location                                          | Yes      |
+| statusMessage | No       | string                                 | Message providing details about the current status                 | Yes      |
+| createTime    | No       | date-time                              | Timestamp when the resource was created                            | Yes      |
+| updateTime    | No       | date-time                              | Timestamp when the resource was last updated                       | Yes      |
 
 ### Metadata Object
 
@@ -375,6 +375,46 @@ common fields: _serviceType, metadata, providerHints_
 | cpu     | Yes      | integer | Number of CPUs per node                             |
 | memory  | Yes      | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
 | storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+
+### Network
+
+The network schema defines load balancing and service discovery resources for
+providing network access to workloads. Unlike managing networking as part of
+compute resources, this service type treats network services as first-class
+resources. Platform-specific configuration (service type, backend selection) is
+provided via _providerHints_.
+
+#### Schema
+
+Plus common fields: _serviceType, metadata, providerHints_
+
+| Field | Required | Type                                | Description     |
+| :---- | :------- | :---------------------------------- | :-------------- |
+| ports | Yes      | array[[Port](#network-port-object)] | Ports to expose |
+
+#### Network port Object
+
+| Field      | Required | Type    | Description                                                          |
+| :--------- | :------- | :------ | :------------------------------------------------------------------- |
+| name       | No*      | string  | Port name. *Required when using providerHints.kubernetes.nodePorts   |
+| protocol   | No       | string  | Protocol (TCP, UDP, SCTP). Default: TCP                              |
+| port       | Yes      | integer | Service port (1-65535)                                               |
+| targetPort | Yes      | integer | Target pod port (1-65535)                                            |
+
+> **Note:** When using `providerHints.kubernetes.nodePorts`, all ports must have
+> unique `name` fields. The keys in `nodePorts` must match these port names.
+
+#### Kubernetes Provider Hints
+
+The Kubernetes Network Service Provider uses the following fields in
+`providerHints.kubernetes`:
+
+| Field     | Required | Type              | Description                                        |
+| :-------- | :------- | :---------------- | :------------------------------------------------- |
+| type      | No       | string            | Service type (ClusterIP, NodePort, LoadBalancer)   |
+| selector  | No       | map[string]string | Label selector to match target pods                |
+| clusterIP | No       | string            | Specific cluster IP allocation                     |
+| nodePorts | No       | map[string]int    | Map of port names to NodePort values (30000-32767) |
 
 ### Schema Compatibility
 
