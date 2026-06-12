@@ -28,6 +28,19 @@ superseded-by:
 
 # Catalog Item Schema
 
+## Open Questions
+
+### Unify primitive and composite into a single `resources[]` shape?
+
+Currently, the ADR defines two catalog item kinds: primitive (top-level
+`serviceType` + `fields`) and composite (`resources[]` with one entry per
+blueprint node). An alternative is to treat every catalog item as a
+blueprint: `spec.resources` with `minItems: 1`, where a “primitive” offering
+is simply a catalog item whose blueprint has exactly one resource.
+
+- Should all catalog items use a unified `resources[]` shape (including
+  single-resource offerings) or should we keep the primitive and composite style?
+
 ## Summary
 
 This ADR defines the structure for Catalog Items in the DCM Service Catalog.
@@ -35,8 +48,9 @@ This ADR defines the structure for Catalog Items in the DCM Service Catalog.
 ## Motivation
 
 Catalog Items wrap service specifications with validation rules and defaults,
-enabling administrators to create curated offerings. Items are either
-**primitive** (one service type, one provisioned resource) or **composite**
+enabling administrators to create curated offerings. This design is both
+provider-agnostic and service type-agnostic. Catalog Items are either
+primitive (one service type, one provisioned resource) or composite
 (a blueprint of multiple resources, each with its own primitive
 `serviceType`). Composite stacks are defined entirely in the catalog item;
 there is no composite service type in the
@@ -49,9 +63,9 @@ there is no composite service type in the
   patterns
 - Add validation rule
 - Enable administrators to create curated offerings for users
-- Support **composite catalog items** for multi-resource stacks (n-tier apps)
 - Design catalog schemas as provider-agnostic specifications that Service
   Providers translate to their native platform formats
+- Define composite catalog items for multi-resource stacks (n-tier applications)
 
 ### Non-Goals
 
@@ -69,16 +83,16 @@ implementations).
 
 #### Catalog Item kinds
 
-Catalog items are **primitive** or **composite**. The shape is discriminated
+Catalog items are primitive or composite. The shape is differentiated
 by which top-level fields are present:
 
-| Kind | Required fields | Template source |
-| :--- | :-------------- | :---------------- |
-| **Primitive** | `serviceType`, `fields` | [ServiceType](../service-type-definitions/service-type-definitions.md) registry |
-| **Composite** | `resources` | Blueprint embedded in the catalog item (no composite service type) |
+| Kind         | Required fields | Template source |
+|:-------------| :-------------- | :---------------- |
+| Primitive    | `serviceType`, `fields` | [ServiceType](../service-type-definitions/service-type-definitions.md) registry |
+| Composite    | `resources` | Blueprint embedded in the catalog item (no composite service type) |
 
-A catalog item must not set both `serviceType` (primitive) and `resources`
-(composite).
+**Note**: A catalog item must **not** set both `serviceType` (primitive) on the
+root level and `resources` (composite).
 
 #### Primitive catalog item
 
@@ -204,15 +218,14 @@ definition.
 
 #### Composite catalog item
 
-A composite catalog item defines a **multi-resource blueprint**: a list of
+A composite catalog item defines a multi-resource blueprint i.e. a list of
 named resources. Each resource declares its primitive `serviceType`, optional
-`requiresResources`, optional static `properties`, and a **`fields`** array
-(same shape as primitive catalog items) for defaults and governance on that
-resource's spec.
+`requiresResources`, and a `fields` array (same shape as primitive catalog items)
+ for defaults and governance on that resource's spec.
 
-Catalog resolution merges **per-resource `fields`** and user values, evaluates
-**CEL** (`${…}`) where present, validates each resource, and produces an
-**effective resource graph** for placement. Orchestration (DAG, per-node policy,
+Catalog resolution merges per-resource `fields` and user values, evaluates
+CEL (`${…}`) where present, validates each resource, and produces an
+effective resource graph for placement. Orchestration (DAG, per-node policy,
 per-level `create`) is defined in
 [Declarative API](/enhancements/declarative-api/declarative-api.md).
 
@@ -222,7 +235,6 @@ per-level `create`) is defined in
 | :----------- | :------- | :----- | :---------- |
 | apiVersion   | Yes      | string | CatalogItem schema version |
 | description  | No       | string | Human-readable offering description |
-| paramSchema  | No       | object | User-supplied parameters at order time (optional; defer for v1 — use `fields` defaults and `userValues`) |
 | resources    | Yes      | array  | Blueprint resources (min 1); see below |
 
 Composite catalog items do **not** have top-level `fields` or `serviceType`.
@@ -230,59 +242,77 @@ Governance lives on each entry in `resources`.
 
 Each entry in `resources`:
 
-| Field              | Required | Type   | Description |
-| :----------------- | :------- | :----- | :---------- |
-| name               | Yes      | string | Stable identifier within the blueprint (e.g., _database_, _app_) |
-| serviceType        | Yes      | string | Primitive type (_vm_, _container_, _database_, _cluster_) |
-| requiresResources  | No       | array  | Names of other blueprint resources that must reach Ready before this one |
-| properties         | No       | object | Static blueprint fragments not modeled as `fields` (optional; prefer `fields`) |
-| fields             | No       | array  | Defaults and validation for this resource (same shape as primitive `fields`) |
+| Field              | Required | Type   | Description                                                                             |
+| :----------------- | :------- | :----- |:----------------------------------------------------------------------------------------|
+| name               | Yes      | string | Stable identifier within the blueprint (e.g., _database_, _app_)                        |
+| serviceType        | Yes      | string | Primitive type (_vm_, _container_, _database_, _cluster_)                               |
+| requiresResources  | No       | array  | Names of other resource(s) that must reach `Ready` state before the resource in context |
+| fields             | No       | array  | Defaults and validation for this resource (same shape as primitive `fields`)            |
 
-`requiresResources` controls **provision order** between blueprint resources.
-Do not confuse it with **`dependsOn`** on a field entry, which controls
-**conditional field options** based on another field's value (for example version
-choices when `database.engine` changes).
+The field `requiresResources` controls provisioning order between blueprint resources.
+Do not confuse it with `dependsOn` on a field entry, which controls
+conditional field options based on another field's value within the same
+resource (for example `version` options when `engine` changes).
 
-**Field paths:** use the **`serviceType.` prefix** plus the field path in that
-service type's OpenAPI schema — for example `database.engine`,
-`container.image.reference`. Do **not** use the blueprint resource `name` as the
-path prefix (not `db.engine` when `name` is `db`). The resource `name` is used
-for `requiresResources` and graph identity only. Paths do not include a
-`resources` prefix.
+##### Field paths, userValues, and CEL
 
-When a composite item contains **more than one resource with the same
-`serviceType`**, path and CEL disambiguation is an open team decision (for
-example a suffix or the resource `name` only where duplicates exist).
+Composite items use the same relative path convention as primitive catalog
+items. The `serviceType` on each blueprint resource tells which
+OpenAPI schema applies; `path` is only an address inside that spec.
 
-**Cross-resource bindings** use CEL in field defaults — for example
-`container.process.env[0].value: "${database.connectionString}"`. Placement
-infers DAG edges from CEL references and `requiresResources`.
+| Mechanism                   | Convention                                                        | Example |
+|:----------------------------|:------------------------------------------------------------------| :------ |
+| `resources[].fields[].path` | Relative to that resource's spec                                  | `engine`, `image.reference`, `process.env[0].value` |
+| `dependsOn.path`            | Relative within the same resource's spec                          | `engine` |
+| `userValues` (composite)    | `resource` (blueprint `name`) + relative `path`                   | `resource: ordersDb`, `path: version` |
+| `userValues` (primitive)    | Relative `path` only (unchanged)                                  | `path: version` |
+| CEL (outputs)               | `${resourceName.outputField}` — blueprint `name`                  | `${ordersDb.connectionString}` |
+| `requiresResources`         | Blueprint resource `name`                                         | `[ordersDb]` |
 
-**CEL references to other resources** (for example `${database.connectionString}`)
-are **not** catalog input fields. They refer to **outputs** published by the
-provider when the source resource reaches Ready (stored in placement run state).
-The reference prefix is the source resource's **`serviceType`** when unique; the
-suffix (`connectionString`) is an output attribute for that node.
+Resolution for each blueprint resource:
 
-Today [`DatabaseSpec`](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/database/spec.yaml)
-does **not** define `connectionString` — only inputs (`engine`, `version`,
-`resources`) plus read-only common fields (`status`, `id`, …). Defining standard
-database outputs (for example `connectionString`, `host`, `port`) in the service
-type schema or a separate outputs contract is **follow-up work**. Until then,
-either document provider-specific output names in the declarative API layer or
-rely on **provider inference** (`requiresResources: [database]` on a `container`
-without explicit `DATABASE_URL` in the catalog).
+1. Look up the entry in `resources[]` by `name` (for `userValues`) or iterate
+   each entry (for defaults).
+2. Read `serviceType` from that entry → validate and merge against that
+   service type's OpenAPI schema.
+3. Apply `fields[].default` with `setNestedValue(spec, path, value)` using
+   relative paths (same as primitive `spec_builder`).
+4. Apply `userValues` where `userValue.resource` matches the entry's `name`.
+5. Resolve CEL in field defaults after dependency outputs exist (two-phase;
+   see Declarative API). CEL prefixes use resource `name`.
 
-**paramSchema (v1):** not required for the first iteration. Use explicit
-`default` values on `fields` and optional `userValues` on the catalog item
-instance (same as primitive items). Add `paramSchema` later when offerings need
-user params referenced as `${params.*}` across resources (see Payments example).
+Duplicate `serviceType` values in one catalog item (for example two `database`
+resources) are unambiguous. The `fields` are scoped by their parent resource
+block. The `userValues` and CEL references use unique resource `name` field.
 
-**Placement** expands each blueprint resource into one graph node. Each node is
-provisioned by the provider for its primitive `serviceType`. All nodes share the
-same `catalogItemInstanceId` and placement **run**.
+Cross-resource bindings use CEL in field defaults — for example
+`process.env[0].value` with `default: "${ordersDb.connectionString}"` on the
+`app` resource. Placement infers DAG edges from CEL references and
+`requiresResources`.
 
-##### Example: Orders API (database + container)
+CEL references (for example `${ordersDb.connectionString}`) are **not** catalog
+input fields. They refer to **outputs** published by the provider when the
+source resource reaches `Ready` (stored in placement run state). The prefix is
+the blueprint resource **`name`**; the suffix (`connectionString`) is an output
+attribute on that node.
+
+Defining standard outputs for existing service types (for example database
+`connectionString`, `host`, `port`) in the service type OpenAPI schema 
+is follow-up work.
+
+In the catalog item instance, the `UserValue` extends the schema with
+optional `resource` field (required when the catalog item is composite).
+
+```yaml
+userValues:
+  - resource: ordersDb    # blueprint resources[].name
+    path: version         # relative, same as fields[].path on that resource
+    value: "17"
+```
+
+Primitive instances omit `resource` as it is not required.
+
+##### Example: Dev Application (database + container)
 
 ```yaml
 apiVersion: v1alpha1
@@ -292,60 +322,61 @@ metadata:
   displayName: "Dev Application"
 spec:
   resources:
-    - name: database
+    - name: ordersDb
       serviceType: database
       fields:
-        - path: "database.engine"
+        - path: "engine"
           editable: true
           default: postgres
           validationSchema: { enum: [postgres, mysql] }
-        - path: "database.version"
+        - path: "version"
           editable: true
           default: "16"
           dependsOn:
-            path: database.engine
+            path: engine
             allowedValues:
               postgres: ["14", "15", "16", "17"]
               mysql: ["8.0"]
-        - path: "database.resources.cpu"
+        - path: "resources.cpu"
           default: 1
-        - path: "database.resources.memory"
+        - path: "resources.memory"
           default: 512MB
-        - path: "database.resources.storage"
+        - path: "resources.storage"
           default: 10GB
-        - path: "database.metadata.name"
+        - path: "metadata.name"
           default: orders-db
 
     - name: app
       serviceType: container
-      requiresResources: [database]
+      requiresResources: [ordersDb]
       fields:
-        - path: "container.image.reference"
+        - path: "image.reference"
           editable: false
           default: registry.example.com/orders-api:1.0
-        - path: "container.metadata.name"
+        - path: "metadata.name"
           default: orders-api
-        - path: "container.process.env[0].name"
+        - path: "process.env[0].name"
           default: DATABASE_URL
-        - path: "container.process.env[0].value"
-          default: "${database.connectionString}"
-        - path: "container.network.ports[0].container_port"
+        - path: "process.env[0].value"
+          default: "${ordersDb.connectionString}"
+        - path: "network.ports[0].container_port"
           default: 8080
-        - path: "container.network.ports[0].visibility"
+        - path: "network.ports[0].visibility"
           default: internal
 ```
 
-The `DATABASE_URL` field shows the target CEL shape once database outputs
-exist.
+The `DATABASE_URL` / `${ordersDb.connectionString}` fields show the target CEL
+shape once database outputs exist.
 
-User order:
+Example user order:
 
 ```yaml
 kind: CatalogItemInstance
 spec:
   catalogItemId: dev-container-db
   userValues:
-    - path: database.version
+    - resource: ordersDb
+      path: version
       value: "17"
 ```
 
@@ -353,12 +384,12 @@ Resolution output (effective graph — conceptual):
 
 ```yaml
 resources:
-  - name: database
+  - name: ordersDb
     serviceType: database
     spec: { ... }
   - name: app
     serviceType: container
-    requiresResources: [database]
+    requiresResources: [ordersDb]
     spec: { ... }
 ```
 
@@ -399,17 +430,16 @@ For the complete validation vocabulary, see the
 
 #### Composite catalog item
 
-1. Admin creates CatalogItem with `resources` blueprint (per-resource `fields`,
-   optional `properties`)
-2. User submits CatalogItemInstance with `userValues` (paths use the
-   `serviceType.fieldPath` convention, for example `database.version`)
-3. Catalog resolution: merge per-resource fields and user values, evaluate CEL
-   against params (when `paramSchema` is used) and resource outputs (when
-   dependencies are Ready), validate each resource, produce effective resource graph
-4. Placement admits a **run**, builds DAG from `requiresResources` and CEL edges,
-   evaluates policy **per graph node**, applies creates **per DAG level**
+1. Admin creates CatalogItem with `resources` blueprint (per-resource `fields`)
+2. User submits CatalogItemInstance with `userValues` (`resource` + relative
+   `path` per override)
+3. Catalog resolution: for each blueprint resource, resolve `serviceType`,
+   merge `fields` and matching `userValues`, evaluate CEL against resource
+   outputs, validate and produce effective resource graph
+4. Placement accepts the resource graph, builds DAG from `requiresResources`
+   and CEL edges, evaluates policy per graph node, applies creates per DAG level
 5. Each node is provisioned by the provider for its `serviceType`; status
-   aggregates to the catalog item instance / run
+   aggregates to the catalog item instance
 
 See [Declarative API](/enhancements/declarative-api/declarative-api.md) for
 CEL, DAG levels, and status-driven progression.
