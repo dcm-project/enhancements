@@ -284,6 +284,8 @@ Resolution for each blueprint resource:
 Duplicate `serviceType` values in one catalog item (for example two `database`
 resources) are unambiguous. The `fields` are scoped by their parent resource
 block. The `userValues` and CEL references use unique resource `name` field.
+If any `name` duplication occurs, the catalog instance request will fail 
+validation and be rejected.
 
 Cross-resource bindings use CEL in field defaults — for example
 `process.env[0].value` with `default: "${ordersDb.connectionString}"` on the
