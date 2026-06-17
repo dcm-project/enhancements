@@ -33,9 +33,12 @@ see-also:
    tag rates in v1, or defer to v2? *Recommendation: defer — tiered rates cover
    90% of use cases; tag rates add significant schema complexity.*
 
-2. **In-place tier upgrades.** Can an instance be upgraded from Tier 1 to
-   Tier 3 without delete+recreate? Koku cost models are mutable (PUT), so the
-   SP could support it, but the simpler path for v1 is delete+recreate.
+2. **In-place tier upgrades.** *(Deferred.)* Can an instance be upgraded from
+   Tier 1 to Tier 3 without delete+recreate? Koku cost models are mutable
+   (PUT), so the SP could support it. However, DCM does not yet support
+   instance updates, so this is deferred until that capability is available.
+   The proposal was influenced by UDLM's vision of mutable resource
+   specifications; v1 uses delete+recreate.
 
 3. **Multi-tenancy mapping.** DCM does not have tenancy yet (v1). Koku uses
    schema-per-tenant. Which Koku tenant does the bridge create sources in?
@@ -90,18 +93,29 @@ catalog items, and policies — solves all of these.
   cluster events and creates cost instances through DCM's catalog pipeline.
 - Expose metering and cost data through read-only query endpoints on the SP.
 - Publish standard CloudEvent status updates to NATS.
-- Implement the three-state health model (`healthy`/`unhealthy`).
+- Implement the three-state health model (`healthy`/`unhealthy`/`unavailable`).
 
 ### Non-Goals
 
 - Replacing or reimplementing Koku's metering pipeline, rate engine,
   distribution logic, or reporting.
-- Cloud cost management (AWS CUR, Azure, GCP). The cost SP focuses on
-  on-premise OpenShift cluster metering. Koku handles cloud costs separately.
+- Cloud cost management in v1 (AWS CUR, Azure, GCP). The v1 scope focuses on
+  OpenShift cluster and VM metering. Koku already handles cloud costs and the
+  SP architecture is designed to support additional resource types (VMs,
+  OpenStack workloads, cloud costs) in future versions.
 - Tag-based rates in v1 (deferred to v2).
-- Per-resource (VM, container) cost tracking in v1. Koku already captures this
-  data via the metrics operator; correlation is a Phase 5 deliverable.
 - DCM UI integration for cost dashboards (future capability).
+
+**Note on scope:** The `cost` service type is intentionally generic — not
+OpenShift-specific. The
+[koku-metrics-operator](https://github.com/project-koku/koku-metrics-operator)
+already captures OpenShift Virtualization VM metrics (CPU, memory, disk,
+uptime, labels — see
+[queries.go](https://github.com/project-koku/koku-metrics-operator/blob/main/internal/collector/queries.go#L36))
+in addition to pod, node, PVC, namespace, and GPU metrics. RHOSO (Red Hat
+OpenStack Services on OpenShift) metering support is being added before end of
+year ([COST-5067](https://redhat.atlassian.net/browse/COST-5067)). Future
+versions of this SP will expose those additional cost dimensions through DCM.
 
 ## Proposal
 
@@ -168,21 +182,16 @@ deleted).
 
 #### New Service Type: `cost`
 
-The `cost` type extends DCM's service type enum:
+This SP introduces a new `cost` service type. Metering and cost tracking is
+not a VM, container, or cluster — it is a cross-cutting capability that
+applies to those resources. A separate service type cleanly separates concerns
+and enables catalog governance and policy evaluation.
 
-```yaml
-enum:
-  - vm
-  - container
-  - database
-  - cluster
-  - three-tier-app-demo
-  - cost
-```
-
-Metering and cost tracking is not a VM, container, or cluster — it is a
-capability that applies to those resources. A separate service type cleanly
-separates concerns and enables catalog governance and policy evaluation.
+The `cost` service type definition (schema and enum addition) will be
+submitted as a separate PR to the
+[service-type-definitions](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md)
+enhancement, consistent with how `vm`, `container`, `database`, and `cluster`
+are defined there. This document references that definition.
 
 #### Spec Schema
 
@@ -279,11 +288,27 @@ The three tiers map to what is present in the spec:
 3. Create a Koku Source (`POST /api/cost-management/v1/sources/`).
 4. If `cost_model` is present in the spec, create a Koku Cost Model
    (`POST /api/cost-management/v1/cost-models/`). Skip for Tier 1.
-5. Store the mapping: `dcm_instance_id` → `cluster_id` → `koku_source_uuid` →
-   `koku_cost_model_uuid`.
+5. Store the ID mapping (see table below).
 6. Return `{id, status: "PROVISIONING"}`.
 7. Background reconciler polls `GET /sources/{uuid}/stats/` until first
    metering data appears, then publishes a READY CloudEvent.
+
+**ID Mapping:**
+
+The SP maintains a four-way mapping in SQLite that links DCM and Koku objects
+for lifecycle management:
+
+| Field | Description | Example |
+|-------|------------|---------|
+| `dcm_instance_id` | DCM catalog item instance ID | `inst-abc123` |
+| `cluster_id` | OpenShift cluster UUID (from `ClusterVersion` CR) | `d4f8e2a1-...` |
+| `koku_source_uuid` | Koku source created for this cluster | `src-789xyz` |
+| `koku_cost_model_uuid` | Koku cost model (Tier 2/3 only; null for Tier 1) | `cm-456def` |
+
+This mapping enables the SP to:
+- On **DELETE**: look up the Koku source to pause and cost model to remove.
+- On **status queries**: filter Koku reports by the target cluster's `cluster_id`.
+- On **reconciliation**: check whether metering data is flowing for the source.
 
 #### Delete Workflow
 
@@ -306,22 +331,64 @@ PROVISIONING → READY → ERROR → DELETED
 - **ERROR**: Operator not uploading, Koku API unreachable, or other failure.
 - **DELETED**: Source paused, cost model removed.
 
+##### Status Mapping from Koku to DCM
+
+The following table maps Koku-side conditions to DCM status values:
+
+| DCM Status | Koku Condition | Description |
+|------------|---------------|-------------|
+| PROVISIONING | Source created, no metering data yet | Koku source exists but `GET /sources/{uuid}/stats/` returns empty data. Operator may still be bootstrapping (~10-15 min). |
+| READY | Metering data actively flowing | `GET /sources/{uuid}/stats/` returns recent data points. Source is active and not paused. |
+| ERROR | Operator not uploading | Source exists but metering data has gone stale (no new data beyond the configured staleness threshold). |
+| ERROR | Koku API unreachable | SP cannot reach the Koku API to verify source status. |
+| ERROR | Source creation failed | Koku rejected the `POST /sources/` request (e.g., duplicate `cluster_id`, invalid authentication). |
+| DELETED | Source paused, cost model removed | `PATCH /sources/{uuid}/ {"paused": true}` succeeded. Historical data is preserved in Koku. |
+
+#### API Endpoints
+
+The following table summarizes the full API surface:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check (three-state model) |
+| `/metrics` | GET | Prometheus metrics |
+| `/api/v1alpha1/instances` | POST | Create a cost instance (Koku source + optional cost model) |
+| `/api/v1alpha1/instances/{id}` | GET | Get cost instance status and details |
+| `/api/v1alpha1/instances/{id}` | DELETE | Delete cost instance (pause Koku source, remove cost model) |
+| `/api/v1alpha1/instances` | GET | List cost instances |
+| `/usage/{id}/compute` | GET | Query CPU utilization (proxied from Koku) |
+| `/usage/{id}/memory` | GET | Query memory utilization (proxied from Koku) |
+| `/usage/{id}/storage` | GET | Query storage utilization (proxied from Koku) |
+| `/cost-reports/{id}` | GET | Query cost summary (requires cost model) |
+| `/cost-reports/{id}/breakdown` | GET | Query cost breakdown by project (requires cost model) |
+| `/cost-reports/{id}/forecast` | GET | Query cost forecast (requires cost model) |
+
 #### Health Endpoint
 
-The SP implements the three-state health model:
+The SP implements the three-state health model per the
+[SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md)
+enhancement:
 
 ```json
 {"status": "healthy", "version": "0.1.0", "uptime": 3600}
 ```
 
-Returns `healthy` when the Koku API is reachable, `unhealthy` when Koku is
-down. The control plane uses this to mark the provider Ready, Unhealthy, or
-Unavailable.
+The SP returns `healthy` when the Koku API is reachable, or `unhealthy` when
+Koku is down. The third state, `unavailable`, is inferred by the control plane
+when the SP itself is unreachable (non-200 / timeout after `FailureThreshold`).
 
 #### Read-Only Query API
 
 In addition to the CRUD lifecycle, the SP serves metering and cost query
-endpoints:
+endpoints. These are designed for multiple consumers:
+
+- **DCM UI** — platform engineers can see cost data alongside provisioned
+  resources in a single dashboard.
+- **Tenant self-service** — operators or project owners can query their
+  cluster's metering and cost data through DCM's API gateway without needing
+  direct Koku access.
+- **External tooling** — CI/CD pipelines for cost gates, external dashboards,
+  or cost-aware placement policies.
 
 **Metering** (always available):
 
@@ -342,7 +409,21 @@ endpoints:
 #### Bridge Component
 
 The bridge watches NATS for cluster READY events and automatically creates
-cost instances through DCM's catalog pipeline:
+cost instances through DCM's catalog pipeline. It is essentially event-driven
+automation on top of DCM's existing API: it subscribes to NATS CloudEvents,
+watches for cluster READY/DELETED events from any cluster SP (ACM, kcli, k8s,
+etc.), and automatically creates/deletes cost instances through DCM's standard
+catalog pipeline — so every provisioned cluster gets cost tracking without
+operator intervention per cluster.
+
+**Future:** DCM's upcoming
+[declarative API](https://github.com/dcm-project/enhancements/blob/main/enhancements/declarative-api/declarative-api.md)
+will support multi-resource catalog items, enabling "provision cluster + attach
+cost metering" in a single request. When that capability is available, the
+bridge can be replaced by a composite catalog item. The bridge approach was
+chosen for v1 because it works with DCM as it exists today.
+
+Flow:
 
 1. Receive `dcm.status.cluster` CloudEvent with `status: READY`.
 2. Read the cluster's labels to select the appropriate catalog item.
@@ -438,7 +519,7 @@ Six catalog items covering all three tiers:
 | HTTP | go-chi/chi |
 | Persistence | SQLite (GORM) for ID mappings |
 | Messaging | NATS JetStream (CloudEvents SDK) |
-| Health | Three-state model (healthy/unhealthy) |
+| Health | Three-state model (healthy/unhealthy/unavailable) |
 | Koku client | HTTP client with `x-rh-identity` auth |
 
 ### Test Plan
