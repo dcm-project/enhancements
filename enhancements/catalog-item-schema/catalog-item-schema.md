@@ -372,17 +372,65 @@ also infers DAG edges from CEL references alongside `requiresResources`.
 Defining standard outputs on service types (for example `connectionString`,
 `host`, `port`) is follow-up work.
 
-###### Resolution output (effective graph)
+###### Example: Placement payload (effective graph after catalog resolution)
 
-```yaml
-resources:
-  - name: ordersDb
-    serviceType: database
-    spec: { ... }
-  - name: app
-    serviceType: container
-    requiresResources: [ordersDb]
-    spec: { ... }
+```json
+{
+  "apiVersion": "v1alpha1",
+  "catalogItemInstanceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "spec": {
+    "resources": [
+      {
+        "name": "ordersDb",
+        "serviceType": "database",
+        "requirements": [],
+        "spec": {
+          "service_type": "database",
+          "engine": "postgres",
+          "version": "17",
+          "resources": {
+            "cpu": 1,
+            "memory": "512MB",
+            "storage": "10GB"
+          },
+          "metadata": {
+            "name": "orders-db"
+          }
+        }
+      },
+      {
+        "name": "app",
+        "serviceType": "container",
+        "requirements": ["ordersDb"],
+        "spec": {
+          "service_type": "container",
+          "image": {
+            "reference": "registry.example.com/orders-api:1.0"
+          },
+          "metadata": {
+            "name": "orders-api"
+          },
+          "process": {
+            "env": [
+              {
+                "name": "DATABASE_URL",
+                "value": "${ordersDb.connectionString}"
+              }
+            ]
+          },
+          "network": {
+            "ports": [
+              {
+                "container_port": 8080,
+                "visibility": "internal"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}
 ```
 
 #### Versioning
