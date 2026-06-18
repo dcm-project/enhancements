@@ -156,8 +156,8 @@ spec:
           default: "rhel-9"
 ```
 
-Multiple catalog items can reference the same ServiceType with different
-constraints: a `Production VM` item could require `vcpu.count` between 4-16
+Multiple catalog items can reference the same `serviceType` with different
+`validationSchema` constraints: a `Production VM` item could require `vcpu.count` between 4-16
 instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
 
 | Field            | Required | Type    | Default | Description                                                    |
@@ -308,10 +308,13 @@ Each `userValue`:
 Example for a single-resource VM (`name: main`):
 
 ```yaml
-userValues:
-  - resource: main
-    path: vcpu.count
-    value: 4
+kind: CatalogItemInstance
+spec:
+  catalogItemId: dev-vm
+  userValues:
+    - resource: webserver
+      path: vcpu.count
+      value: 4
 ```
 
 Example for a multi-resource application:
@@ -324,6 +327,9 @@ spec:
     - resource: ordersDb
       path: version
       value: "17"
+    - resource: app
+      path: "image.reference"
+      value: "registry.example.com/orders-api:1.0"
 ```
 
 ##### Catalog resolution
