@@ -383,9 +383,9 @@ Defining standard outputs on service types (for example `connectionString`,
       {
         "name": "ordersDb",
         "serviceType": "database",
-        "requirements": [],
+        "requiresResources": [],
         "spec": {
-          "service_type": "database",
+          "serviceType": "database",
           "engine": "postgres",
           "version": "17",
           "resources": {
@@ -401,9 +401,9 @@ Defining standard outputs on service types (for example `connectionString`,
       {
         "name": "app",
         "serviceType": "container",
-        "requirements": ["ordersDb"],
+        "requiresResources": ["ordersDb"],
         "spec": {
-          "service_type": "container",
+          "serviceType": "container",
           "image": {
             "reference": "registry.example.com/orders-api:1.0"
           },
@@ -421,7 +421,7 @@ Defining standard outputs on service types (for example `connectionString`,
           "network": {
             "ports": [
               {
-                "container_port": 8080,
+                "containerPort": 8080,
                 "visibility": "internal"
               }
             ]
