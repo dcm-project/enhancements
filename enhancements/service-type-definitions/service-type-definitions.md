@@ -35,11 +35,11 @@ Example:
 ## Summary
 
 This ADR defines provider-agnostic schemas for DCM service types. These schemas
-enable Service Providers to provision four core service types — virtual
-machines, containers, databases, and Kubernetes clusters — across different
-infrastructure platforms without vendor lock-in. The key principle is
-_portability first_: schemas contain only minimal fields common across all
-implementations, with platform-specific configuration delegated to
+enable Service Providers to provision five core service types — virtual
+machines, containers, databases, Kubernetes clusters, and cost tracking —
+across different infrastructure platforms without vendor lock-in. The key
+principle is _portability first_: schemas contain only minimal fields common
+across all implementations, with platform-specific configuration delegated to
 _providerHints_.
 
 ## Motivation
@@ -73,8 +73,8 @@ without breaking compatibility.
 - Migration strategies for breaking schema changes
 - Provider-specific implementation details (each provider handles translation
   independently)
-- Additional service types beyond VMs, containers, databases, and Kubernetes
-  clusters (deferred to future phases)
+- Additional service types beyond VMs, containers, databases, Kubernetes
+  clusters, and cost (deferred to future phases)
 - Standalone storage volumes or separately provisioned networks are _not_
   included. All storage (disk size, ephemeral allocation) and networking
   (interfaces, IPs, subnets, security groups) must be defined and bundled
@@ -100,7 +100,7 @@ All service schemas share common fields defined once in
 
 | Field         | Required | Type                                        | Description                                                                          | ReadOnly |
 |:--------------|:---------|:--------------------------------------------|:-------------------------------------------------------------------------------------|:---------|
-| serviceType   | Yes      | string                                      | Service type identifier (_vm_, _container_, _database_, _cluster_)                   | No       |
+| serviceType   | Yes      | string                                      | Service type identifier (_vm_, _container_, _database_, _cluster_, _cost_)           | No       |
 | metadata      | Yes      | [Metadata](#metadata-object)                | Service identification and labels                                                    | No       |
 | providerHints | No       | [ProviderHints](#providerhints-object)      | Platform-specific configuration                                                      | No       |
 | id            | No       | string                                      | Unique identifier for the resource                                                   | Yes      |
@@ -134,8 +134,7 @@ remains portable across platforms.
 
 Any _serviceType_ can be defined by inheriting from
 [common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
-and adding type-specific fields. For the first milestone, DCM will support the
-following serviceTypes:
+and adding type-specific fields. DCM supports the following serviceTypes:
 
 - Virtual Machine  
   Virtual machines with CPU, memory, storage, and OS specifications
@@ -146,6 +145,9 @@ following serviceTypes:
 - Database  
   Fields common across all database types (SQL, NoSQL, search, time-series,
   etc.)
+- Cost  
+  Cost tracking and metering as a cross-cutting capability for resources
+  managed by other service types
 
 ### Virtual Machine
 
@@ -375,6 +377,70 @@ common fields: _serviceType, metadata, providerHints_
 | cpu     | Yes      | integer | Number of CPUs per node                             |
 | memory  | Yes      | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
 | storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+
+### Cost
+
+The cost service type enables metering and cost tracking as a cross-cutting
+capability that applies to compute resources (VMs, containers, clusters)
+managed by other service providers. Unlike the four compute-oriented types
+above, `cost` provisions **visibility** (metering, overhead distribution,
+financial tracking) rather than infrastructure.
+
+The initial implementation is backed by
+[Red Hat Lightspeed Cost Management](https://github.com/project-koku/koku)
+(Project Koku). See the
+[Cost Management Service Provider enhancement](https://github.com/dcm-project/enhancements/blob/main/enhancements/cost-sp/cost-sp.md)
+for the full proposal.
+
+#### Schema
+
+Plus common fields: _serviceType, metadata, providerHints_
+
+| Field      | Required | Type                                 | Description                                          |
+| :--------- | :------- | :----------------------------------- | :--------------------------------------------------- |
+| target     | Yes      | [Target](#cost-target-object)        | The resource to track costs for                      |
+| cost_model | No       | [CostModel](#cost-costmodel-object)  | Rate configuration (absent = basic metering only)    |
+| currency   | No       | string                               | Currency code (default: _USD_)                       |
+
+#### Cost target Object
+
+| Field         | Required | Type   | Description                                          |
+| :------------ | :------- | :----- | :--------------------------------------------------- |
+| resource_id   | Yes      | string | DCM instance ID of the resource to track costs for   |
+| resource_type | No       | string | Type of the target resource (default: _cluster_)     |
+
+#### Cost costModel Object
+
+| Field        | Required | Type                                    | Description                                      |
+| :----------- | :------- | :-------------------------------------- | :----------------------------------------------- |
+| rates        | No       | array[[Rate](#cost-rate-object)]        | Tiered rate definitions (absent = distribution only) |
+| markup       | No       | [Markup](#cost-markup-object)           | Markup percentage                                |
+| distribution | No       | string                                  | Distribution method: _cpu_ or _memory_ (default: _cpu_) |
+
+#### Cost rate Object
+
+| Field     | Required | Type   | Description                                                    |
+| :-------- | :------- | :----- | :------------------------------------------------------------- |
+| metric    | Yes      | string | Rate metric (e.g., _cpu\_core\_usage\_per\_hour_, _node\_cost\_per\_month_) |
+| cost_type | No       | string | _Infrastructure_ or _Supplementary_ (default: _Infrastructure_) |
+| value     | Yes      | number | Rate value (≥ 0)                                               |
+
+#### Cost markup Object
+
+| Field | Required | Type   | Description                               |
+| :---- | :------- | :----- | :---------------------------------------- |
+| value | No       | number | Markup percentage (default: _0_)          |
+| unit  | No       | string | Unit type: _percent_ (default: _percent_) |
+
+#### Cost tier mapping
+
+The three tiers map to what is present in the spec:
+
+| Tier                 | `cost_model` | `cost_model.rates` | Effect                                                    |
+| :------------------- | :----------- | :----------------- | :-------------------------------------------------------- |
+| 1 — Basic Metering   | absent       | —                  | Source only. Usage data flows.                            |
+| 2 — Distribution     | present      | absent             | Source + cost model with distribution. Overhead categorized. |
+| 3 — Full Cost        | present      | present            | Source + cost model + rates. `cost = metering × rate`.    |
 
 ### Schema Compatibility
 
