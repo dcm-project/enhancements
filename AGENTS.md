@@ -135,6 +135,14 @@ Every section listed in the template must appear in the final document. If a
 section does not apply, write "N/A — [one-sentence reason]" rather than silently
 omitting the section or leaving an empty heading.
 
+### Summary
+
+The Summary is the first section readers encounter — keep it clear, concise, and
+consistent in style across enhancements. State what the enhancement does and why
+in two to four sentences. Avoid implementation details, background context, or
+motivation (those belong in their own sections). A reader should be able to
+decide whether to keep reading based on the Summary alone.
+
 ### Test Plan
 
 Write "N/A — test plans are derived during implementation after the enhancement
