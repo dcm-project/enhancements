@@ -101,9 +101,6 @@ names, or contributor handles there when needed.
 ## Review Process
 
 - All files are owned by the reviewers listed in `.github/CODEOWNERS`
-- PR slash commands: `/lgtm`, `/hold`, `/unhold`
-- `/approve` is a reminder only — use GitHub's native review approval (Files
-  changed > Review > Approve)
 
 ## Level of Detail
 
