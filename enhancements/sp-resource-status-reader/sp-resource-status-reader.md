@@ -60,10 +60,9 @@ of resources, leaving users with stale status information.
 
 The SP Resource Manager will run a background message consumer component
 (**StatusConsumer**) alongside its existing HTTP server. The StatusConsumer
-subscribes to a wildcard subject on the messaging system to receive all
-resource status events from all providers. Upon receiving a message,
-extracts the instance identifier, and updates the instance record in the 
-database.
+subscribes to a wildcard subject on the messaging system to receive all resource
+status events from all providers. Upon receiving a message, extracts the
+instance identifier, and updates the instance record in the database.
 
 ### Architecture
 
@@ -139,8 +138,8 @@ The StatusConsumer processes each incoming message through the following steps:
 
 1. **Parse CloudEvent Envelope** — Deserialize the message into a CloudEvent
    v1.0 structure. Discard and log if the envelope is malformed.
-2. **Extract Metadata** — Extract `serviceType` from the NATS subject,
-   and provider identity from the CloudEvent `source` attribute.
+2. **Extract Metadata** — Extract `serviceType` from the NATS subject, and
+   provider identity from the CloudEvent `source` attribute.
 3. **Deserialize Payload** — Decode the CloudEvent data field into the
    appropriate struct.
 4. **Update Database** — UPDATE the instance record with the new status and
@@ -157,8 +156,8 @@ WHERE instance_id = $3
 ```
 
 If the `instanceId` does not match any existing record, the update is a no-op
-and a warning is logged. This can occur when an instance has been deleted
-before the status event was processed or when events arrive out of order.
+and a warning is logged. This can occur when an instance has been deleted before
+the status event was processed or when events arrive out of order.
 
 ### Status Update Flow
 

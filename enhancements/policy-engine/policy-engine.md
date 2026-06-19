@@ -29,8 +29,9 @@ Management (DCM) application responsible for governing service creation and
 modification (e.g., VirtualMachines, Containers). It enables Admins,
 Tenant-Admins, and Users to inject logic that validates (Approve/Reject),
 mutates (Defaulting/Altering) and assigns Service Providers to request payloads
-using an embedded [Open Policy Agent (OPA)](https://www.openpolicyagent.org/docs)
-engine and [Rego](https://www.openpolicyagent.org/docs/policy-language).
+using an embedded
+[Open Policy Agent (OPA)](https://www.openpolicyagent.org/docs) engine and
+[Rego](https://www.openpolicyagent.org/docs/policy-language).
 
 OPA is embedded as a Go library within the Policy Engine process rather than
 deployed as a separate sidecar service. Rego source code is persisted in the
@@ -331,8 +332,8 @@ parallel with policy management operations.
       `service_provider_constraints` exist, validate the selected provider
       against the constraints.
 
-- Finalize: Return the final payload, selected provider, and status to
-  Placement Manager.
+- Finalize: Return the final payload, selected provider, and status to Placement
+  Manager.
   - Status is `APPROVED` if the payload was not modified, `MODIFIED` if any
     patches were applied.
 

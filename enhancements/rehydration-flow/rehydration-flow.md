@@ -60,8 +60,8 @@ requiring manual recreation.
 Rehydration is triggered on an existing CatalogItemInstance. The flow
 intentionally does **not** regenerate the ServiceType payload from the
 CatalogItem. Instead, it uses the original intent stored in the Placement DB to
-ensure that only policy and environment changes are reflected, not changes to the
-underlying ServiceType or CatalogItem definitions.
+ensure that only policy and environment changes are reflected, not changes to
+the underlying ServiceType or CatalogItem definitions.
 
 #### ID Separation
 
@@ -112,32 +112,33 @@ flowchart TD
 
 #### Catalog Manager
 
-| Method | Endpoint                                          | Description                        |
-|--------|---------------------------------------------------|------------------------------------|
-| POST   | /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate     | Trigger rehydration of an instance |
+| Method | Endpoint                                                         | Description                        |
+| ------ | ---------------------------------------------------------------- | ---------------------------------- |
+| POST   | /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate | Trigger rehydration of an instance |
 
 **POST /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate**
 
-Triggers rehydration of an existing CatalogItemInstance. The Catalog Manager does
-**not** regenerate the ServiceType payload. It generates a new InstanceID and
-delegates to the Placement Manager rehydrate endpoint, passing both the current
-InstanceID and the new InstanceID.
+Triggers rehydration of an existing CatalogItemInstance. The Catalog Manager
+does **not** regenerate the ServiceType payload. It generates a new InstanceID
+and delegates to the Placement Manager rehydrate endpoint, passing both the
+current InstanceID and the new InstanceID.
 
 Response: Returns `202 Accepted` if the rehydration process has started.
 
 #### Placement Manager
 
-| Method | Endpoint                                  | Description                       |
-|--------|-------------------------------------------|-----------------------------------|
-| POST   | /api/v1/resources/{instanceId}:rehydrate  | Rehydrate an existing resource    |
+| Method | Endpoint                                 | Description                    |
+| ------ | ---------------------------------------- | ------------------------------ |
+| POST   | /api/v1/resources/{instanceId}:rehydrate | Rehydrate an existing resource |
 
 **POST /api/v1/resources/{instanceId}:rehydrate**
 
-Triggers the rehydration of an existing resource. The Placement Manager retrieves
-the original intent from the Placement DB and orchestrates creation of the new
-resource followed by deletion of the old one.
+Triggers the rehydration of an existing resource. The Placement Manager
+retrieves the original intent from the Placement DB and orchestrates creation of
+the new resource followed by deletion of the old one.
 
 Request body:
+
 ```json
 {
   "newInstanceId": "<new-instance-id>"
@@ -155,7 +156,7 @@ sequenceDiagram
     autonumber
     actor User
     participant CM as Catalog Manager
-    participant CM_DB as Catalog Manager DB    
+    participant CM_DB as Catalog Manager DB
     participant PM as Placement Manager
     participant DB as Placement DB
     participant PE as Policy Manager
@@ -183,7 +184,7 @@ sequenceDiagram
         PE-->>PM: 406 Not Acceptable
         PM->>DB: Update record (policy rejected)
         PM-->>CM: Error (policy rejected)
-        CM->>CM_DB: Rollback resourceId to currentResourceId        
+        CM->>CM_DB: Rollback resourceId to currentResourceId
         CM-->>User: Rehydration failed (policy rejected)
     else Policy approves
         PE-->>PM: 200 OK<br/>{evaluatedServiceInstance, selectedProvider, status}
@@ -236,8 +237,9 @@ sequenceDiagram
    - Catalog Manager reads the current resourceId from its database
    - Catalog Manager generates a new resourceId for the downstream services
    - Catalog Manager updates its database with the new resourceId **before**
-     calling Placement Manager (see [DB-First Update Order](#catalog-manager-db-first-update-order)).
-     The update uses compare-and-swap (CAS): it only succeeds if the resourceId
+     calling Placement Manager (see
+     [DB-First Update Order](#catalog-manager-db-first-update-order)). The
+     update uses compare-and-swap (CAS): it only succeeds if the resourceId
      still matches the value read earlier, preventing concurrent rehydrates from
      both proceeding
    - Catalog Manager then forwards the request to the Placement Manager
@@ -253,17 +255,17 @@ sequenceDiagram
 3. **Policy Re-evaluation**
    - Placement Manager sends the original intent to the Policy Manager for
      evaluation against the current policy set
-   - Policy Manager evaluates the request through the full policy chain
-     (Global, Tenant, User)
-   - If the policy rejects the request, the Placement Manager updates the
-     record and returns an error to Catalog Manager, which rolls back its
-     database to the original resourceId
+   - Policy Manager evaluates the request through the full policy chain (Global,
+     Tenant, User)
+   - If the policy rejects the request, the Placement Manager updates the record
+     and returns an error to Catalog Manager, which rolls back its database to
+     the original resourceId
    - If the policy approves, the Placement Manager receives the evaluated
      payload and the newly selected Service Provider
 
 4. **Resource Creation**
-   - Placement Manager stores the new validated request in the Placement DB
-     with the new InstanceID
+   - Placement Manager stores the new validated request in the Placement DB with
+     the new InstanceID
    - Placement Manager delegates instance creation to SP Resource Manager with
      the new InstanceID, the new providerName, and the evaluated spec
    - Since the new InstanceID is different from the old one, there is no ID
@@ -281,8 +283,8 @@ sequenceDiagram
      for background deletion without contacting the Service Provider (see
      [Deferred Deletion](#deferred-deletion))
    - SP Resource Manager returns success to allow the flow to continue
-   - Placement Manager removes the old instance record from the Placement DB
-     and returns success to the Catalog Manager
+   - Placement Manager removes the old instance record from the Placement DB and
+     returns success to the Catalog Manager
 
 ### Handling Deletion of the Old Resource
 
@@ -329,6 +331,7 @@ flowchart TD
 ```
 
 **Cleanup queue record:**
+
 ```json
 {
   "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
@@ -343,14 +346,14 @@ flowchart TD
 
 #### Key Characteristics
 
-- **Non-blocking**: Deferred deletion does not contact the Service Provider,
-  so the rehydration flow is never blocked by provider latency or availability
+- **Non-blocking**: Deferred deletion does not contact the Service Provider, so
+  the rehydration flow is never blocked by provider latency or availability
 - **Persistent**: The cleanup queue is stored in the database to survive
   restarts
 - **Automatic retry**: The cleanup process automatically retries deletions as
   Service Providers become available
-- **Bounded retries**: After a configurable maximum number of retries, the
-  entry is marked as `FAILED` for manual intervention
+- **Bounded retries**: After a configurable maximum number of retries, the entry
+  is marked as `FAILED` for manual intervention
 - **Idempotent**: Cleanup deletions are idempotent; repeated attempts to delete
   an already-deleted resource are safe
 
@@ -383,11 +386,11 @@ flowchart TD
   deleted. This ensures the system is never left without a running resource
   during the rehydration process
 - **ID Separation**: The CatalogItemInstance ID is separate from the InstanceID
-  used downstream. This allows the Catalog Manager to issue a new InstanceID
-  for the recreated resource, avoiding ID conflicts in downstream services
+  used downstream. This allows the Catalog Manager to issue a new InstanceID for
+  the recreated resource, avoiding ID conflicts in downstream services
 - **Policy Re-evaluation**: Every rehydration re-evaluates the full policy
-  chain, potentially selecting a different Service Provider or applying different
-  mutations
+  chain, potentially selecting a different Service Provider or applying
+  different mutations
 - **Deferred Cleanup**: Deletion of the old resource is always deferred during
   rehydration. The SP Resource Manager enqueues the old instance for background
   cleanup without contacting the Service Provider, ensuring the rehydration flow
@@ -398,9 +401,9 @@ flowchart TD
 
 ### Catalog Manager: DB-First Update Order
 
-The Catalog Manager uses a **DB-first** approach when updating the
-`resource_id` during rehydration. The database is
-updated before calling Placement Manager, and rolled back if the PM call fails.
+The Catalog Manager uses a **DB-first** approach when updating the `resource_id`
+during rehydration. The database is updated before calling Placement Manager,
+and rolled back if the PM call fails.
 
 #### Why DB-First?
 
@@ -408,10 +411,10 @@ The alternative approach (PM-first) would call Placement Manager before updating
 the database. While this ensures the database always points to a resource that
 exists in PM, it introduces a significant risk: **orphaned resources**.
 
-| Approach | Tradeoff |
-|----------|----------|
+| Approach     | Tradeoff                                                                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **PM-first** | DB always points to something real, but if the DB update fails, PM has provisioned a resource that the DB doesn't reference. These orphans are invisible to the system and silently leak infrastructure. |
-| **DB-first** | DB may briefly point to a `resource_id` that PM hasn't provisioned yet (a window of milliseconds), but we rollback immediately on PM failure, and any inconsistency is easily detected. |
+| **DB-first** | DB may briefly point to a `resource_id` that PM hasn't provisioned yet (a window of milliseconds), but we rollback immediately on PM failure, and any inconsistency is easily detected.                  |
 
 The key insight: **DB inconsistencies are cheap to detect and fix; PM orphans
 leak real infrastructure silently.**

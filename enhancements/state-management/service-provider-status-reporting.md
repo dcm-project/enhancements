@@ -70,9 +70,9 @@ envelope.
 
 ### User Stories
 
-- **As a Service Provider Developer**, I want to reliantly publish a status update message
-  ("fire and forget") so that I don't have to implement complex retry logic if
-  the DCM is briefly unavailable.
+- **As a Service Provider Developer**, I want to reliantly publish a status
+  update message ("fire and forget") so that I don't have to implement complex
+  retry logic if the DCM is briefly unavailable.
 - **As a Platform Admin**, I want to see the status of VMs update in real-time
   on my dashboard without waiting for a polling interval.
 - **As a Billing System Maintainer**, I want to listen to "Instance Stopped"
@@ -81,10 +81,10 @@ envelope.
 
 ### Risks and Mitigations
 
-| Risk                  | Mitigation                                                                                                                                        |
-| :-------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Message Loss**      | For critical transitions, we can use message system persistence to ensure at-least-once delivery with persistence, also to not overload database. |
-| **Flooding/Flapping** | Providers must implement "Debounce" logic to avoid sending updates for rapid status oscillation (e.g., running->error->running) within milliseconds.     |
+| Risk                  | Mitigation                                                                                                                                           |
+| :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Message Loss**      | For critical transitions, we can use message system persistence to ensure at-least-once delivery with persistence, also to not overload database.    |
+| **Flooding/Flapping** | Providers must implement "Debounce" logic to avoid sending updates for rapid status oscillation (e.g., running->error->running) within milliseconds. |
 
 ## Design Details
 
