@@ -18,11 +18,11 @@ creation-date: 2026-01-09
 
 ## Summary
 
-The Placement Manager orchestrates resource requests within DCM
-core. It receives user requests through the Catalog Manager, validates and 
-enriches them through the Policy Manager, and delegates instance creation 
-to the SP Resource Manager. The Placement Manager focuses on 
-request orchestration and coordination.
+The Placement Manager orchestrates resource requests within DCM core. It
+receives user requests through the Catalog Manager, validates and enriches them
+through the Policy Manager, and delegates instance creation to the SP Resource
+Manager. The Placement Manager focuses on request orchestration and
+coordination.
 
 ## Motivation
 
@@ -43,10 +43,9 @@ request orchestration and coordination.
 ### System Architecture
 
 The Placement Manager acts as the central orchestration service within DCM core,
-coordinating between user requests (from Catalog), policy validation, 
-and catalog instance creation. 
-The following diagram illustrates the system architecture and
-component interactions.
+coordinating between user requests (from Catalog), policy validation, and
+catalog instance creation. The following diagram illustrates the system
+architecture and component interactions.
 
 ```mermaid
 %%{init: {'flowchart': {'rankSpacing': 100, 'nodeSpacing': 10, 'curve': 'linear'},}}%%
@@ -62,9 +61,9 @@ flowchart TD
 
     subgraph DCM_Core [ ]
         PM["**Placement Manager**<br/>"]:::placementManager
-        
+
         PE["**Policy Manager**<br/>Request Validation<br/>Payload Mutation<br/>SP Selection"]:::policyEngine
-        
+
         SPRM["**SP Resource Manager**<br/>Create Instance<br/> Read Instances<br/> Delete Instances"]:::spResourceManager
 
         PM_DB[("**Placement DB**<br/>Store Intent<br/>Store validated request")]:::database
@@ -75,7 +74,7 @@ flowchart TD
     PM --> PE
     PM --> PM_DB
     PM --> SPRM
-    
+
 
     class DCM_Core dcmCore
 ```
@@ -117,7 +116,7 @@ resources.
 #### Endpoints Overview
 
 | Method | Endpoint                       | Description                    |
-|--------|--------------------------------|--------------------------------|
+| ------ | ------------------------------ | ------------------------------ |
 | POST   | /api/v1/resources              | Create a resource              |
 | GET    | /api/v1/resources              | List all resources             |
 | GET    | /api/v1/resources/{resourceId} | Get a resource                 |
@@ -126,7 +125,7 @@ resources.
 
 **POST /api/v1/resources - Create an resource.**
 
-The POST endpoint creates a resource that is supported by DCM. The resource 
+The POST endpoint creates a resource that is supported by DCM. The resource
 request is an instance of a catalog item and originates from the user (UI)
 through the Catalog Manager.
 
@@ -175,6 +174,7 @@ Example of payload for incoming VM catalog instance request
 ```
 
 Response payload: Returns 201 Created if successful.
+
 ```json
 {
   "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
@@ -364,8 +364,8 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- Catalog Manager sends a POST request to Placement Manager with `catalogItemInstanceId` and
-  `spec` (resource specification)
+- Catalog Manager sends a POST request to Placement Manager with
+  `catalogItemInstanceId` and `spec` (resource specification)
 - Placement Manager receives and processes the request
 
 2. **Record Intent**
@@ -375,6 +375,7 @@ sequenceDiagram
 - Intent is stored before any processing to ensure request persistence
 
 3. **Policy Validation**
+
 - Placement Manager forwards the request to Policy Manager for validation
 - Policy Manager evaluates requests against policies
 - Policy Manager returns:
@@ -403,8 +404,8 @@ sequenceDiagram
   - Request processing stops
 - If instance creation succeeds:
   - SP Resource Manager returns success response with `instanceId`, `status`
-  - Placement Manager returns 201 Created to Catalog Manager with a full `Resource`
-    object
+  - Placement Manager returns 201 Created to Catalog Manager with a full
+    `Resource` object
   - The resource is now in a `PROVISIONING` state
 
 #### Key Characteristics/Notes

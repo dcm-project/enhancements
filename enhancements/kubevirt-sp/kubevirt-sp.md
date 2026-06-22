@@ -28,8 +28,8 @@ Registry.
 
 - Define the lifecycle of an SP running KubeVirt.
 - Define the registration flow with DCM SP API.
-- Define Create, Read and Delete endpoints for managing VMs
-  running on a cluster.  
+- Define Create, Read and Delete endpoints for managing VMs running on a
+  cluster.
 - Define status reporting for DCM requests.
 
 ### Non-Goals
@@ -47,8 +47,8 @@ Registry.
 
 - The KubeVirt Service Provider is connected to a Kubernetes-based cluster (OCP,
   KIND, Minikube) with KubeVirt installed.
-- The KubeVirt Service Provider should have the necessary permissions to
-  an entire cluster.
+- The KubeVirt Service Provider should have the necessary permissions to an
+  entire cluster.
 - The DCM Service Provider Registry is reachable for registration.
 - The API service has valid Kubernetes credentials (kubeconfig or in-cluster
   service account).
@@ -64,32 +64,32 @@ Registry.
 
 #### DCM SP Registry
 
-- Auto-registration on startup with DCM SP Registrar.
-  See documentation for
+- Auto-registration on startup with DCM SP Registrar. See documentation for
   [DCM Registration Flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
 - Metadata includes region, status and total availability of resources.
 
 #### DCM SP Heath Check
 
-Kubevirt SP must expose a health endpoint `http://<provider-ip>:<port>/health` 
-for DCM control plane to poll every 10 seconds. 
-See documentation for [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md). 
+Kubevirt SP must expose a health endpoint `http://<provider-ip>:<port>/health`
+for DCM control plane to poll every 10 seconds. See documentation for
+[SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
 
 #### DCM SP Status Reporting
 
 - Send status for virtual machine instance to DCM endpoint
-  `/instances/{instanceId}/status`. See documentation for 
+  `/instances/{instanceId}/status`. See documentation for
   [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
 - Use a shared informer to watch/monitor VMI events.
 
 ### Registration Flow
-KubeVirt SP API must successfully complete a registration process to ensure
-DCM is aware of it and can use it. During startup, the service uses the DCM
+
+KubeVirt SP API must successfully complete a registration process to ensure DCM
+is aware of it and can use it. During startup, the service uses the DCM
 registration client to send a request to the SP API registration endpoint:
-`POST /api/v1/providers`. See DCM 
+`POST /api/v1/providers`. See DCM
 [registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
 and
-[registration client library](https://github.com/dcm-project/service-provider-api/tree/main/pkg/registration/client) 
+[registration client library](https://github.com/dcm-project/service-provider-api/tree/main/pkg/registration/client)
 for more information.
 
 Example of request payload.
@@ -116,7 +116,9 @@ request := &dcm.RegistrationRequest{
 ```
 
 #### Registration Process
-The follow steps highlights the process for self-registration at startup 
+
+The follow steps highlights the process for self-registration at startup
+
 - API server starts and initializes HTTP listener.
 - After the server is ready, registration runs in a background goroutine.
 - The service constructs the API host URL from the listener address or
@@ -134,13 +136,13 @@ machine resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                | Description                        |
-| ------ | ----------------------- |------------------------------------|
-| POST   | /api/v1/vm              | Create a new virtual machine       |
-| GET    | /api/v1/vm              | List all virtual machines          |
-| GET    | /api/v1/vm/{vmId}       | Get a virtual machine instance     |
-| DELETE | /api/v1/vm/{vmId}       | Delete a virtual machine instance  |
-| GET    | /api/v1/health          | KubeVirt API service health check  |
+| Method | Endpoint          | Description                       |
+| ------ | ----------------- | --------------------------------- |
+| POST   | /api/v1/vm        | Create a new virtual machine      |
+| GET    | /api/v1/vm        | List all virtual machines         |
+| GET    | /api/v1/vm/{vmId} | Get a virtual machine instance    |
+| DELETE | /api/v1/vm/{vmId} | Delete a virtual machine instance |
+| GET    | /api/v1/health    | KubeVirt API service health check |
 
 ###### AEP Compliance
 
@@ -160,15 +162,16 @@ Example payload
   "memory": { "size": "2GB" },
   "vcpu": { "count": 2 },
   "guestOS": { "type": "fedora-39" },
-  "access":
-    { "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..." },
+  "access": {
+    "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
+  },
   "metadata": { "name": "fedora-vm" },
   "serviceType": "vm"
 }
 ```
 
-Response Payload: Returns 201 with payload and sets the status to **PROVISIONING**
-after it is created.
+Response Payload: Returns 201 with payload and sets the status to
+**PROVISIONING** after it is created.
 
 ```json
 {
@@ -216,44 +219,41 @@ Example payload
 - Handler receives GET request with _vmId_ path parameter  
   Calls GetVMFromCluster(_vmId_)
 - Cluster lookup:  
-  Query KubeVirt API for VirtualMachine with matching
-  `dcm-instance-id` label
+  Query KubeVirt API for VirtualMachine with matching `dcm-instance-id` label
 - VMI details:  
   Query VirtualMachineInstance for runtime info  
-  Extract IP address from network interfaces   
+  Extract IP address from network interfaces  
   Extract current phase (Running, Stopped, etc.)
 - SSH configuration:  
-  Check VM spec for SSH access credentials   
-  Extract hostname from cloud-init user data   
+  Check VM spec for SSH access credentials  
+  Extract hostname from cloud-init user data  
   Query NodePort service for external SSH access  
   Build cluster SSH command and NodePort connection details
-- Response payload:   
+- Response payload:  
   Return complete VMInstance object
 
 Example payload
 
 ```json
-  {
-    "name": "fedora-vm",
-    "namespace": "fedora-vm-001",
-    "status": "RUNNING",
-    "ip": "10.244.0.12",
-    "ssh":
-      {
-        "enabled": true,
-        "username": "fedora",
-        "secretName": "my-fedora-vm-ssh",
-        "connectMethods":
-          {
-            "clusterSSH": "ssh fedora@10.244.0.12",
-            "nodePort": { "node": "192.168.0.10", "port": 32222 }
-          }
-      }
+{
+  "name": "fedora-vm",
+  "namespace": "fedora-vm-001",
+  "status": "RUNNING",
+  "ip": "10.244.0.12",
+  "ssh": {
+    "enabled": true,
+    "username": "fedora",
+    "secretName": "my-fedora-vm-ssh",
+    "connectMethods": {
+      "clusterSSH": "ssh fedora@10.244.0.12",
+      "nodePort": { "node": "192.168.0.10", "port": 32222 }
+    }
   }
+}
 ```
 
-**Note**: Payload above is **only** an example. This will be updated
-when the schema contract is defined by DCM.
+**Note**: Payload above is **only** an example. This will be updated when the
+schema contract is defined by DCM.
 
 **DELETE /api/v1/vm/{vmId}**
 
@@ -265,7 +265,8 @@ Retrieve the health status for the KubeVirt Service Provider API.
 
 ### Status Reporting To DCM
 
-Following the design and recommendation in the [DCM Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md)
+Following the design and recommendation in the
+[DCM Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md)
 , the VMStatusSyncService within KubeVirt SP implements a watcher loop that uses
 Kubernetes watch APIs to stream VMI events per VM instance and update DCM in
 real time. These resources must be labeled with
@@ -274,6 +275,7 @@ real time. These resources must be labeled with
 #### VM Status Update Flow - Using Informer
 
 ##### Setup Phase
+
 - Create a single SharedIndexInformer for VirtualMachineInstances
 - Add a custom indexer for `dcm-instance-id` labels for fast lookups
 - Register event handlers - AddVMI(), UpdateVMI(), DeleteVMI()
@@ -283,6 +285,7 @@ real time. These resources must be labeled with
 - Wait for cache sync (every 10 mins) before processing events
 
 ##### Event Processing Flow
+
 - Watch receives a VMI event (Added/Updated/Delete)
 - Informer updates the local cache (thread-safe)
 - Handler extracts `dcm-instance-id` from VMI labels
@@ -291,6 +294,7 @@ real time. These resources must be labeled with
 - Failed events are automatically retried (with exponential backoff)
 
 ##### Pros
+
 - Single shared watch connection for the cluster (scales better)
 - Local cache for fast queries (no API calls)
 - Automatic reconnection with exponential backoff
@@ -302,6 +306,7 @@ real time. These resources must be labeled with
 - Handles missed events via resync
 
 ##### Cons
+
 - Higher memory usage (caches all VMIs)
 - More complex setup (indexers, handlers)
 - Receives all VMI events (filter in handlers)
@@ -309,19 +314,20 @@ real time. These resources must be labeled with
 - More code to maintain
 - Cache can become stale if not properly synced
 - Overkill for small scale ( <50 VMs)
-- Cold start requires fetching all existing VMIs 
-  before watch begins
+- Cold start requires fetching all existing VMIs before watch begins
 
-**Note**: The implementation of the status report flow will
-be updated (in v2) to Event driven architecture (message broker) following the design
-in the updated version of the [DCM Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
+**Note**: The implementation of the status report flow will be updated (in v2)
+to Event driven architecture (message broker) following the design in the
+updated version of the
+[DCM Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
 
 ##### Status Mapping from DCM to KubeVirt
-This maps the DCM generic status to the lifecycle phase within 
-the VMI status. See DCM Status Reporting for more information.
+
+This maps the DCM generic status to the lifecycle phase within the VMI status.
+See DCM Status Reporting for more information.
 
 | DCM          | KubeVirt                       | Description                    |
-|--------------|--------------------------------|--------------------------------|
+| ------------ | ------------------------------ | ------------------------------ |
 | PROVISIONING | Pending, Scheduling, Scheduled | VMI is in a provisioning state |
 | RUNNING      | Running                        | VMI is in a running state      |
 | STOPPING     | Succeeded                      | VMI is in a stopped state      |
@@ -329,8 +335,8 @@ the VMI status. See DCM Status Reporting for more information.
 | FAILED       | Unknown                        | VMI is in an unknown state     |
 | DELETED      | N/A                            | VMI & VM spec are not found    |
 
-See 
-[KubeVirt VMI Phase](https://github.com/kubevirt/kubevirt/blob/main/staging/src/kubevirt.io/api/core/v1/types.go#L1086) 
+See
+[KubeVirt VMI Phase](https://github.com/kubevirt/kubevirt/blob/main/staging/src/kubevirt.io/api/core/v1/types.go#L1086)
 definitions.
 
 ## Alternatives
@@ -338,7 +344,9 @@ definitions.
 ### VM Status Update Flow - Using Watch Loop
 
 #### Description
+
 How the Watch Loops works:
+
 - Spawns a goroutine to run a watcher per VM instance.
 - Context cancellation will stop all watchers.
 - Each VM instance has its own watcher loop, hence monitored independently.
@@ -346,6 +354,7 @@ How the Watch Loops works:
 - Map VMI phase to DCM status
 
 #### Pros
+
 - Simple implementation
 - Lower memory usage (no cache)
 - Direct event stream (minimal latency)
@@ -358,6 +367,7 @@ How the Watch Loops works:
 - Per-VM isolation (one failure doesn't affect others)
 
 #### Cons
+
 - Multiple connections (N VMs = N connections)
 - No local cache (queries require API calls)
 - Manual reconnection logic needed
@@ -368,9 +378,10 @@ How the Watch Loops works:
 - Doesn't scale well (> 100 VMs)
 
 #### Status
+
 - Rejected
 
 #### Rationale
-The watch loop per VM does not scale at all because N number of VMs mean 
-N number of connections. This increases API server load 
-and management overhead.
+
+The watch loop per VM does not scale at all because N number of VMs mean N
+number of connections. This increases API server load and management overhead.

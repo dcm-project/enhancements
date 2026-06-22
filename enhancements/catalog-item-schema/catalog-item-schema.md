@@ -53,7 +53,8 @@ service type defined in
 ### Non-Goals
 
 - Defining the service schemas themselves (see
-  [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md) )
+  [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md)
+  )
 
 ## Proposal
 
@@ -106,27 +107,27 @@ for complete schema definition.
 
 Each field in the _fields_ array has:
 
-| Field            | Required | Type    | Default | Description                                                    |
-| :--------------- | :------- | :------ | :------ | :------------------------------------------------------------- |
-| path             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)              |
-| displayName      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path |
-| editable         | No       | boolean | false   | Whether users can modify this field                            |
-| default          | No       | any     | -       | Default value for this field                                   |
-| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)                   |
+| Field            | Required | Type    | Default | Description                                                                   |
+| :--------------- | :------- | :------ | :------ | :---------------------------------------------------------------------------- |
+| path             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)                             |
+| displayName      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path                |
+| editable         | No       | boolean | false   | Whether users can modify this field                                           |
+| default          | No       | any     | -       | Default value for this field                                                  |
+| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)                                  |
 | dependsOn        | No       | object  | -       | Conditional options derived from another field (single option when read-only) |
 
-The `dependsOn` object specifies conditional options for this field based on another
-field's value. It has:
+The `dependsOn` object specifies conditional options for this field based on
+another field's value. It has:
 
 | Field         | Required | Type   | Description                                                              |
-| :------------ | :------- | :----- | :------------------------------------------------------------------------ |
-| path          | Yes      | string | JSON path of the field this one depends on (e.g., `region`)               |
+| :------------ | :------- | :----- | :----------------------------------------------------------------------- |
+| path          | Yes      | string | JSON path of the field this one depends on (e.g., `region`)              |
 | allowedValues | Yes      | object | If the field at path equals key K, this field's options are the array at |
 |               |          |        | `allowedValues[K]`.                                                      |
 
 When `dependsOn` is set, the field's options are derived from the field at path.
-Each `allowedValues` entry is the list of options for that key (one or more).
-If the field at path has a value with no corresponding key in `allowedValues`,
+Each `allowedValues` entry is the list of options for that key (one or more). If
+the field at path has a value with no corresponding key in `allowedValues`,
 there are no value restrictions for this field. UIs use this to show the right
 options; the chosen or derived values are sent when ordering the catalog item.
 
@@ -147,7 +148,8 @@ For example, to model `backup.retention_days` (retention in days) depending on
       "false": ["0"]
 ```
 
-When backup is disabled, retention is 0; when enabled, the user selects 7, 30, or 90 days.
+When backup is disabled, retention is 0; when enabled, the user selects 7, 30,
+or 90 days.
 
 Fields not listed are neither editable nor have default values. The catalog item
 owner must ensure all mandatory fields are listed.

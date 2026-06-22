@@ -61,8 +61,7 @@ operations within DCM core.
 - **Service Registry**:
   - Stores Service Provider's registration information
   - Used for retrieving SP details during instance creation
-  - SP info includes `endpoints`, `metadata`, `status` and `resource
-    capacity`
+  - SP info includes `endpoints`, `metadata`, `status` and `resource capacity`
 - **Service Type Instance Records**:
   - Stores created service type instance information
   - Instance data includes `instanceId`, `providerName`, `status`.
@@ -70,13 +69,13 @@ operations within DCM core.
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the DCM Placement Manager to create
-and manage instances of service types.
+The CRUD endpoints are consumed by the DCM Placement Manager to create and
+manage instances of service types.
 
 #### Endpoints Overview
 
 | Method | Endpoint                                    | Description                      |
-|--------|---------------------------------------------|----------------------------------|
+| ------ | ------------------------------------------- | -------------------------------- |
 | POST   | /api/v1/service-type-instances              | Create a service type instance   |
 | GET    | /api/v1/service-type-instances              | List all service type instances  |
 | GET    | /api/v1/service-type-instances/{instanceId} | Get a service type instance      |
@@ -91,8 +90,8 @@ check for compliance with AEP.
 **POST /api/v1/service-type-instances**  
 Create a service type instance.
 
-The POST endpoint provides an interface to create instances of
-service types that are supported by DCM.
+The POST endpoint provides an interface to create instances of service types
+that are supported by DCM.
 
 Snippet of supported service type schema for the request body
 
@@ -120,6 +119,7 @@ requestBody:
 ```
 
 Example of payload for incoming VM request
+
 ```json
 {
   "providerName": "kubevirt-sp",
@@ -127,8 +127,9 @@ Example of payload for incoming VM request
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
     "guestOS": { "type": "fedora-39" },
-    "access":
-    { "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..." },
+    "access": {
+      "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
+    },
     "metadata": { "name": "fedora-vm" }
   }
 }
@@ -138,6 +139,7 @@ Example of payload for incoming VM request
 List all service type instances according to AEP standards.
 
 Example of Response Payload
+
 ```json
 [
   {
@@ -165,6 +167,7 @@ Example of Response Payload
 Get a service type instance based on id.
 
 Example of Response Payload
+
 ```json
 {
   "name": "ubuntu-vm",
@@ -204,7 +207,7 @@ sequenceDiagram
     alt SP not found
         SPRM-->>PS: 404 Not Found
     else SP Health Check fails
-        SPRM-->>PS: 503 Service Unavailable       
+        SPRM-->>PS: 503 Service Unavailable
 
         SPRM->>SP: POST {SP_endpoint}/api/v1/services<br/>{payload}
         activate SP
@@ -217,12 +220,12 @@ sequenceDiagram
             SP-->>SPRM: Success response<br/>{instanceId, status, metadata}
             SPRM->>DB: Create instance record<br/>{instanceId, providerName, metadata}
             activate DB
-            
+
             alt DB record creation fails
                 DB-->>SPRM: Error response
                 deactivate DB
                 SPRM-->>PS: 500 Internal Server Error<br/>{instanceId, error}
-            
+
             else DB record creation succeeds
                 DB-->>SPRM: Record created
                 SPRM-->>PS: 202 Accepted<br/>{instanceId, status}
@@ -235,11 +238,11 @@ sequenceDiagram
 #### Steps
 
 - **Request Reception**
-  - SP Resource Manager receives a POST request (`/api/v1/service-type-instances`) from
-    Placement Manager with:
+  - SP Resource Manager receives a POST request
+    (`/api/v1/service-type-instances`) from Placement Manager with:
     - `providerName`: The unique identifier of the target Service Provider
-    - `spec`: The detailed spec following any of service type 
-       schema (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec)
+    - `spec`: The detailed spec following any of service type schema (VMSpec,
+      ContainerSpec, DatabaseSpec, or ClusterSpec)
 - **Service Provider Lookup**
   - Queries the Service Registry database using the `providerName`
   - Retrieves:
@@ -247,12 +250,14 @@ sequenceDiagram
     - SP metadata (region, providerName etc)
     - Current SP status (healthy, degraded, unavailable)
   - If SP is not found, returns 404 error to Placement Manager
-  - If SP status is degraded or unavailable, returns 503 error to Placement Manager
+  - If SP status is degraded or unavailable, returns 503 error to Placement
+    Manager
 - **Service Provider Invocation**
   - Calls the Service Provider's API endpoint:
     `POST {SP_endpoint}/api/v1/services`
   - Forwards the service specification (payload) to the SP
-  - If SP instance creation fails, forward the SP's error response to Placement Manager
+  - If SP instance creation fails, forward the SP's error response to Placement
+    Manager
 - **Persist Response**
   - Receives response from Service Provider containing:
     - `instanceId`: Unique identifier for the created instance
