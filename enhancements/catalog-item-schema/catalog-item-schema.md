@@ -28,22 +28,21 @@ superseded-by:
 
 # Catalog Item Schema
 
-
 ## Summary
 
-This ADR defines the structure for Catalog Items (curated offerings) and
-Catalog Item Instances (user orders) in the DCM Service Catalog.
+This ADR defines the structure for Catalog Items (curated offerings) and Catalog
+Item Instances (user orders) in the DCM Service Catalog.
 
 ## Motivation
 
 Catalog Items wrap service specifications with validation rules and defaults,
 enabling administrators to create curated offerings. The design is both
-provider-agnostic and service type-agnostic. Catalog Items work with any
-service type defined in
+provider-agnostic and service type-agnostic. Catalog Items work with any service
+type defined in
 [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md).
-Every catalog item is a blueprint of one or more named resources. 
-Each resource declares its`serviceType` from the registry,
-optional `requiresResources`, and field configurations. 
+Every catalog item is a blueprint of one or more named resources. Each resource
+declares its`serviceType` from the registry, optional `requiresResources`, and
+field configurations.
 
 ### Goals
 
@@ -59,8 +58,8 @@ optional `requiresResources`, and field configurations.
 
 ### Non-Goals
 
-- Defining the service schemas themselves (see
-  [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md) )
+- Defining the service schemas themselves, see
+  [Service Type Definition](https://raw.githubusercontent.com/dcm-project/enhancements/main/enhancements/service-type-definitions/service-type-definitions.md)
 
 ## Proposal
 
@@ -73,32 +72,32 @@ implementations).
 #### Catalog item blueprint
 
 Every catalog item defines `spec.resources` (min 1). Each entry is a named
-resource with its own `serviceType`, optional `requiresResources`,
-and `fields` for defaults and governance.
+resource with its own `serviceType`, optional `requiresResources`, and `fields`
+for defaults and governance.
 
-| Kind              | `resources` length | Provisioning |
-| :---------------- | :----------------- | :----------- |
-| Single-resource   | 1                  | One graph node |
-| Multi-resource    | > 1                | One graph node per entry; DAG via `requiresResources` |
+| Kind            | `resources` length | Provisioning                                          |
+| :-------------- | :----------------- | :---------------------------------------------------- |
+| Single-resource | 1                  | One graph node                                        |
+| Multi-resource  | > 1                | One graph node per entry; DAG via `requiresResources` |
 
 Orchestration (DAG sort, per-node policy, per-level create) is defined in
 [Declarative API](/enhancements/declarative-api/declarative-api.md).
 
 ##### CatalogItem spec
 
-| Field      | Required | Type  | Description |
-| :--------- | :------- | :---- | :---------- |
+| Field      | Required | Type   | Description                                   |
+| :--------- | :------- | :----- | :-------------------------------------------- |
 | apiVersion | Yes      | string | CatalogItem schema version (e.g., _v1alpha1_) |
-| resources  | Yes      | array | Blueprint resources (min 1); see below |
+| resources  | Yes      | array  | Blueprint resources (min 1); see below        |
 
 Each entry in `resources`:
 
-| Field             | Required | Type   | Description |
-| :---------------- |:---------| :----- | :---------- |
-| name              | Yes      | string | Stable identifier within the blueprint (e.g., _main_, _ordersDb_) |
+| Field             | Required | Type   | Description                                                               |
+| :---------------- | :------- | :----- | :------------------------------------------------------------------------ |
+| name              | Yes      | string | Stable identifier within the blueprint (e.g., _main_, _ordersDb_)         |
 | serviceType       | Yes      | string | Service type from the registry (_vm_, _container_, _database_, _cluster_) |
-| requiresResources | No       | array  | Other blueprint `name` values that must reach Ready before this resource |
-| fields            | Yes      | array  | Defaults and validation for this resource (see below) |
+| requiresResources | No       | array  | Other blueprint `name` values that must reach Ready before this resource  |
+| fields            | Yes      | array  | Defaults and validation for this resource (see below)                     |
 
 ##### Example: Production Postgres (single resource)
 
@@ -157,30 +156,31 @@ spec:
 ```
 
 Multiple catalog items can reference the same `serviceType` with different
-`validationSchema` constraints: a `Production VM` item could require `vcpu.count` between 4-16
-instead of 1-4, while sharing the same underlying `vm` ServiceType definition.
+`validationSchema` constraints: a `Production VM` item could require
+`vcpu.count` between 4-16 instead of 1-4, while sharing the same underlying `vm`
+ServiceType definition.
 
-| Field            | Required | Type    | Default | Description                                                    |
-| :--------------- | :------- | :------ | :------ | :------------------------------------------------------------- |
-| path             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)              |
-| displayName      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path |
-| editable         | No       | boolean | false   | Whether users can modify this field                            |
-| default          | No       | any     | -       | Default value for this field                                   |
-| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)                   |
+| Field            | Required | Type    | Default | Description                                                                   |
+| :--------------- | :------- | :------ | :------ | :---------------------------------------------------------------------------- |
+| path             | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)                             |
+| displayName      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path                |
+| editable         | No       | boolean | false   | Whether users can modify this field                                           |
+| default          | No       | any     | -       | Default value for this field                                                  |
+| validationSchema | No       | object  | -       | JSON Schema rules (only applies if editable)                                  |
 | dependsOn        | No       | object  | -       | Conditional options derived from another field (single option when read-only) |
 
-The `dependsOn` object specifies conditional options for this field based on another
-field's value. It has:
+The `dependsOn` object specifies conditional options for this field based on
+another field's value. It has:
 
 | Field         | Required | Type   | Description                                                              |
-| :------------ | :------- | :----- | :------------------------------------------------------------------------ |
-| path          | Yes      | string | JSON path of the field this one depends on (e.g., `region`)               |
+| :------------ | :------- | :----- | :----------------------------------------------------------------------- |
+| path          | Yes      | string | JSON path of the field this one depends on (e.g., `region`)              |
 | allowedValues | Yes      | object | If the field at path equals key K, this field's options are the array at |
 |               |          |        | `allowedValues[K]`.                                                      |
 
 When `dependsOn` is set, the field's options are derived from the field at path.
-Each `allowedValues` entry is the list of options for that key (one or more).
-If the field at path has a value with no corresponding key in `allowedValues`,
+Each `allowedValues` entry is the list of options for that key (one or more). If
+the field at path has a value with no corresponding key in `allowedValues`,
 there are no value restrictions for this field. UIs use this to show the right
 options; the chosen or derived values are sent when ordering the catalog item.
 
@@ -211,20 +211,20 @@ resource (for example `version` options when `engine` changes).
 
 ##### Field paths (catalog authoring)
 
-Field `path` values are relative to the service type spec for that
-resource. The resource's `serviceType` determines which OpenAPI schema applies.
+Field `path` values are relative to the service type spec for that resource. The
+resource's `serviceType` determines which OpenAPI schema applies.
 
-| Mechanism                   | Convention                              | Example |
-|:----------------------------|:----------------------------------------| :------ |
-| `resources[].fields[].path` | Relative to that resource's spec        | `engine`, `vcpu.count`, `image.reference` |
-| `dependsOn.path`            | Relative within the same resource's spec | `engine` |
-| `requiresResources`         | Blueprint resource `name`               | `[ordersDb]` |
+| Mechanism                   | Convention                               | Example                                   |
+| :-------------------------- | :--------------------------------------- | :---------------------------------------- |
+| `resources[].fields[].path` | Relative to that resource's spec         | `engine`, `vcpu.count`, `image.reference` |
+| `dependsOn.path`            | Relative within the same resource's spec | `engine`                                  |
+| `requiresResources`         | Blueprint resource `name`                | `[ordersDb]`                              |
 
 Duplicate `serviceType` values in one catalog item (for example two `database`
 resources) are unambiguous. The `fields` are scoped by their parent resource
-block. The `userValues` and CEL references use unique resource `name` field.
-If any `name` duplication occurs, the catalog instance request will fail
-validation and be rejected.
+block. The `userValues` and CEL references use unique resource `name` field. If
+any `name` duplication occurs, the catalog instance request will fail validation
+and be rejected.
 
 ##### Example: Dev Application (multi-resource)
 
@@ -280,30 +280,30 @@ spec:
 ```
 
 The `DATABASE_URL` / `${ordersDb.connectionString}` pair illustrates a fixed env
-name (catalog default) and an env value wired from a dependency output
-via CEL once database outputs exist.
+name (catalog default) and an env value wired from a dependency output via CEL
+once database outputs exist.
 
 #### CatalogItemInstance
 
-A CatalogItemInstance is a user's order against a catalog item. It
-references the catalog item by id and supplies optional user values that
-override editable fields. Creating an instance triggers catalog resolution,
-which produces the effective resource graph sent to placement.
+A CatalogItemInstance is a user's order against a catalog item. It references
+the catalog item by id and supplies optional user values that override editable
+fields. Creating an instance triggers catalog resolution, which produces the
+effective resource graph sent to placement.
 
 ##### CatalogItemInstance spec
 
-| Field           | Required | Type   | Description                                        |
-| :-------------- | :------- | :----- |:---------------------------------------------------|
-| catalogItemId   | Yes      | string | Catalog item to provision (immutable after create) |
-| userValues      | Yes      | array  | User overrides for editable fields                 |
+| Field         | Required | Type   | Description                                        |
+| :------------ | :------- | :----- | :------------------------------------------------- |
+| catalogItemId | Yes      | string | Catalog item to provision (immutable after create) |
+| userValues    | Yes      | array  | User overrides for editable fields                 |
 
 Each `userValue`:
 
-| Field    | Required | Description |
-| :------- | :------- | :---------- |
+| Field    | Required | Description                                                         |
+| :------- | :------- | :------------------------------------------------------------------ |
 | resource | Yes      | Blueprint `name`; identifies which resource the override applies to |
-| path     | Yes      | Relative field path (same convention as catalog `fields[].path`) |
-| value    | Yes      | Value for that field |
+| path     | Yes      | Relative field path (same convention as catalog `fields[].path`)    |
+| value    | Yes      | Value for that field                                                |
 
 Example for a single-resource VM (`name: main`):
 
@@ -339,35 +339,32 @@ graph ready for placement. Each graph node is a provision-able resource: a
 service-type shaped spec built from the `serviceType` template, catalog field
 defaults, and user overrides.
 
-
 ###### Per-resource transformation
 
 For each blueprint resource being resolved:
 
-1. Select the service type: Read `serviceType` from the blueprint entry.
-   Load the matching service type from the registry. This defines the OpenAPI
-   schema and baseline `spec` template for that node.
+1. Select the service type: Read `serviceType` from the blueprint entry. Load
+   the matching service type from the registry. This defines the OpenAPI schema
+   and baseline `spec` template for that node.
 
 2. Validate: Check that catalog `fields` paths are valid for that schema;
-   defaults and `userValues` satisfy `validation_schema` and `depends_on`
-   rules; each `userValue` references a known blueprint `name` and relative
-   `path`.
+   defaults and `userValues` satisfy `validation_schema` and `depends_on` rules;
+   each `userValue` references a known blueprint `name` and relative `path`.
 
-3. Transform/Merge into an effective spec: — Start from a copy of the ServiceType
-   template, overlay catalog `fields[].default`, then overlay matching
-   `userValues` for editable paths.
+3. Transform/Merge into an effective spec: — Start from a copy of the
+   ServiceType template, overlay catalog `fields[].default`, then overlay
+   matching `userValues` for editable paths.
 
-4. Add the resolved resource to the graph: Combine the merged spec with
-   the node's identity: blueprint `name`, `serviceType`, and
-   `requiresResources`.
+4. Add the resolved resource to the graph: Combine the merged spec with the
+   node's identity: blueprint `name`, `serviceType`, and `requiresResources`.
 
 The result is the service type instance spec for each resource.
 
 ###### CEL and cross-resource wiring
 
-| Mechanism         | Convention                               | Example |
-| :---------------- |:-----------------------------------------| :------ |
-| CEL (outputs)     | `${name.outputField}` | `${ordersDb.connectionString}` |
+| Mechanism     | Convention            | Example                        |
+| :------------ | :-------------------- | :----------------------------- |
+| CEL (outputs) | `${name.outputField}` | `${ordersDb.connectionString}` |
 
 CEL references in catalog field defaults are not user input. They refer to
 outputs published when the source resource reaches `Ready` state. Placement
@@ -473,17 +470,17 @@ For the complete validation vocabulary, see the
 
 #### Catalog item instance (order and resolution)
 
-1. User submits a CatalogItemInstance: `catalogItemId` and optional
-   `userValues` for editable fields.
-2. Catalog resolution: For each blueprint resource, load ServiceType
-   template, validate, merge catalog defaults and user overrides, assemble the
-   effective resource graph. Unresolved CEL remains in the spec for placement.
-3. Placement: Catalog sends the full graph to placement. Placement builds
-   the DAG from `requiresResources` and CEL edges, evaluate policy per node, 
+1. User submits a CatalogItemInstance: `catalogItemId` and optional `userValues`
+   for editable fields.
+2. Catalog resolution: For each blueprint resource, load ServiceType template,
+   validate, merge catalog defaults and user overrides, assemble the effective
+   resource graph. Unresolved CEL remains in the spec for placement.
+3. Placement: Catalog sends the full graph to placement. Placement builds the
+   DAG from `requiresResources` and CEL edges, evaluate policy per node,
    provision per DAG level via SPRM.
 
-See [Declarative API](/enhancements/declarative-api/declarative-api.md) for
-CEL two-phase evaluation, DAG levels, and status-driven progression.
+See [Declarative API](/enhancements/declarative-api/declarative-api.md) for CEL
+two-phase evaluation, DAG levels, and status-driven progression.
 
 Note: The validationSchema is used by both UI (for UX) and DCM (for
 enforcement). Users may bypass the UI (CLI, Ansible, cURL), so DCM must always
