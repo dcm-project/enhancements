@@ -54,12 +54,11 @@ After the frontmatter, the document must include these sections in order:
 8. Implementation Details/Notes/Constraints
 9. Risks and Mitigations
 10. Design Details
-11. Test Plan
-12. Upgrade / Downgrade Strategy
-13. Implementation History
-14. Drawbacks
-15. Alternatives (with subsections: Description, Pros, Cons, Status, Rationale)
-16. Infrastructure Needed
+11. Upgrade / Downgrade Strategy
+12. Implementation History
+13. Drawbacks
+14. Alternatives (with subsections: Description, Pros, Cons, Status, Rationale)
+15. Infrastructure Needed
 
 The template contains HTML comments (`<!-- ... -->`) explaining what goes in
 each section. Replace them with real content — do not leave them in the final
@@ -142,12 +141,6 @@ consistent in style across enhancements. State what the enhancement does and why
 in two to four sentences. Avoid implementation details, background context, or
 motivation (those belong in their own sections). A reader should be able to
 decide whether to keep reading based on the Summary alone.
-
-### Test Plan
-
-Write "N/A — test plans are derived during implementation after the enhancement
-is approved." The enhancement document captures design intent, not test
-strategy.
 
 ### Template Placeholders
 
