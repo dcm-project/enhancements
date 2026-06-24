@@ -551,12 +551,8 @@ set to `PENDING` after the resource is created.
 ```json
 {
   "results": [
-    {
-      /* cluster instance - same schema as POST response */
-    },
-    {
-      /* cluster instance - same schema as POST response */
-    }
+    {/* cluster instance - same schema as POST response */},
+    {/* cluster instance - same schema as POST response */}
   ],
   "next_page_token": "a1b2c3d4e5f6"
 }
