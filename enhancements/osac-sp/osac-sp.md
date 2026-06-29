@@ -3,9 +3,14 @@ title: osac-sp
 authors:
   - "@jordigilh"
 reviewers:
-  - TBD
+  - "@gciavarrini"
+  - "@jenniferubah"
+  - "@machacekondra"
+  - "@ygalblum"
 approvers:
-  - TBD
+  - "@machacekondra"
+  - "@ygalblum"
+  - "@jenniferubah"
 creation-date: 2026-06-29
 ---
 
@@ -13,14 +18,7 @@ creation-date: 2026-06-29
 
 ## Open Questions
 
-> 1. Should the OSAC SP support catalog item selection (exposing OSAC's cluster
->    catalog items to DCM), or should DCM manage its own catalog and translate
->    to OSAC template parameters?
-> 2. How should multi-hub topologies be handled? OSAC supports multiple
->    infrastructure hubs managed by a single fulfillment service — should DCM be
->    aware of hub selection or should OSAC handle placement internally?
-> 3. What authentication mechanism should the OSAC SP use to communicate with
->    the OSAC fulfillment service (service account token, mTLS, or OAuth)?
+None at this time.
 
 ## Summary
 
@@ -42,13 +40,21 @@ This document defines the v1 implementation scope, which focuses on:
 
 **VM-as-a-Service (deferred):** OSAC's `ComputeInstance` CRD and operator
 controller are feature-complete (multi-NIC networking, security groups, console
-proxy, provisioning webhooks). However, the OSAC fulfillment service does not
-yet expose a public gRPC service for VM operations — the public API currently
-lists only `ClusterOrders`, `Clusters`, and `ClusterTemplates`. Once OSAC
-surfaces VM lifecycle operations through their public fulfillment API, a
-subsequent version of this enhancement will add `serviceType: "vm"` registration
-using the same adapter pattern. This avoids bypassing OSAC's intended
-architecture by creating CRDs directly on the hub cluster.
+proxy, provisioning webhooks). The public API proto includes ComputeInstance
+**message type** definitions (see
+[fulfillment-api PRs](https://github.com/osac-project/fulfillment-api/pulls?q=is%3Apr+compute+instance)
+for state and condition enums added through Feb 2026). However, the fulfillment
+service does not yet register a ComputeInstance **gRPC service** with CRUD RPC
+methods. The
+[fulfillment-service README](https://github.com/osac-project/fulfillment-service)
+`grpcurl list` output shows only four public services:
+`osac.public.v1.ClusterOrders`, `osac.public.v1.Clusters`,
+`osac.public.v1.ClusterTemplates`, and `osac.public.v1.Events` — no
+`osac.public.v1.ComputeInstances`. Once OSAC registers a public ComputeInstance
+service with lifecycle RPCs, a subsequent version of this enhancement will add
+`serviceType: "vm"` registration using the same adapter pattern. This avoids
+bypassing OSAC's intended architecture by creating CRDs directly on the hub
+cluster.
 
 ## Motivation
 
@@ -92,14 +98,52 @@ without duplicating OSAC's existing orchestration logic.
 - The OSAC platform is deployed and operational, including the fulfillment
   service, OSAC operator, and AAP backend.
 - The OSAC fulfillment service is reachable from the OSAC SP via gRPC or REST.
-- The OSAC SP has valid credentials (service account token) to authenticate
-  against the OSAC fulfillment service.
+- The OSAC SP is registered as an OAuth 2.0 client in OSAC's Keycloak instance
+  and has valid credentials (client ID and secret) to authenticate via OIDC
+  client credentials flow.
 - The DCM Service Provider Registry is reachable for registration.
 - DCM messaging system is reachable for publishing status updates.
 - At least one infrastructure hub is registered with the OSAC fulfillment
   service and has capacity to provision clusters.
 - Network policies allow OSAC SP to communicate with both DCM and the OSAC
   fulfillment service.
+
+### Authentication
+
+OSAC uses Keycloak as its identity provider with standard OIDC support. The OSAC
+SP authenticates against the OSAC fulfillment service using the OAuth 2.0 client
+credentials flow:
+
+1. The OSAC SP is registered as a client in OSAC's Keycloak instance.
+2. On startup (and periodically), the SP obtains a JWT from Keycloak using its
+   client credentials.
+3. The JWT is passed as a bearer token on all gRPC calls to the OSAC fulfillment
+   service.
+
+For multi-tenant fleet management — where DCM needs to operate across multiple
+OSAC organizations — Keycloak's token exchange capability (RFC 8693) allows the
+OSAC SP to obtain tenant-scoped tokens without requiring separate credentials
+per organization. No OSAC-specific auth integration is required; standard OIDC
+and token exchange libraries work out of the box.
+
+### Multi-Hub Topology
+
+OSAC supports multiple infrastructure hubs managed by a single fulfillment
+service. DCM's topology awareness operates at the Service Provider level —
+during registration, the OSAC SP advertises region and zone metadata that DCM's
+Policy Manager uses for SP selection. Hub selection within OSAC is an internal
+placement decision handled by the fulfillment service, opaque to DCM. The
+`providerHints.osac.hubName` field allows users to override hub selection when
+needed, but is optional — if omitted, OSAC selects the appropriate hub.
+
+### Catalog Independence
+
+DCM and OSAC maintain independent service catalogs. The OSAC SP does not expose
+OSAC's cluster catalog items to DCM, nor does DCM push its catalog definitions
+into OSAC. Instead, the OSAC SP maps DCM requests to OSAC templates via the
+`providerHints.osac.templateId` field. Administrators configure DCM catalog
+items that reference the appropriate OSAC template, keeping each system's
+catalog management self-contained.
 
 ### Integration Points
 
@@ -127,12 +171,13 @@ sequenceDiagram
     participant AAP as Ansible Automation Platform
 
     DCM->>SP: POST /api/v1alpha1/clusters
-    SP->>FS: CreateClusterOrder (gRPC)
+    SP->>FS: osac.public.v1.ClusterOrders/Create (gRPC)
     FS->>FS: Create ClusterOrder CR
     OP->>OP: Reconcile ClusterOrder
     OP->>AAP: Launch provisioning template
     AAP->>AAP: Provision HCP cluster
     OP->>FS: Update ClusterOrder status
+    SP->>FS: osac.public.v1.ClusterOrders/Get (poll)
     SP->>DCM: Publish status event (CloudEvents)
 ```
 
@@ -182,13 +227,15 @@ OSAC fulfillment service.
 
 #### Fulfillment Service Configuration
 
-| Field                | Type   | Default | Description                                   |
-| -------------------- | ------ | ------- | --------------------------------------------- |
-| fulfillmentAddress   | string | ""      | OSAC fulfillment service gRPC address         |
-| fulfillmentTokenFile | string | ""      | Path to file containing the gRPC auth token   |
-| defaultHubName       | string | ""      | Default hub for cluster provisioning          |
-| tlsEnabled           | bool   | true    | Enable TLS for fulfillment service connection |
-| tlsCertFile          | string | ""      | Path to TLS certificate file                  |
+| Field              | Type   | Default | Description                                   |
+| ------------------ | ------ | ------- | --------------------------------------------- |
+| fulfillmentAddress | string | ""      | OSAC fulfillment service gRPC address         |
+| oidcIssuerUrl      | string | ""      | Keycloak OIDC issuer URL                      |
+| oidcClientId       | string | ""      | OAuth 2.0 client ID registered in Keycloak    |
+| oidcClientSecret   | string | ""      | OAuth 2.0 client secret (or path to file)     |
+| defaultHubName     | string | ""      | Default hub for cluster provisioning          |
+| tlsEnabled         | bool   | true    | Enable TLS for fulfillment service connection |
+| tlsCertFile        | string | ""      | Path to TLS CA certificate file               |
 
 ### Registration Flow
 
@@ -272,21 +319,21 @@ pre-defined by DCM core. See
 for the complete specification.
 
 The OSAC SP translates the DCM cluster request into an OSAC fulfillment service
-`CreateClusterOrder` gRPC call, mapping DCM fields to OSAC's ClusterOrder
-specification.
+`osac.public.v1.ClusterOrders/Create` gRPC call, mapping DCM fields to OSAC's
+cluster order request specification.
 
-**Field Mapping (DCM to OSAC):**
+**Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                | OSAC ClusterOrder Field | Notes                                  |
-| ------------------------ | ----------------------- | -------------------------------------- |
-| version                  | templateParameters      | Mapped to OpenShift release image      |
-| nodes.controlPlane.count | nodeRequests[cp].count  | HCP manages internally; passed as hint |
-| nodes.worker.count       | nodeRequests[w].count   | Number of worker nodes                 |
-| nodes.worker.cpu         | nodeRequests[w].cpu     | CPU per worker node                    |
-| nodes.worker.memory      | nodeRequests[w].memory  | Memory per worker node                 |
-| nodes.worker.storage     | nodeRequests[w].storage | Storage per worker node                |
-| metadata.name            | name                    | Cluster name                           |
-| providerHints.osac       | templateParameters      | OSAC-specific parameters (see below)   |
+| DCM Field                | OSAC Fulfillment API Field  | Notes                                  |
+| ------------------------ | --------------------------- | -------------------------------------- |
+| version                  | template_parameters         | Mapped to OpenShift release image      |
+| nodes.controlPlane.count | node_sets[cp].size          | HCP manages internally; passed as hint |
+| nodes.worker.count       | node_sets[worker].size      | Number of worker nodes                 |
+| nodes.worker.cpu         | template_parameters.cpu     | CPU per worker node                    |
+| nodes.worker.memory      | template_parameters.memory  | Memory per worker node                 |
+| nodes.worker.storage     | template_parameters.storage | Storage per worker node                |
+| metadata.name            | name                        | Cluster name                           |
+| providerHints.osac       | template_parameters         | OSAC-specific parameters (see below)   |
 
 **Provider Hints (osac):**
 
@@ -382,7 +429,8 @@ set to `PENDING` after the resource is created.
 **Process Flow:**
 
 1. Handler receives `GET` request with optional pagination parameters.
-2. Calls OSAC fulfillment service `ListClusterOrders` gRPC method.
+2. Calls OSAC fulfillment service `osac.public.v1.ClusterOrders/List` gRPC
+   method.
 3. Filters results to those created by this SP instance.
 4. Returns fully-populated cluster resources per AEP-132.
 5. Response includes pagination metadata (`next_page_token`).
@@ -400,16 +448,18 @@ set to `PENDING` after the resource is created.
 **Process Flow:**
 
 1. Handler receives `GET` request with `clusterId` path parameter.
-2. Calls OSAC fulfillment service `GetClusterOrder` gRPC method using the stored
-   OSAC order ID mapped to `clusterId`.
-3. Translates OSAC ClusterOrder status and details to DCM response format.
-4. Populates `kubeconfig` field when cluster reaches `READY` status.
+2. Calls OSAC fulfillment service `osac.public.v1.ClusterOrders/Get` gRPC method
+   using the stored OSAC order ID mapped to `clusterId`.
+3. Translates OSAC cluster order status and details to DCM response format.
+4. When cluster reaches `READY` status, retrieves credentials via
+   `osac.public.v1.Clusters/GetKubeconfig`.
 5. Returns complete cluster instance object.
 
 **Kubeconfig Field Behavior:**
 
-- **READY**: Contains the base64-encoded kubeconfig retrieved from the OSAC
-  fulfillment service. Users can decode this to access the cluster.
+- **READY**: Contains the base64-encoded kubeconfig retrieved via
+  `osac.public.v1.Clusters/GetKubeconfig`. Users can decode this to access the
+  cluster.
 - **PROVISIONING/PENDING**: Empty string. Credentials are not yet available.
 - **FAILED**: Empty string. Cluster provisioning failed.
 
@@ -423,15 +473,16 @@ set to `PENDING` after the resource is created.
 
 **Description:** Delete a cluster instance.
 
-Sends a `DeleteClusterOrder` gRPC call to the OSAC fulfillment service, which
-triggers the OSAC operator to decommission the cluster via AAP. Returns
-`204 No Content`.
+Sends an `osac.public.v1.ClusterOrders/Delete` gRPC call to the OSAC fulfillment
+service, which triggers the OSAC operator to decommission the cluster via AAP.
+Returns `204 No Content`.
 
 **Process Flow:**
 
 1. Handler receives `DELETE` request with `clusterId` path parameter.
 2. Looks up the OSAC order ID mapped to `clusterId`.
-3. Calls OSAC fulfillment service `DeleteClusterOrder` gRPC method.
+3. Calls OSAC fulfillment service `osac.public.v1.ClusterOrders/Delete` gRPC
+   method.
 4. Returns `204 No Content` on success.
 
 **Error Handling:**
@@ -447,7 +498,7 @@ triggers the OSAC operator to decommission the cluster via AAP. Returns
 The health check verifies:
 
 - Connectivity to the OSAC fulfillment service (gRPC health check)
-- Valid authentication credentials
+- Valid OIDC token (can obtain or refresh JWT from Keycloak)
 - At least one hub is registered and available
 
 ### Implementation Details/Notes/Constraints
@@ -461,9 +512,11 @@ OSAC identifiers on all operations.
 #### Status Polling
 
 Unlike SPs that watch Kubernetes CRDs directly, the OSAC SP polls the OSAC
-fulfillment service at a configurable interval (default: 30 seconds) to detect
-status changes on cluster orders. When a status change is detected, the SP
-publishes a CloudEvents status update to DCM.
+fulfillment service (`osac.public.v1.ClusterOrders/List`) at a configurable
+interval (default: 30 seconds) to detect status changes on cluster orders. When
+a status change is detected, the SP publishes a CloudEvents status update to
+DCM. The OSAC fulfillment service also exposes an `osac.public.v1.Events`
+service which may enable event-driven status updates in a future iteration.
 
 #### Version Translation
 
@@ -478,7 +531,7 @@ translation.
 | Risk                                                                    | Mitigation                                                                                                             |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | OSAC fulfillment service is unavailable, causing all operations to fail | Health check detects connectivity loss; exponential backoff on retries; DCM can route to alternative cluster providers |
-| Status polling introduces latency in reporting cluster readiness        | Configurable poll interval; future enhancement to use OSAC webhooks or streaming for real-time status                  |
+| Status polling introduces latency in reporting cluster readiness        | Configurable poll interval; future enhancement to use `osac.public.v1.Events` service for event-driven status updates  |
 | ID mapping data loss (local storage) causes orphaned clusters           | Persist mapping in a durable store; reconciliation loop matches OSAC orders by metadata labels                         |
 | OSAC platform version upgrades change the gRPC API contract             | Pin to a specific OSAC API version; version negotiation on startup                                                     |
 | Network partition between OSAC SP and fulfillment service               | Circuit breaker pattern; return 502 to DCM so it can retry or failover                                                 |
@@ -493,8 +546,8 @@ OSAC fulfillment service and publishes updates to DCM via CloudEvents.
 #### Polling Loop
 
 - Runs in a background goroutine at a configurable interval (default: 30s).
-- Queries the OSAC fulfillment service for all cluster orders created by this SP
-  instance.
+- Calls `osac.public.v1.ClusterOrders/List` for all cluster orders created by
+  this SP instance.
 - Compares current status against last-known status from the local cache.
 - Publishes a CloudEvents status update for each order that has changed.
 
@@ -522,14 +575,17 @@ specification (v1.0).
 
 #### Status Mapping (OSAC to DCM)
 
-| DCM Status   | OSAC ClusterOrder Condition        | Description                     |
-| ------------ | ---------------------------------- | ------------------------------- |
-| PENDING      | Accepted=True, Progressing=False   | Order accepted, not yet started |
-| PROVISIONING | Progressing=True                   | Cluster is being provisioned    |
-| READY        | Available=True                     | Cluster is fully operational    |
-| FAILED       | Failed=True                        | Provisioning failed             |
-| UNAVAILABLE  | Available=False, Progressing=False | Cluster is not available        |
-| DELETED      | N/A                                | ClusterOrder not found          |
+The OSAC fulfillment service returns status values on cluster order responses.
+The OSAC SP maps these to DCM status values:
+
+| DCM Status   | OSAC Fulfillment Status | Description                                       |
+| ------------ | ----------------------- | ------------------------------------------------- |
+| PENDING      | (newly created)         | Order accepted, not yet started                   |
+| PROVISIONING | PROGRESSING             | Cluster is being provisioned                      |
+| READY        | READY                   | Cluster is fully operational                      |
+| FAILED       | FAILED                  | Provisioning failed                               |
+| UNAVAILABLE  | DEGRADED                | Cluster is provisioned but experiencing issues    |
+| DELETED      | (order not found)       | ClusterOrder has been removed from fulfillment DB |
 
 ### Upgrade / Downgrade Strategy
 

@@ -21,3 +21,4 @@ words:
   - baremetal
   - hypershift
   - kubeconfig
+  - grpcurl
