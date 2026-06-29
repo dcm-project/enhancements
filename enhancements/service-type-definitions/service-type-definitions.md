@@ -35,11 +35,11 @@ Example:
 ## Summary
 
 This ADR defines provider-agnostic schemas for DCM service types. These schemas
-enable Service Providers to provision four core service types — virtual
-machines, containers, databases, and Kubernetes clusters — across different
-infrastructure platforms without vendor lock-in. The key principle is
-_portability first_: schemas contain only minimal fields common across all
-implementations, with platform-specific configuration delegated to
+enable Service Providers to provision five core service types — virtual
+machines, containers, databases, Kubernetes clusters, and standalone storage —
+across different infrastructure platforms without vendor lock-in. The key
+principle is _portability first_: schemas contain only minimal fields common
+across all implementations, with platform-specific configuration delegated to
 _providerHints_.
 
 ## Motivation
@@ -52,7 +52,7 @@ without breaking compatibility.
 
 - Define a generic schema that works for any serviceType, ensure portability,
   and allows extensibility without schema changes.
-- Define an initial set of four primary service types applying this pattern:
+- Define an initial set of five primary service types applying this pattern:
   - _VM_  
     Virtual machines with compute, storage, and OS specifications
   - _Container_  
@@ -62,6 +62,8 @@ without breaking compatibility.
     EKS, AWS, GKE, etc.)
   - _Database_  
     Database services with various engines (PostgreSQL, MySQL, etc.)
+  - _Storage_  
+    Standalone persistent volumes decoupled from compute service types
 
 ### Non-Goals
 
@@ -73,14 +75,13 @@ without breaking compatibility.
 - Migration strategies for breaking schema changes
 - Provider-specific implementation details (each provider handles translation
   independently)
-- Additional service types beyond VMs, containers, databases, and Kubernetes
-  clusters (deferred to future phases)
-- Standalone storage volumes or separately provisioned networks are _not_
-  included. All storage (disk size, ephemeral allocation) and networking
-  (interfaces, IPs, subnets, security groups) must be defined and bundled
-  directly with the compute specification. Future iterations may decouple these
-  services, but the current principle is monolithic definition for simplified
-  deployment.
+- Additional service types beyond VMs, containers, databases, Kubernetes
+  clusters, and standalone storage (deferred to future phases)
+- Separately provisioned networks are _not_ included as a standalone service
+  type. Network interfaces bundled with compute (VM, container) remain in those
+  schemas. Standalone storage volumes are supported via the _storage_ service
+  type; disk size on VMs and ephemeral allocation on containers remain bundled
+  with compute where applicable.
 - Multiple service type schema versions. Initial release supports only the
   current schema version; service type versioning deferred to future phases.
 
@@ -98,17 +99,17 @@ All service schemas share common fields defined once in
 
 ## Schema Structure
 
-| Field         | Required | Type                                   | Description                                                        | ReadOnly |
-| :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- | :------- |
-| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) | No       |
-| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  | No       |
-| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    | No       |
-| id            | No       | string                                 | Unique identifier for the resource                                 | Yes      |
-| status        | No       | string                                 | Current state of the resource                                      | Yes      |
-| path          | No       | string                                 | Resource path or location                                          | Yes      |
-| statusMessage | No       | string                                 | Message providing details about the current status                 | Yes      |
-| createTime    | No       | date-time                              | Timestamp when the resource was created                            | Yes      |
-| updateTime    | No       | date-time                              | Timestamp when the resource was last updated                       | Yes      |
+| Field         | Required | Type                                   | Description                                                                   | ReadOnly |
+| :------------ | :------- | :------------------------------------- | :---------------------------------------------------------------------------- | :------- |
+| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_, _storage_) | No       |
+| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                             | No       |
+| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                               | No       |
+| id            | No       | string                                 | Unique identifier for the resource                                            | Yes      |
+| status        | No       | string                                 | Current state of the resource                                                 | Yes      |
+| path          | No       | string                                 | Resource path or location                                                     | Yes      |
+| statusMessage | No       | string                                 | Message providing details about the current status                            | Yes      |
+| createTime    | No       | date-time                              | Timestamp when the resource was created                                       | Yes      |
+| updateTime    | No       | date-time                              | Timestamp when the resource was last updated                                  | Yes      |
 
 ### Metadata Object
 
@@ -146,6 +147,8 @@ following serviceTypes:
 - Database  
   Fields common across all database types (SQL, NoSQL, search, time-series,
   etc.)
+- Storage  
+  Standalone persistent volumes (capacity, access mode) independent of compute
 
 ### Virtual Machine
 
@@ -375,6 +378,42 @@ common fields: _serviceType, metadata, providerHints_
 | cpu     | Yes      | integer | Number of CPUs per node                             |
 | memory  | Yes      | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
 | storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+
+### Storage
+
+The following sections detail the Storage schema architecture for standalone
+persistent volumes. See
+[k8s-storage-sp](https://github.com/dcm-project/enhancements/blob/main/enhancements/k8s-storage-sp/k8s-storage-sp.md)
+for the Kubernetes reference Service Provider implementation.
+
+#### Schema
+
+Plus common fields: _serviceType, metadata, providerHints_
+
+| Field    | Required | Type   | Description                                  |
+| :------- | :------- | :----- | :------------------------------------------- |
+| capacity | Yes      | string | Volume size with unit (e.g., _100Gi_, _1TB_) |
+
+#### Storage providerHints (kubernetes)
+
+Platform-specific PVC settings may be supplied under `providerHints.kubernetes`:
+
+| Field        | Required | Type   | Description                                                                 |
+| :----------- | :------- | :----- | :-------------------------------------------------------------------------- |
+| storageClass | No       | string | Kubernetes StorageClass name                                                |
+| volumeMode   | No       | string | _Filesystem_ (default) or _Block_                                           |
+| accessMode   | No       | string | PVC access mode: _ReadWriteOnce_ (default), _ReadOnlyMany_, _ReadWriteMany_ |
+
+When `accessMode` is omitted, the Service Provider applies a platform default
+(typically _ReadWriteOnce_ for block storage).
+
+**Note:** `accessMode` is Kubernetes-specific because it controls both
+attachment scope (single node vs. multiple nodes vs. single pod) and permissions
+(read-write vs. read-only) at PVC creation time. Other storage platforms handle
+attachment and permissions differently (e.g., AWS EBS sets multi-attach
+capability via volume type; GCP Persistent Disk sets mode at attach time). The
+CatalogItem admin configures this field based on the backend capabilities (e.g.,
+Ceph RBD only supports ReadWriteOnce; CephFS only supports ReadWriteMany).
 
 ### Schema Compatibility
 

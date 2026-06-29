@@ -14,6 +14,7 @@ see-also:
   - "/enhancements/state-management/service-provider-status-reporting.md"
   - "/enhancements/kubevirt-sp/kubevirt-sp.md"
   - "/enhancements/k8s-container-sp/k8s-container-sp.md"
+  - "/enhancements/k8s-storage-sp/k8s-storage-sp.md"
   - "/enhancements/acm-cluster-sp/acm-cluster-sp.md"
 ---
 
@@ -60,7 +61,7 @@ The DCM system is composed of the following core components:
 | **Policy Manager (Policy Engine)** | Validates, mutates, and selects Service Providers via REGO policies and OPA                           |
 | **SP Resource Manager**            | Intermediary between Placement Manager and Service Providers; handles SP lookup and health validation |
 | **Service Registry**               | Stores Service Provider registration, endpoints, and metadata                                         |
-| **Service Providers**              | Execute infrastructure provisioning (KubeVirt SP, K8s Container SP, ACM Cluster SP)                   |
+| **Service Providers**              | Execute infrastructure provisioning (KubeVirt SP, K8s Container SP, K8s Storage SP, ACM Cluster SP)   |
 | **Messaging System**               | Handles CloudEvents for asynchronous status reporting (NATS)                                          |
 
 ```mermaid
@@ -295,12 +296,14 @@ graph LR
         CT[Container Schema]
         DBS[Database Schema]
         CL[Cluster Schema]
+        STG[Storage Schema]
     end
 
     CommonFields --> VM
     CommonFields --> CT
     CommonFields --> DBS
     CommonFields --> CL
+    CommonFields --> STG
 ```
 
 ### 3.2 Supported ServiceTypes
@@ -345,6 +348,15 @@ graph LR
 | `nodes.controlPlane.cpu/memory/storage` | various | yes      | Control plane resources               |
 | `nodes.worker.count`                    | integer | yes      | Worker node count                     |
 | `nodes.worker.cpu/memory/storage`       | various | yes      | Worker node resources                 |
+
+#### Storage (`serviceType: storage`)
+
+| Field                                   | Type   | Required | Description                                                  |
+| --------------------------------------- | ------ | -------- | ------------------------------------------------------------ |
+| `capacity`                              | string | yes      | Volume size (e.g., `"100Gi"`, `"1TB"`)                       |
+| `providerHints.kubernetes.storageClass` | string | no       | Kubernetes StorageClass name                                 |
+| `providerHints.kubernetes.volumeMode`   | string | no       | `Filesystem` or `Block`                                      |
+| `providerHints.kubernetes.accessMode`   | string | no       | PVC access mode (e.g., `"ReadWriteOnce"`, `"ReadWriteMany"`) |
 
 ---
 
@@ -401,6 +413,33 @@ spec:
     - path: "resources.storage"
       editable: true
       default: "100GB"
+```
+
+**Storage CatalogItem example:**
+
+```yaml
+apiVersion: v1alpha1
+kind: CatalogItem
+metadata:
+  name: standard-block-volume
+spec:
+  serviceType: storage
+  fields:
+    - path: "capacity"
+      editable: true
+      default: "100Gi"
+      validationSchema:
+        type: string
+        pattern: '^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$'
+    - path: "providerHints.kubernetes.storageClass"
+      editable: false
+      default: "gp3-csi"
+    - path: "providerHints.kubernetes.volumeMode"
+      editable: false
+      default: "Filesystem"
+    - path: "providerHints.kubernetes.accessMode"
+      editable: false
+      default: "ReadWriteOnce"
 ```
 
 ### 4.2 CatalogItem to ServiceType Translation
@@ -532,7 +571,7 @@ sequenceDiagram
     Platform->>SP: State change event<br/>(via informer watch or polling)
     SP->>SP: Map platform status → DCM status
     SP->>SP: Build CloudEvent
-    SP->>MSG: Publish to:<br/>dcm.providers.{provider}.{serviceType}<br/>.instances.{instanceId}.status
+    SP->>MSG: Publish to NATS subject<br/>dcm.{serviceType}<br/>
 
     MSG->>DCM: Deliver event
     DCM->>DCM: Validate CloudEvent schema
@@ -545,15 +584,15 @@ sequenceDiagram
 
 **Status enums by ServiceType:**
 
-| VM           | Container | Cluster  |
-| ------------ | --------- | -------- |
-| PROVISIONING | PENDING   | CREATING |
-| RUNNING      | RUNNING   | ACTIVE   |
-| STOPPED      | SUCCEEDED | UPDATING |
-| PAUSED       | FAILED    | DEGRADED |
-| FAILED       | UNKNOWN   | DELETED  |
-| DELETING     |           |          |
-| DELETED      |           |          |
+| VM           | Container | Cluster  | Storage      |
+| ------------ | --------- | -------- | ------------ |
+| PROVISIONING | PENDING   | CREATING | PROVISIONING |
+| RUNNING      | RUNNING   | ACTIVE   | RUNNING      |
+| STOPPED      | SUCCEEDED | UPDATING |              |
+| PAUSED       | FAILED    | DEGRADED |              |
+| FAILED       | UNKNOWN   | DELETED  | FAILED       |
+| DELETING     |           |          | DELETING     |
+| DELETED      |           |          | DELETED      |
 
 ---
 
@@ -631,7 +670,7 @@ sequenceDiagram
 
     %% Continuous status reporting
     Note over SP,MSG: Async status reporting begins
-    SP->>MSG: Publish status CloudEvents<br/>as instance state changes
+    SP->>MSG: Publish status CloudEvents<br/>to dcm.{serviceType}
     MSG->>PM: Deliver status updates
     PM->>DB: UPSERT status
 ```
@@ -726,6 +765,11 @@ flowchart LR
         C1[Receive Cluster spec] --> C2[Create HostedCluster and NodePool]
         C2 --> C3[Return requestId - PENDING]
     end
+
+    subgraph K8sStorageSP[K8s Storage SP]
+        D1[Receive Storage spec] --> D2[Create PersistentVolumeClaim]
+        D2 --> D3[Return requestId - PROVISIONING]
+    end
 ```
 
 ### 6.5 Continuous Status Reporting
@@ -739,7 +783,7 @@ flowchart TD
         A[Platform event detected<br/>via Informer watch or polling]
         A --> B[Map platform status<br/>to DCM status enum]
         B --> C[Build CloudEvent v1.0]
-        C --> D[Publish to NATS<br/>dcm.providers.provider.serviceType<br/>.instances.instanceId.status]
+        C --> D[Publish to NATS<br/>dcm.{serviceType}]
     end
 
     subgraph DCM Core
@@ -830,4 +874,32 @@ graph LR
     HC3 --> DC3
     HC4 --> DC4
     HC5 --> DC5
+```
+
+```mermaid
+graph LR
+    subgraph K8s PVC Phase
+        PVC1[Pending]
+        PVC2[Bound - resizing]
+        PVC3[Bound]
+        PVC4[Lost]
+        PVC5[deletionTimestamp set]
+        PVC6[Not Found]
+    end
+
+    subgraph DCM Storage Status
+        SS1[PROVISIONING]
+        SS2[PROVISIONING]
+        SS3[RUNNING]
+        SS4[FAILED]
+        SS5[DELETING]
+        SS6[DELETED]
+    end
+
+    PVC1 --> SS1
+    PVC2 --> SS2
+    PVC3 --> SS3
+    PVC4 --> SS4
+    PVC5 --> SS5
+    PVC6 --> SS6
 ```

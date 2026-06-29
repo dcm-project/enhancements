@@ -124,7 +124,7 @@ enhancement:
 dcm.{serviceType}
 ```
 
-For example: `dcm.vm`, `dcm.container`, `dcm.cluster`.
+For example: `dcm.vm`, `dcm.container`, `dcm.cluster`, `dcm.storage`.
 
 The `serviceType` token in the subject determines the message schema. All other
 context — provider identity (`source`), instance identifier (`subject`), and

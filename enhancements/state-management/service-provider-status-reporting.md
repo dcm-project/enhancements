@@ -124,7 +124,8 @@ Providers must publish messages to a subject based on the service type:
 
 `dcm.{serviceType}`
 
-- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`).
+- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`,
+  `storage`).
 
 The service type determines the message schema and is the only routing-relevant
 token. All other context — provider identity, instance identifier, timestamps —
@@ -133,7 +134,7 @@ is carried in the CloudEvent envelope attributes (see section 3).
 ### 3. CloudEvents Format
 
 All messages must be valid JSON CloudEvents (v1.0). We currently define only
-very simple format for `VmStatus` and `ContainerStatus`.
+very simple format for `VmStatus`, `ContainerStatus`, and `StorageStatus`.
 
 ```golang
 type VmStatus struct {
@@ -144,6 +145,14 @@ type VmStatus struct {
 
 ```golang
 type ContainerStatus struct {
+  Id string  `json:"id"`
+  Status string `json:"status"`
+  Message string `json:"message"`
+}
+```
+
+```golang
+type StorageStatus struct {
   Id string  `json:"id"`
   Status string `json:"status"`
   Message string `json:"message"`
@@ -209,6 +218,25 @@ but simplified for general consumption. **Target Statuses:** `PENDING`,
 | **SUCCEEDED**      | `Succeeded`, `Exited (0)`                          |
 | **FAILED**         | `Failed`, `CrashLoopBackOff`, `Exited (non-zero)`  |
 | **UNKNOWN**        | `Unknown` (Node lost)                              |
+
+##### Storage status
+
+For standalone storage volumes (e.g., Kubernetes PVCs), status reflects
+provisioning and binding lifecycle. **Target Statuses:** `PROVISIONING`,
+`RUNNING`, `FAILED`, `DELETING`, `DELETED`.
+
+| DCM Generic Status | Kubernetes PVC Equivalent                      |
+| :----------------- | :--------------------------------------------- |
+| **PROVISIONING**   | `Pending` (waiting for binding/provisioning)   |
+| **PROVISIONING**   | `Bound` with active resize conditions          |
+|                    | (`Resizing`, `FileSystemResizePending`)        |
+| **RUNNING**        | `Bound` (no active resize conditions)          |
+| **FAILED**         | `Lost` or unrecoverable binding failure        |
+| **DELETING**       | Deletion in progress (`deletionTimestamp` set) |
+| **DELETED**        | PVC not found                                  |
+
+See [k8s-storage-sp](../k8s-storage-sp/k8s-storage-sp.md) for the reference
+Kubernetes Storage SP status mapping.
 
 ##### Cluster status
 
