@@ -77,7 +77,10 @@ without duplicating OSAC's existing orchestration logic.
 ### Non-Goals
 
 - Define endpoints for day 2 operations (`scale`, `upgrade`, `hibernate`) for
-  cluster instances.
+  cluster instances — the DCM SP API does not yet define an `UPDATE` verb or
+  mutable-field contract for cluster resources. OSAC's fulfillment service
+  supports `Update` on ClusterOrders, so day 2 operations can be added once DCM
+  standardizes the update contract.
 - **VM-as-a-Service provisioning** — OSAC's ComputeInstance operator is
   feature-complete, but the fulfillment service public gRPC API does not yet
   expose VM operations. VM support will be added once OSAC surfaces
@@ -87,7 +90,8 @@ without duplicating OSAC's existing orchestration logic.
   the underlying infrastructure for OSAC clusters, not a separate user-facing
   service.
 - Deployment strategy for the OSAC SP API.
-- Define `UPDATE` endpoint, as this is out of scope for v1.
+- Define `UPDATE` endpoint — blocked on the same DCM SP API dependency as day 2
+  operations above.
 - Multi-hub placement logic — OSAC handles hub selection internally.
 - OSAC internal components (operator, AAP playbooks, networking controllers).
 
