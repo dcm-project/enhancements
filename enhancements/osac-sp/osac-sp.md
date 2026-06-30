@@ -18,43 +18,33 @@ creation-date: 2026-06-29
 
 ## Open Questions
 
-None at this time.
+1. **CLUSTER_STATE_FAILED mapping:** DCM's cluster lifecycle defines `CREATING`,
+   `ACTIVE`, `UPDATING`, `DEGRADED`, `DELETED` but not `FAILED`. OSAC has
+   [`CLUSTER_STATE_FAILED`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto).
+   Should `FAILED` map to `DEGRADED` (cluster unusable but exists) or should DCM
+   add a `FAILED` cluster status?
+
+2. **CREATING vs UPDATING distinction:** OSAC uses `CLUSTER_STATE_PROGRESSING`
+   for both initial provisioning and spec updates (confirmed in the
+   [feedback controller](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go)).
+   The SP must track per-cluster history to distinguish DCM `CREATING` from
+   `UPDATING`. Is tracking previous state in the local mapping store acceptable,
+   or should DCM define a single `PROGRESSING` state instead?
+
+3. **Host type mapping strategy:** OSAC clusters use predefined
+   [`host_type`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto)
+   identifiers (e.g., `acme_1tb`) rather than free cpu/memory/storage values.
+   DCM's cluster schema requires `nodes.worker.cpu`, `memory`, `storage`. Three
+   options are proposed in [Node Sizing](#node-sizing) — which should be the
+   default?
 
 ## Summary
 
-The OSAC Service Provider (OSAC SP) is a REST API that manages OpenShift
-clusters through the Open Sovereign AI Cloud (OSAC) platform. It exposes
-endpoints for creating, reading, and deleting clusters, and integrates with the
-DCM Service Provider Registry. The OSAC SP acts as an adapter between DCM and
-the OSAC fulfillment service, translating DCM cluster requests into OSAC
-fulfillment API calls.
-
-### Scope Notes (v1)
-
-This document defines the v1 implementation scope, which focuses on:
-
-- **Service Type**: `cluster` only (OpenShift clusters via Hosted Control
-  Planes)
-- **Integration Path**: OSAC fulfillment service public gRPC API
-  (`osac.public.v1.ClusterOrders`)
-
-**VM-as-a-Service (deferred):** OSAC's `ComputeInstance` CRD and operator
-controller are feature-complete (multi-NIC networking, security groups, console
-proxy, provisioning webhooks). The public API proto includes ComputeInstance
-**message type** definitions (see
-[fulfillment-api PRs](https://github.com/osac-project/fulfillment-api/pulls?q=is%3Apr+compute+instance)
-for state and condition enums added through Feb 2026). However, the fulfillment
-service does not yet register a ComputeInstance **gRPC service** with CRUD RPC
-methods. The
-[fulfillment-service README](https://github.com/osac-project/fulfillment-service)
-`grpcurl list` output shows only four public services:
-`osac.public.v1.ClusterOrders`, `osac.public.v1.Clusters`,
-`osac.public.v1.ClusterTemplates`, and `osac.public.v1.Events` — no
-`osac.public.v1.ComputeInstances`. Once OSAC registers a public ComputeInstance
-service with lifecycle RPCs, a subsequent version of this enhancement will add
-`serviceType: "vm"` registration using the same adapter pattern. This avoids
-bypassing OSAC's intended architecture by creating CRDs directly on the hub
-cluster.
+The OSAC Service Provider (OSAC SP) is an external Service Provider that
+integrates the Open Sovereign AI Cloud (OSAC) platform with DCM through the
+environment agent model. It provisions OpenShift clusters and VMs by translating
+agent-routed requests into OSAC fulfillment service gRPC API calls, and reports
+status changes back via the messaging system.
 
 ## Motivation
 
@@ -67,11 +57,12 @@ without duplicating OSAC's existing orchestration logic.
 
 ### Goals
 
-- Define the lifecycle of an SP using OSAC to provision OpenShift clusters.
-- Define the registration flow with DCM SP API.
-- Define `CREATE`, `READ`, and `DELETE` endpoints for managing clusters
+- Define the lifecycle of an SP using OSAC to provision OpenShift clusters and
+  VMs.
+- Define the registration flow with the environment agent.
+- Define `CREATE`, `READ`, and `DELETE` endpoints for managing clusters and VMs
   provisioned via OSAC.
-- Define status reporting mechanism for DCM requests.
+- Define status reporting mechanism for DCM requests via CloudEvents.
 - Define how cluster credentials are communicated to the user.
 
 ### Non-Goals
@@ -79,20 +70,17 @@ without duplicating OSAC's existing orchestration logic.
 - Define endpoints for day 2 operations (`scale`, `upgrade`, `hibernate`) for
   cluster instances — the DCM SP API does not yet define an `UPDATE` verb or
   mutable-field contract for cluster resources. OSAC's fulfillment service
-  supports `Update` on ClusterOrders, so day 2 operations can be added once DCM
-  standardizes the update contract.
-- **VM-as-a-Service provisioning** — OSAC's ComputeInstance operator is
-  feature-complete, but the fulfillment service public gRPC API does not yet
-  expose VM operations. VM support will be added once OSAC surfaces
-  `ComputeInstance` lifecycle through `osac.public.v1.*`. See
-  [Scope Notes](#scope-notes-v1).
+  supports
+  [`Clusters/Update`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/clusters_service.proto),
+  so day 2 operations can be added once DCM standardizes the update contract.
 - Bare Metal-as-a-Service as a standalone service type — bare metal hosts are
   the underlying infrastructure for OSAC clusters, not a separate user-facing
   service.
 - Deployment strategy for the OSAC SP API.
 - Define `UPDATE` endpoint — blocked on the same DCM SP API dependency as day 2
   operations above.
-- Multi-hub placement logic — OSAC handles hub selection internally.
+- Multi-hub placement logic — OSAC handles hub selection internally; DCM
+  placement selects the environment agent, not the SP.
 - OSAC internal components (operator, AAP playbooks, networking controllers).
 
 ## Proposal
@@ -104,13 +92,16 @@ without duplicating OSAC's existing orchestration logic.
 - The OSAC fulfillment service is reachable from the OSAC SP via gRPC or REST.
 - The OSAC SP is registered as an OAuth 2.0 client in OSAC's Keycloak instance
   and has valid credentials (client ID and secret) to authenticate via OIDC
-  client credentials flow.
-- The DCM Service Provider Registry is reachable for registration.
-- DCM messaging system is reachable for publishing status updates.
+  client credentials flow. The OSAC
+  [authorization policy](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/policies/authz.rego)
+  grants `Clusters/Create`, `ComputeInstances/Create`, and all other CRUD
+  methods to any authenticated client — no elevated permissions are required.
+- An environment agent is deployed and reachable for SP registration.
+- The DCM messaging system is reachable for publishing status updates.
 - At least one infrastructure hub is registered with the OSAC fulfillment
   service and has capacity to provision clusters.
-- Network policies allow OSAC SP to communicate with both DCM and the OSAC
-  fulfillment service.
+- Network policies allow OSAC SP to communicate with both the environment agent
+  and the OSAC fulfillment service.
 
 ### Authentication
 
@@ -124,21 +115,31 @@ credentials flow:
 3. The JWT is passed as a bearer token on all gRPC calls to the OSAC fulfillment
    service.
 
-For multi-tenant fleet management — where DCM needs to operate across multiple
-OSAC organizations — Keycloak's token exchange capability (RFC 8693) allows the
-OSAC SP to obtain tenant-scoped tokens without requiring separate credentials
-per organization. No OSAC-specific auth integration is required; standard OIDC
-and token exchange libraries work out of the box.
+For multi-tenant fleet management, OSAC does **not** support Keycloak token
+exchange (RFC 8693) — the realm configuration explicitly sets
+`standard.token.exchange.enabled: false`
+([realm.json](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/it/charts/keycloak/files/realm.json)),
+and
+[`AUTH.md`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/docs/AUTH.md)
+documents only client credentials for service accounts and group-based tenancy
+for users. Instead, OSAC resolves tenancy from Keycloak group membership:
+Authorino maps the caller's Keycloak groups (or, for service accounts, the
+`admin_groups` claim) into a `tenants` claim, which the fulfillment service uses
+to determine assignable, default, and visible tenants for each request. A
+service account granted an admin role receives the universal tenant set `["*"]`
+and can see and manage resources across all tenants without per-tenant
+credentials. The OSAC SP authenticates as a single service account; if DCM needs
+to scope OSAC SP operations to a specific tenant, the tenant is set explicitly
+via the resource's `metadata.tenant` field on create, not via a separate token
+per organization.
 
 ### Multi-Hub Topology
 
 OSAC supports multiple infrastructure hubs managed by a single fulfillment
-service. DCM's topology awareness operates at the Service Provider level —
-during registration, the OSAC SP advertises region and zone metadata that DCM's
-Policy Manager uses for SP selection. Hub selection within OSAC is an internal
-placement decision handled by the fulfillment service, opaque to DCM. The
-`providerHints.osac.hubName` field allows users to override hub selection when
-needed, but is optional — if omitted, OSAC selects the appropriate hub.
+service. Hub selection is an internal OSAC placement decision handled by the
+fulfillment service, opaque to both the agent and DCM. DCM's placement operates
+at the agent level — selecting the environment agent that contains this SP — per
+the [environment agent enhancement](../environment-agent/environment-agent.md).
 
 ### Catalog Independence
 
@@ -153,58 +154,108 @@ catalog management self-contained.
 
 #### OSAC Fulfillment Service Integration
 
-The OSAC SP communicates with the OSAC fulfillment service using its gRPC API.
-The fulfillment service manages the lifecycle of cluster orders by coordinating
-with the OSAC operator on the hub cluster.
+The OSAC SP communicates with the OSAC fulfillment service using its public gRPC
+API. The fulfillment service manages the lifecycle of clusters and VMs by
+coordinating with the OSAC operator on the hub cluster.
 
-- Uses the OSAC fulfillment service gRPC API to create, query, and delete
-  cluster orders.
+- Uses the
+  [`osac.public.v1.Clusters`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/clusters_service.proto)
+  gRPC service for cluster operations.
+- Uses the
+  [`osac.public.v1.ComputeInstances`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/compute_instances_service.proto)
+  gRPC service for VM operations.
 - The fulfillment service translates requests into `ClusterOrder` custom
-  resources on the hub cluster.
-- The OSAC operator reconciles `ClusterOrder` CRDs by triggering AAP
-  provisioning templates.
+  resources on the hub cluster (reconciled by the
+  [OSAC operator](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/clusterorder_controller.go)).
 - Clusters are provisioned using Hosted Control Planes via ACM on the hub
   cluster.
 
 ```mermaid
 sequenceDiagram
     participant DCM as DCM Control Plane
+    participant MS as Messaging System
+    participant AG as Environment Agent
     participant SP as OSAC SP
     participant FS as OSAC Fulfillment Service
     participant OP as OSAC Operator
-    participant AAP as Ansible Automation Platform
 
-    DCM->>SP: POST /api/v1alpha1/clusters
-    SP->>FS: osac.public.v1.ClusterOrders/Create (gRPC)
-    FS->>FS: Create ClusterOrder CR
+    DCM->>MS: Publish creation request to agent topic
+    MS->>AG: Deliver creation request
+    AG->>SP: Route to OSAC SP (by service type)
+    SP->>FS: osac.public.v1.Clusters/Create (gRPC)
+    FS->>FS: Create Cluster resource
     OP->>OP: Reconcile ClusterOrder
-    OP->>AAP: Launch provisioning template
-    AAP->>AAP: Provision HCP cluster
-    OP->>FS: Update ClusterOrder status
-    SP->>FS: osac.public.v1.ClusterOrders/Get (poll)
-    SP->>DCM: Publish status event (CloudEvents)
+    OP->>FS: Update cluster status
+    SP->>FS: osac.public.v1.Clusters/List (poll)
+    SP->>MS: Publish status event (CloudEvents)
+    MS->>DCM: Deliver status update
 ```
 
-#### DCM SP Registry
+#### Environment Agent Registration
 
-- Auto-registration on startup with DCM SP Registrar. See documentation for
-  [DCM Registration Flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
+The OSAC SP is an **external SP** that registers with the environment agent via
+`POST /api/v1/providers`, following the contract defined in the
+[environment agent enhancement](../environment-agent/environment-agent.md#sp-registration-to-agent).
+Registration is per service type — the OSAC SP registers twice (once for
+`cluster`, once for `vm`), per the
+[SP registration flow](../sp-registration-flow/sp-registration-flow.md).
 
-#### DCM SP Health Check
+```mermaid
+sequenceDiagram
+    participant SP as OSAC SP
+    participant AG as Environment Agent
+    participant DCM as DCM Control Plane
 
-OSAC SP must expose a health endpoint `http://<provider-ip>:<port>/health` for
-DCM control plane to poll every 10 seconds. See documentation for
-[SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
+    Note over SP: Startup complete
+    SP->>AG: POST /api/v1/providers (serviceType: cluster)
+    AG-->>SP: 201 Created (lease TTL)
+    SP->>AG: POST /api/v1/providers (serviceType: vm)
+    AG-->>SP: 201 Created (lease TTL)
+    AG->>DCM: Register agent (serviceTypes: [cluster, vm])
+    DCM-->>AG: 200 OK
 
-#### DCM SP Status Reporting
+    loop Lease renewal
+        SP->>AG: POST /api/v1/providers (re-register)
+        AG-->>SP: 200 OK (lease renewed)
+    end
+```
 
-- Publish status updates for cluster instances to the messaging system using
-  CloudEvents format. Events are published to the subject:
-  `dcm.providers.{providerName}.cluster.instances.{instanceId}.status`
-- See documentation for
-  [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
-- Use a polling loop against the OSAC fulfillment service to detect status
-  changes on ClusterOrder resources.
+#### SP Health Check
+
+OSAC SP exposes a `GET /health` endpoint that the environment agent polls to
+monitor SP health using the three-state model (Ready, Unhealthy, Unavailable).
+See
+[SP Health Check](../service-provider-health-check/service-provider-health-check.md).
+
+#### Status Reporting
+
+Status updates are published to the messaging system using CloudEvents format.
+Per the
+[SP Status Reporting](../state-management/service-provider-status-reporting.md)
+enhancement:
+
+- **Subject:** `dcm.cluster` or `dcm.vm`
+- **Type:** `dcm.status.cluster` or `dcm.status.vm`
+- **Source:** `dcm/providers/{providerName}`
+
+```mermaid
+sequenceDiagram
+    participant FS as OSAC Fulfillment Service
+    participant SP as OSAC SP
+    participant MS as Messaging System
+    participant DCM as DCM Control Plane
+
+    loop Every 30s (configurable)
+        SP->>FS: Clusters/List + ComputeInstances/List (CEL filter)
+        FS-->>SP: Current resource states
+        SP->>SP: Compare against local cache
+        alt Status changed
+            SP->>MS: Publish CloudEvents status update
+            MS->>DCM: Deliver status event
+            SP->>SP: Update local cache
+        end
+    end
+```
 
 ### User Stories
 
@@ -214,14 +265,20 @@ As a DCM user, I want to request an OpenShift cluster through DCM so that I
 receive a fully provisioned cluster with credentials, without needing to
 interact with OSAC directly.
 
-#### Story 2: Query Cluster Status
+#### Story 2: Provision a VM
 
-As a DCM user, I want to check the status of my cluster provisioning request so
-that I know when my cluster is ready and can retrieve the access credentials.
+As a DCM user, I want to request a VM through DCM so that I receive a running
+compute instance with connectivity details, without needing to interact with
+OSAC directly.
 
-#### Story 3: Delete a Cluster
+#### Story 3: Query Resource Status
 
-As a DCM user, I want to delete a cluster I no longer need so that
+As a DCM user, I want to check the status of my provisioning request so that I
+know when my resource is ready and can retrieve access credentials.
+
+#### Story 4: Delete a Resource
+
+As a DCM user, I want to delete a cluster or VM I no longer need so that
 infrastructure resources are released.
 
 ### SP Configuration
@@ -231,43 +288,43 @@ OSAC fulfillment service.
 
 #### Fulfillment Service Configuration
 
-| Field              | Type   | Default | Description                                   |
-| ------------------ | ------ | ------- | --------------------------------------------- |
-| fulfillmentAddress | string | ""      | OSAC fulfillment service gRPC address         |
-| oidcIssuerUrl      | string | ""      | Keycloak OIDC issuer URL                      |
-| oidcClientId       | string | ""      | OAuth 2.0 client ID registered in Keycloak    |
-| oidcClientSecret   | string | ""      | OAuth 2.0 client secret (or path to file)     |
-| defaultHubName     | string | ""      | Default hub for cluster provisioning          |
-| tlsEnabled         | bool   | true    | Enable TLS for fulfillment service connection |
-| tlsCertFile        | string | ""      | Path to TLS CA certificate file               |
+| Field              | Type   | Required | Description                                   |
+| ------------------ | ------ | -------- | --------------------------------------------- |
+| fulfillmentAddress | string | Yes      | OSAC fulfillment service gRPC address         |
+| oidcIssuerUrl      | string | Yes      | Keycloak OIDC issuer URL                      |
+| oidcClientId       | string | Yes      | OAuth 2.0 client ID registered in Keycloak    |
+| oidcClientSecret   | string | Yes      | OAuth 2.0 client secret (or path to file)     |
+| tlsEnabled         | bool   | No       | Enable TLS for fulfillment service connection |
+| tlsCertFile        | string | No       | Path to TLS CA certificate file               |
 
 ### Registration Flow
 
-The OSAC SP API must successfully complete a registration process to ensure DCM
-is aware of it and can use it. During startup, the service uses the DCM
-registration client to send a request to the SP API registration endpoint
-`POST /api/v1alpha1/providers`. See DCM
-[registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
-for more information.
+The OSAC SP registers with the environment agent on startup. Since registration
+is per service type, the SP makes two registration calls:
 
-Example request payload:
+**Cluster registration:**
 
 ```json
 {
   "name": "osac-sp",
   "serviceType": "cluster",
-  "displayName": "OSAC Service Provider",
-  "endpoint": "https://osac-sp.example.com/api/v1alpha1/clusters",
-  "metadata": {
-    "capabilities": {
-      "supportedPlatforms": ["baremetal"],
-      "supportedProvisioningTypes": ["hypershift"],
-      "kubernetesSupportedVersions": ["1.29", "1.30", "1.31"]
-    }
-  },
-  "operations": ["CREATE", "DELETE", "READ"]
+  "endpoint": "https://osac-sp.example.com/api/v1alpha1/clusters"
 }
 ```
+
+**VM registration:**
+
+```json
+{
+  "name": "osac-sp",
+  "serviceType": "vm",
+  "endpoint": "https://osac-sp.example.com/api/v1alpha1/vms"
+}
+```
+
+The agent then includes these service types in its registration with DCM. The
+agent advertises capabilities (Kubernetes versions, platforms) based on what the
+SP reports.
 
 #### Capability Advertisement
 
@@ -283,22 +340,23 @@ infrastructure using Hosted Control Planes.
 
 #### Registration Process
 
-The OSAC SP follows the standard self-registration process defined in the
-[SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md):
+The OSAC SP follows the external SP registration process defined in the
+[environment agent enhancement](../environment-agent/environment-agent.md#external-sp-registration):
 
 - API server starts and initializes HTTP listener.
 - After the server is ready, registration runs in a background goroutine.
-- Registration request is sent to the DCM Service Provider Registry.
-- On success, the service is registered and available for DCM to use.
+- Registration requests are sent to the agent (`POST /api/v1/providers`) — one
+  per service type.
+- External SPs periodically re-register to maintain their lease with the agent.
 - Registration failures are retried with exponential backoff and logged but do
   not block server startup.
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the DCM SP API to create and manage cluster
-resources.
+The CRUD endpoints are consumed by the environment agent, which routes requests
+from the messaging topic to the appropriate SP based on service type.
 
-#### Endpoints Overview
+#### Cluster Endpoints
 
 | Method | Endpoint                           | Description               |
 | ------ | ---------------------------------- | ------------------------- |
@@ -306,7 +364,21 @@ resources.
 | GET    | /api/v1alpha1/clusters             | List all clusters         |
 | GET    | /api/v1alpha1/clusters/{clusterId} | Get a cluster instance    |
 | DELETE | /api/v1alpha1/clusters/{clusterId} | Delete a cluster instance |
-| GET    | /api/v1alpha1/health               | OSAC SP health check      |
+
+#### VM Endpoints
+
+| Method | Endpoint                 | Description          |
+| ------ | ------------------------ | -------------------- |
+| POST   | /api/v1alpha1/vms        | Create a new VM      |
+| GET    | /api/v1alpha1/vms        | List all VMs         |
+| GET    | /api/v1alpha1/vms/{vmId} | Get a VM instance    |
+| DELETE | /api/v1alpha1/vms/{vmId} | Delete a VM instance |
+
+#### Common Endpoints
+
+| Method | Endpoint             | Description          |
+| ------ | -------------------- | -------------------- |
+| GET    | /api/v1alpha1/health | OSAC SP health check |
 
 ##### AEP Compliance
 
@@ -317,50 +389,62 @@ to check for compliance with AEP.
 
 **Description:** Create a new OpenShift cluster.
 
-The POST endpoint follows the contract defined in the Cluster schema spec
-pre-defined by DCM core. See
-[Cluster Schema](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#kubernetes-cluster)
-for the complete specification.
+The POST endpoint follows the contract defined in the
+[Cluster Schema](../service-type-definitions/service-type-definitions.md#kubernetes-cluster).
 
-The OSAC SP translates the DCM cluster request into an OSAC fulfillment service
-`osac.public.v1.ClusterOrders/Create` gRPC call, mapping DCM fields to OSAC's
-cluster order request specification.
+The OSAC SP translates the DCM cluster request into an
+`osac.public.v1.Clusters/Create` gRPC call, mapping DCM fields to OSAC's
+[`ClusterSpec`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto).
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                | OSAC Fulfillment API Field  | Notes                                  |
-| ------------------------ | --------------------------- | -------------------------------------- |
-| version                  | template_parameters         | Mapped to OpenShift release image      |
-| nodes.controlPlane.count | node_sets[cp].size          | HCP manages internally; passed as hint |
-| nodes.worker.count       | node_sets[worker].size      | Number of worker nodes                 |
-| nodes.worker.cpu         | template_parameters.cpu     | CPU per worker node                    |
-| nodes.worker.memory      | template_parameters.memory  | Memory per worker node                 |
-| nodes.worker.storage     | template_parameters.storage | Storage per worker node                |
-| metadata.name            | name                        | Cluster name                           |
-| providerHints.osac       | template_parameters         | OSAC-specific parameters (see below)   |
+| DCM Field                | OSAC Field                  | Notes                                      |
+| ------------------------ | --------------------------- | ------------------------------------------ |
+| version                  | spec.release_image          | SP translates K8s version to OCP image     |
+| nodes.controlPlane.count | (managed by HCP)            | Hosted Control Planes manage CP internally |
+| nodes.worker.count       | spec.node_sets[w].size      | Number of worker nodes                     |
+| nodes.worker.cpu/memory  | spec.node_sets[w].host_type | See [Node Sizing](#node-sizing)            |
+| metadata.name            | metadata.name               | Cluster name (DNS label format)            |
+| providerHints.osac       | (see below)                 | OSAC-specific parameters                   |
+
+##### Node Sizing
+
+OSAC clusters use
+[`ClusterNodeSet`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto)
+with `host_type` (a predefined identifier like `acme_1tb` from the
+[HostTypes service](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/host_types_service.proto))
+and `size` (node count). DCM's cluster schema uses free-form `cpu`, `memory`,
+`storage` values.
+
+Three options for bridging this mismatch:
+
+| Option                      | Description                                                                     | Tradeoff                                 |
+| --------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
+| A. Admin-configured mapping | SP config maps DCM resource ranges to OSAC host types                           | Requires admin to maintain the table     |
+| B. HostTypes API lookup     | SP queries `GET /api/fulfillment/v1/host_types` at startup, selects closest fit | Heuristic; may surprise users            |
+| C. Template-driven          | DCM catalog item specifies the host_type via providerHints; SP passes through   | Simplest but moves complexity to catalog |
+
+See [Open Questions](#open-questions) for reviewer feedback request.
 
 **Provider Hints (osac):**
 
-| Field        | Type   | Description                                          |
-| ------------ | ------ | ---------------------------------------------------- |
-| hubName      | string | Target hub for provisioning (overrides default)      |
-| templateId   | string | OSAC catalog template to use for provisioning        |
-| baseDomain   | string | Base DNS domain for the cluster                      |
-| pullSecret   | string | Pull secret reference for cluster image pulls        |
-| sshKey       | string | SSH public key for node access                       |
-| releaseImage | string | Specific OpenShift release image (overrides version) |
+| Field        | Type   | Required | Description                                    |
+| ------------ | ------ | -------- | ---------------------------------------------- |
+| templateId   | string | Yes      | OSAC cluster template to use for provisioning  |
+| baseDomain   | string | No       | Base DNS domain for the cluster                |
+| pullSecret   | string | No       | Pull secret reference for cluster image pulls  |
+| sshKey       | string | No       | SSH public key for node access                 |
+| releaseImage | string | No       | Specific OCP release image (overrides version) |
+| hostType     | string | No       | OSAC host_type for worker nodes (option C)     |
 
 **Example Request Payload:**
 
 ```json
 {
-  "version": "4.16",
+  "version": "1.29",
   "nodes": {
     "controlPlane": {
-      "count": 3,
-      "cpu": 4,
-      "memory": "16GB",
-      "storage": "120GB"
+      "count": 3
     },
     "worker": {
       "count": 3,
@@ -374,35 +458,29 @@ cluster order request specification.
   },
   "providerHints": {
     "osac": {
-      "baseDomain": "moc.example.com",
-      "templateId": "default-hcp"
+      "templateId": "default-hcp",
+      "baseDomain": "moc.example.com"
     }
   },
   "serviceType": "cluster"
 }
 ```
 
-**Response:** Returns `201 Created` with the following payload. The status is
-set to `PENDING` after the resource is created.
+**Response:** Returns `201 Created` with the cluster resource in its initial
+state:
 
 ```json
 {
   "requestId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "name": "sovereign-ai-cluster-01",
-  "status": "PENDING",
+  "status": "CREATING",
   "platform": "baremetal",
-  "version": "4.16",
+  "version": "1.29",
   "apiEndpoint": "",
   "consoleUrl": "",
   "nodes": {
-    "controlPlane": {
-      "ready": 0,
-      "total": 3
-    },
-    "worker": {
-      "ready": 0,
-      "total": 3
-    }
+    "controlPlane": { "ready": 0, "total": 3 },
+    "worker": { "ready": 0, "total": 3 }
   },
   "kubeconfig": "",
   "metadata": {
@@ -415,33 +493,118 @@ set to `PENDING` after the resource is created.
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
+- **401 Unauthorized**: OIDC token expired or invalid (SP-to-OSAC auth failure)
+- **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
 - **409 Conflict**: Cluster with the same `metadata.name` already exists
-- **422 Unprocessable Entity**: Unsupported configuration or version
+- **422 Unprocessable Entity**: No suitable host_type for requested resources
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
 
-#### GET /api/v1alpha1/clusters
+#### POST /api/v1alpha1/vms
+
+**Description:** Create a new VM (compute instance).
+
+The POST endpoint follows the contract defined in the
+[VM Schema](../service-type-definitions/service-type-definitions.md#virtual-machine).
+
+The OSAC SP translates the DCM VM request into a
+`osac.public.v1.ComputeInstances/Create` gRPC call, mapping DCM fields to OSAC's
+[`ComputeInstanceSpec`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/compute_instance_type.proto).
+
+**Field Mapping (DCM to OSAC Fulfillment API):**
+
+| DCM Field                     | OSAC Field              | Notes                                  |
+| ----------------------------- | ----------------------- | -------------------------------------- |
+| vcpu.count                    | spec.cores              | Direct mapping (or spec.instance_type) |
+| memory.size                   | spec.memory_gib         | Convert to GiB integer                 |
+| storage.disks[boot].capacity  | spec.boot_disk.size_gib | Boot disk size in GiB                  |
+| storage.disks[*]              | spec.additional_disks   | Additional disks                       |
+| guestOS.type                  | spec.image              | Mapped to image source_ref             |
+| access.sshPublicKey           | spec.ssh_key            | SSH public key                         |
+| metadata.name                 | metadata.name           | Instance name (DNS label)              |
+| providerHints.osac.templateId | spec.template           | OSAC template reference                |
+
+**Provider Hints (osac) for VMs:**
+
+| Field        | Type   | Required | Description                                 |
+| ------------ | ------ | -------- | ------------------------------------------- |
+| templateId   | string | Yes      | OSAC compute instance template              |
+| instanceType | string | No       | OSAC instance_type (overrides cores/memory) |
+| isWindows    | bool   | No       | Windows guest OS flag                       |
+
+**Response:** Returns `201 Created` with the VM resource in its initial state:
+
+```json
+{
+  "requestId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+  "name": "ai-worker-01",
+  "status": "PROVISIONING",
+  "metadata": {
+    "namespace": "ai-worker-01",
+    "createdAt": "2026-06-29T15:00:00Z"
+  }
+}
+```
+
+**Error Handling:**
+
+- **400 Bad Request**: Invalid request payload or missing required fields
+- **401 Unauthorized**: OIDC token expired or invalid
+- **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
+- **409 Conflict**: VM with the same `metadata.name` already exists
+- **422 Unprocessable Entity**: Unsupported configuration
+- **500 Internal Server Error**: Unexpected error during resource creation
+- **502 Bad Gateway**: OSAC fulfillment service is unreachable
+
+#### GET /api/v1alpha1/clusters (List)
 
 **Description:** List all cluster instances with pagination support.
 
 **Query Parameters:**
 
-- `max_page_size` (optional): Maximum number of resources to return in a single
-  page. Default: 50.
+- `max_page_size` (optional): Maximum number of resources to return. Default: 50
 - `page_token` (optional): Token indicating the starting point for the page.
 
-**Process Flow:**
+**Pagination Translation:** OSAC uses `offset`/`limit` pagination
+([`ClustersListRequest`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/clusters_service.proto)).
+The SP encodes the `offset` into the opaque `page_token` and maps
+`max_page_size` to `limit`. OSAC also supports
+[CEL filter expressions](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/clusters_service.proto)
+— the SP uses `this.metadata.labels["dcm.io/managed-by"] == "dcm"` to filter
+results to resources it manages.
 
-1. Handler receives `GET` request with optional pagination parameters.
-2. Calls OSAC fulfillment service `osac.public.v1.ClusterOrders/List` gRPC
-   method.
-3. Filters results to those created by this SP instance.
-4. Returns fully-populated cluster resources per AEP-132.
-5. Response includes pagination metadata (`next_page_token`).
+**Response:** Returns `200 OK` with the AEP-132 pagination wrapper:
+
+```json
+{
+  "results": [
+    {
+      "requestId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "sovereign-ai-cluster-01",
+      "status": "ACTIVE",
+      "platform": "baremetal",
+      "version": "1.29",
+      "apiEndpoint": "https://api.sovereign-ai-cluster-01.moc.example.com:6443",
+      "consoleUrl": "https://console-openshift-console.apps.sovereign-ai-cluster-01.moc.example.com",
+      "nodes": {
+        "controlPlane": { "ready": 3, "total": 3 },
+        "worker": { "ready": 3, "total": 3 }
+      },
+      "metadata": {
+        "namespace": "sovereign-ai-cluster-01",
+        "createdAt": "2026-06-29T14:30:00Z"
+      }
+    }
+  ],
+  "next_page_token": "eyJvZmZzZXQiOjUwfQ=="
+}
+```
 
 **Error Handling:**
 
 - **400 Bad Request**: Invalid pagination parameters
+- **401 Unauthorized**: OIDC token expired or invalid
+- **403 Forbidden**: Insufficient permissions
 - **500 Internal Server Error**: Unexpected error querying OSAC
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
 
@@ -452,23 +615,24 @@ set to `PENDING` after the resource is created.
 **Process Flow:**
 
 1. Handler receives `GET` request with `clusterId` path parameter.
-2. Calls OSAC fulfillment service `osac.public.v1.ClusterOrders/Get` gRPC method
-   using the stored OSAC order ID mapped to `clusterId`.
-3. Translates OSAC cluster order status and details to DCM response format.
-4. When cluster reaches `READY` status, retrieves credentials via
+2. Calls `osac.public.v1.Clusters/Get` gRPC method using the stored OSAC cluster
+   ID mapped to `clusterId`.
+3. Translates OSAC cluster status to DCM response format.
+4. When cluster reaches `ACTIVE` status, retrieves credentials via
    `osac.public.v1.Clusters/GetKubeconfig`.
 5. Returns complete cluster instance object.
 
 **Kubeconfig Field Behavior:**
 
-- **READY**: Contains the base64-encoded kubeconfig retrieved via
-  `osac.public.v1.Clusters/GetKubeconfig`. Users can decode this to access the
-  cluster.
-- **PROVISIONING/PENDING**: Empty string. Credentials are not yet available.
-- **FAILED**: Empty string. Cluster provisioning failed.
+- **ACTIVE**: Contains the base64-encoded kubeconfig retrieved via
+  [`Clusters/GetKubeconfig`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/clusters_service.proto).
+- **CREATING/UPDATING**: Empty string. Credentials are not yet available.
+- **FAILED/DEGRADED**: Empty string.
 
 **Error Handling:**
 
+- **401 Unauthorized**: OIDC token expired or invalid
+- **403 Forbidden**: Insufficient permissions
 - **404 Not Found**: Cluster with the specified `clusterId` does not exist
 - **500 Internal Server Error**: Unexpected error querying OSAC
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -477,23 +641,54 @@ set to `PENDING` after the resource is created.
 
 **Description:** Delete a cluster instance.
 
-Sends an `osac.public.v1.ClusterOrders/Delete` gRPC call to the OSAC fulfillment
-service, which triggers the OSAC operator to decommission the cluster via AAP.
-Returns `204 No Content`.
+Sends a `osac.public.v1.Clusters/Delete` gRPC call to the OSAC fulfillment
+service, which triggers the OSAC operator to decommission the cluster. Returns
+`204 No Content`.
 
-**Process Flow:**
+**Deletion is synchronous from the API's perspective, asynchronous for
+infrastructure teardown:** `Clusters/Delete` removes the cluster record
+immediately — subsequent `Get`/`List` calls return `404 Not Found` right away.
+The actual Hosted Control Plane teardown happens in the background: the
+operator's
+[`handleDelete`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/clusterorder_controller.go)
+holds a Kubernetes finalizer on the `ClusterOrder` CR and waits for AAP to
+decommission the hosted cluster before releasing it. `ClusterState` has no
+`DELETING` value (only `PROGRESSING`, `READY`, `FAILED`) — the SP has no
+intermediate status to report. As soon as the SP's next poll (or the delete call
+itself) observes a 404, it publishes `DELETED` and removes the entry from its
+local mapping store.
 
-1. Handler receives `DELETE` request with `clusterId` path parameter.
-2. Looks up the OSAC order ID mapped to `clusterId`.
-3. Calls OSAC fulfillment service `osac.public.v1.ClusterOrders/Delete` gRPC
-   method.
-4. Returns `204 No Content` on success.
+```mermaid
+sequenceDiagram
+    participant AG as Environment Agent
+    participant SP as OSAC SP
+    participant FS as OSAC Fulfillment Service
+    participant OP as OSAC Operator
+
+    AG->>SP: DELETE /api/v1alpha1/clusters/{clusterId}
+    SP->>SP: Look up OSAC ID from mapping store
+    SP->>FS: osac.public.v1.Clusters/Delete (gRPC)
+    FS-->>SP: OK
+    SP-->>AG: 204 No Content
+    OP->>OP: Reconcile deletion (async)
+    Note over SP: Next poll detects cluster removed
+    SP->>SP: Publish DELETED status, remove from cache
+```
 
 **Error Handling:**
 
+- **401 Unauthorized**: OIDC token expired or invalid
+- **403 Forbidden**: Insufficient permissions
 - **404 Not Found**: Cluster with the specified `clusterId` does not exist
 - **500 Internal Server Error**: Unexpected error during deletion
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
+
+#### GET /api/v1alpha1/vms (List) / GET /api/v1alpha1/vms/{vmId} / DELETE
+
+VM endpoints follow the same patterns as cluster endpoints, using
+`osac.public.v1.ComputeInstances` methods (`List`, `Get`, `Delete`). Pagination
+uses the same `offset`/`limit` translation. Error handling includes the same
+401/403/502 codes.
 
 #### GET /api/v1alpha1/health
 
@@ -509,87 +704,160 @@ The health check verifies:
 
 #### ID Mapping
 
-The OSAC SP maintains a mapping between DCM instance IDs (`clusterId`) and OSAC
-order IDs. This mapping is stored locally and used to translate between DCM and
-OSAC identifiers on all operations.
+The OSAC SP maintains a mapping between DCM instance IDs and OSAC resource IDs.
+This mapping is stored locally and used to translate between DCM and OSAC
+identifiers on all operations. The mapping also tracks per-resource state
+history to support the CREATING/UPDATING distinction (see
+[Status Mapping](#status-mapping-osac-to-dcm)).
+
+**Rehydration:** Per the
+[rehydration flow](../rehydration-flow/rehydration-flow.md), DCM rehydrates a
+resource by issuing an ordinary `POST` with a new `instanceId` to create the
+replacement, followed by an ordinary (deferred) `DELETE` on the old `instanceId`
+once the new one is ready. Both calls are standard lifecycle operations from the
+SP's point of view — the new `instanceId` gets its own mapping entry pointing to
+a new OSAC resource, and the old entry is removed independently when its
+`DELETE` is processed. The SP requires no rehydration-specific logic: the two
+instance IDs are never correlated in the mapping store.
+
+#### Ownership Tracking
+
+The SP sets
+[OSAC metadata labels](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/metadata_type.proto)
+on every created resource:
+
+- `metadata.labels["dcm.io/managed-by"] = "dcm"`
+- `metadata.labels["dcm.io/instance-id"] = "<DCM-UUID>"`
+- `metadata.labels["dcm.io/service-type"] = "cluster"` or `"vm"`
+
+These labels enable:
+
+- Filtering owned resources via OSAC's CEL filter:
+  `this.metadata.labels["dcm.io/managed-by"] == "dcm"`
+- Reconciliation after ID mapping data loss (matching OSAC resources back to DCM
+  IDs)
+- No Kubernetes labels are needed — OSAC's metadata API handles ownership
+  natively since OSAC manages resources through its fulfillment service, not via
+  direct Kubernetes API access.
 
 #### Status Polling
 
-Unlike SPs that watch Kubernetes CRDs directly, the OSAC SP polls the OSAC
-fulfillment service (`osac.public.v1.ClusterOrders/List`) at a configurable
-interval (default: 30 seconds) to detect status changes on cluster orders. When
-a status change is detected, the SP publishes a CloudEvents status update to
-DCM. The OSAC fulfillment service also exposes an `osac.public.v1.Events`
-service which may enable event-driven status updates in a future iteration.
+The OSAC SP polls the fulfillment service (`osac.public.v1.Clusters/List` and
+`osac.public.v1.ComputeInstances/List`) at a configurable interval (default: 30
+seconds) to detect status changes. When a status change is detected, the SP
+publishes a CloudEvents status update to the messaging system.
+
+OSAC also exposes a streaming
+[`Events/Watch`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/events_service.proto)
+RPC with CEL-based filtering as an alternative to polling. However, OSAC
+explicitly states "the server doesn't make any guarantee about the delivery or
+order of these events" and recommends combining watch with periodic
+reconciliation. The SP may use Events/Watch for lower-latency detection with
+polling as a reconciliation fallback.
 
 #### Version Translation
 
 The OSAC SP translates between DCM's Kubernetes version format (e.g., `1.29`)
-and OSAC's OpenShift version format (e.g., `4.16`). The SP maintains an internal
-compatibility matrix for this translation. If a user specifies `version` using
-the OpenShift format directly (e.g., `4.16`), the SP accepts it without
-translation.
+and OSAC's OpenShift release image format. The SP maintains an internal
+compatibility matrix for this translation. Users specify Kubernetes versions per
+the
+[service type definition](../service-type-definitions/service-type-definitions.md#kubernetes-cluster)
+— they are unaware of the underlying OpenShift platform. The SP maps the K8s
+version to the appropriate OSAC `release_image` in
+[`ClusterSpec`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto).
 
 ### Risks and Mitigations
 
-| Risk                                                                    | Mitigation                                                                                                             |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| OSAC fulfillment service is unavailable, causing all operations to fail | Health check detects connectivity loss; exponential backoff on retries; DCM can route to alternative cluster providers |
-| Status polling introduces latency in reporting cluster readiness        | Configurable poll interval; future enhancement to use `osac.public.v1.Events` service for event-driven status updates  |
-| ID mapping data loss (local storage) causes orphaned clusters           | Persist mapping in a durable store; reconciliation loop matches OSAC orders by metadata labels                         |
-| OSAC platform version upgrades change the gRPC API contract             | Pin to a specific OSAC API version; version negotiation on startup                                                     |
-| Network partition between OSAC SP and fulfillment service               | Circuit breaker pattern; return 502 to DCM so it can retry or failover                                                 |
+| Risk                                               | Mitigation                                                                                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| OSAC fulfillment service unavailable               | Health check detects connectivity loss; agent marks SP unhealthy; DCM routes to alternative providers   |
+| Status polling introduces latency                  | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback |
+| ID mapping data loss causes orphaned resources     | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership  |
+| OSAC platform version upgrades change the gRPC API | Pin to a specific OSAC API version; version negotiation on startup                                      |
+| OIDC token expiry causes transient auth failures   | Token refresh before expiry; 401 triggers immediate refresh and retry                                   |
+| Host type mapping produces unexpected results      | Admin-configurable mapping table; 422 error when no suitable host_type exists                           |
 
 ## Design Details
 
-### Status Reporting to DCM
+### Status Reporting
 
-The OSAC SP uses a polling loop to monitor cluster order status changes in the
-OSAC fulfillment service and publishes updates to DCM via CloudEvents.
+The OSAC SP publishes status updates to the messaging system using
+[CloudEvents v1.0](https://cloudevents.io/) per the
+[SP Status Reporting](../state-management/service-provider-status-reporting.md)
+enhancement.
 
-#### Polling Loop
+**CloudEvents Fields:**
 
-- Runs in a background goroutine at a configurable interval (default: 30s).
-- Calls `osac.public.v1.ClusterOrders/List` for all cluster orders created by
-  this SP instance.
-- Compares current status against last-known status from the local cache.
-- Publishes a CloudEvents status update for each order that has changed.
-
-#### CloudEvents Format
-
-Status updates are published using the [CloudEvents](https://cloudevents.io/)
-specification (v1.0).
-
-**Message Subject:**
-
-`dcm.providers.{providerName}.cluster.instances.{instanceId}.status`
-
-**Event Type:**
-
-`dcm.providers.{providerName}.status.update`
+| Field   | Value                                   |
+| ------- | --------------------------------------- |
+| Subject | `dcm.cluster` or `dcm.vm`               |
+| Type    | `dcm.status.cluster` or `dcm.status.vm` |
+| Source  | `dcm/providers/osac-sp`                 |
 
 **Payload:**
 
 ```json
 {
-  "status": "READY",
+  "id": "a1b2c3d4",
+  "status": "ACTIVE",
   "message": "Cluster is ready and all nodes are available."
 }
 ```
 
 #### Status Mapping (OSAC to DCM)
 
-The OSAC fulfillment service returns status values on cluster order responses.
-The OSAC SP maps these to DCM status values:
+**Cluster Status:**
 
-| DCM Status   | OSAC Fulfillment Status | Description                                       |
-| ------------ | ----------------------- | ------------------------------------------------- |
-| PENDING      | (newly created)         | Order accepted, not yet started                   |
-| PROVISIONING | PROGRESSING             | Cluster is being provisioned                      |
-| READY        | READY                   | Cluster is fully operational                      |
-| FAILED       | FAILED                  | Provisioning failed                               |
-| UNAVAILABLE  | DEGRADED                | Cluster is provisioned but experiencing issues    |
-| DELETED      | (order not found)       | ClusterOrder has been removed from fulfillment DB |
+The OSAC fulfillment service exposes cluster state via
+[`ClusterState`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto)
+and
+[`ClusterConditionType`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto).
+The operator
+[feedback controller](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go)
+maps CRD phases to these states.
+
+| DCM Status | OSAC Signal                              | Source                | Notes                                             |
+| ---------- | ---------------------------------------- | --------------------- | ------------------------------------------------- |
+| CREATING   | `CLUSTER_STATE_PROGRESSING`              | `status.state`        | First observation (no prior ACTIVE)               |
+| ACTIVE     | `CLUSTER_STATE_READY`                    | `status.state`        |                                                   |
+| UPDATING   | `CLUSTER_STATE_PROGRESSING`              | `status.state`        | Was previously ACTIVE, now PROGRESSING again      |
+| DEGRADED   | `CLUSTER_CONDITION_TYPE_DEGRADED` (TRUE) | `status.conditions[]` | Defined in proto; not yet implemented in operator |
+| DELETED    | Cluster not found (404)                  | API response          |                                                   |
+| FAILED     | `CLUSTER_STATE_FAILED`                   | `status.state`        | See [Open Questions](#open-questions)             |
+
+The SP tracks per-cluster state history in its local mapping store to
+distinguish `CREATING` from `UPDATING`, since OSAC uses `PROGRESSING` for both.
+
+```mermaid
+flowchart TD
+    A[OSAC reports CLUSTER_STATE_PROGRESSING] --> B{Was previously ACTIVE?}
+    B -->|No| C[Map to DCM CREATING]
+    B -->|Yes| D[Map to DCM UPDATING]
+    E[OSAC reports CLUSTER_STATE_READY] --> F[Map to DCM ACTIVE]
+    G[OSAC reports CLUSTER_STATE_FAILED] --> H[Map to DCM FAILED]
+    H --> I[See Open Questions]
+    J["CLUSTER_CONDITION_TYPE_DEGRADED (TRUE)"] --> K[Map to DCM DEGRADED]
+    L[Cluster not found in API] --> M[Map to DCM DELETED]
+```
+
+**VM Status:**
+
+The OSAC fulfillment service exposes VM state via
+[`ComputeInstanceState`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/compute_instance_type.proto).
+DCM VM lifecycle phases are defined in the
+[SP Status Reporting](../state-management/service-provider-status-reporting.md)
+enhancement.
+
+| DCM Status   | OSAC ComputeInstanceState         | Notes            |
+| ------------ | --------------------------------- | ---------------- |
+| PROVISIONING | `COMPUTE_INSTANCE_STATE_STARTING` | VM being created |
+| RUNNING      | `COMPUTE_INSTANCE_STATE_RUNNING`  | VM operational   |
+| STOPPED      | `COMPUTE_INSTANCE_STATE_STOPPED`  | VM stopped       |
+| FAILED       | `COMPUTE_INSTANCE_STATE_FAILED`   | VM unusable      |
+| DELETING     | `COMPUTE_INSTANCE_STATE_DELETING` | VM being removed |
+| STOPPING     | `COMPUTE_INSTANCE_STATE_STOPPING` | VM shutting down |
+| PAUSED       | `COMPUTE_INSTANCE_STATE_PAUSED`   | VM suspended     |
+| DELETED      | Instance not found (404)          | API response     |
 
 ### Upgrade / Downgrade Strategy
 
@@ -601,6 +869,8 @@ remains backward-compatible.
 ## Implementation History
 
 - 2026-06-29: Initial enhancement proposal created.
+- 2026-06-30: Updated to agent model, added VM support, fixed OSAC API
+  references per PR #78 review feedback.
 
 ## Drawbacks
 
@@ -619,27 +889,31 @@ logic (multi-hub placement, template-based automation, catalog management)
 without reimplementing it in the SP, and aligns with OSAC's intended integration
 model where external consumers go through the fulfillment API.
 
+A secondary drawback is the host_type mapping complexity for clusters. OSAC uses
+predefined host types rather than free-form resource specifications, requiring
+the SP to maintain a translation layer that may not perfectly satisfy all user
+requests.
+
 ## Alternatives
 
 ### Alternative 1: Direct CRD Creation on OSAC Hub Cluster
 
 #### Description
 
-The OSAC SP creates `ClusterOrder` CRDs directly on the OSAC hub cluster,
-bypassing the fulfillment service entirely. This is similar to how the ACM
-Cluster SP creates `HostedCluster` CRDs directly.
+The OSAC SP creates CRDs directly on the OSAC hub cluster, bypassing the
+fulfillment service entirely. This is similar to how the ACM Cluster SP creates
+`HostedCluster` CRDs directly.
 
 #### Pros
 
 - Lower latency (no gRPC hop to fulfillment service)
-- Direct CRD watch for real-time status updates (SharedIndexInformer)
+- Direct CRD watch for real-time status updates
 - Fewer moving parts in the data path
-- Simpler error handling (fewer network boundaries)
 
 #### Cons
 
 - Bypasses OSAC's fulfillment logic (catalog items, multi-hub placement, access
-  control)
+  control, authorization policy)
 - Requires OSAC SP to have cluster-admin credentials on the hub cluster
 - Tightly couples DCM to OSAC's internal CRD schema, which may change
 - Cannot leverage OSAC's built-in rate limiting and request validation
@@ -652,10 +926,13 @@ Rejected
 #### Rationale
 
 The fulfillment service exists precisely to provide a governed, stable API
-surface for external consumers. Bypassing it would require the OSAC SP to
-reimplement OSAC's orchestration logic and would create a maintenance burden as
-OSAC's internal CRD schema evolves. The additional latency of the gRPC hop is
-negligible compared to cluster provisioning time (minutes to hours).
+surface for external consumers. The
+[OPA authorization policy](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/policies/authz.rego)
+grants all necessary CRUD operations to standard clients — no elevated access is
+needed via the API path. Bypassing it would require cluster-admin credentials
+and would create a maintenance burden as OSAC's internal CRD schema evolves. The
+additional latency of the gRPC hop is negligible compared to cluster
+provisioning time (minutes to hours).
 
 ### Alternative 2: OSAC REST Gateway Instead of gRPC
 
@@ -672,7 +949,7 @@ communication between the OSAC SP and OSAC.
 
 #### Cons
 
-- REST gateway may not expose all gRPC features (streaming, bidirectional)
+- REST gateway may not expose all gRPC features (streaming Events/Watch)
 - Additional translation layer (REST gateway is itself a gRPC client)
 - Slightly higher overhead (JSON serialization vs. protobuf)
 - REST gateway may lag behind gRPC API in feature parity
@@ -684,57 +961,16 @@ Deferred
 #### Rationale
 
 gRPC provides better performance, type safety via generated clients, and access
-to the full OSAC API surface including streaming for future real-time status
-updates. If the REST gateway achieves full feature parity and the team prefers
-HTTP-based integration, this can be revisited. The implementation could support
-both backends via a configurable transport layer.
-
-### Alternative 3: Include VM Support in v1 via Direct CRD Creation
-
-#### Description
-
-Add `serviceType: "vm"` support in v1 by having the OSAC SP create
-`ComputeInstance` CRDs directly on the OSAC hub cluster, bypassing the
-fulfillment service for VM operations while using the fulfillment gRPC API for
-clusters.
-
-#### Pros
-
-- Delivers both service types in v1
-- OSAC's ComputeInstance operator is already feature-complete
-- Users get VM provisioning without waiting for OSAC's fulfillment API
-
-#### Cons
-
-- Creates two different integration paths within a single SP (gRPC for clusters,
-  direct CRD for VMs), increasing complexity
-- Bypasses OSAC's intended architecture for external consumers
-- Tightly couples the OSAC SP to the ComputeInstance CRD schema, which is still
-  evolving (e.g., OSAC-769 multi-NIC migration completed June 2026)
-- Requires cluster-admin credentials on the hub for VM operations
-- When OSAC does expose VMs through the fulfillment API, the SP would need to
-  migrate from direct CRD to gRPC — a breaking change in integration pattern
-- No access to OSAC's catalog templates, rate limiting, or access control for
-  VMs
-
-#### Status
-
-Rejected
-
-#### Rationale
-
-The short-term benefit of delivering VM support in v1 does not justify the
-technical debt of maintaining two divergent integration paths. The
-ComputeInstance CRD is still undergoing schema changes (recent field removals,
-immutability additions), and coupling to it directly would create a maintenance
-burden. Waiting for OSAC to expose VMs through their public fulfillment API
-ensures a consistent adapter pattern across both service types and avoids a
-costly migration later.
+to the full OSAC API surface including the streaming `Events/Watch` service for
+real-time status updates. If the REST gateway achieves full feature parity and
+the team prefers HTTP-based integration, this can be revisited. The
+implementation could support both backends via a configurable transport layer.
 
 ## Infrastructure Needed
 
 - Access to an OSAC deployment (fulfillment service, operator, hub cluster with
   AAP) for integration testing.
-- gRPC client stubs generated from OSAC's protobuf definitions.
+- gRPC client stubs generated from OSAC's protobuf definitions
+  ([`proto/public/osac/public/v1/`](https://github.com/osac-project/fulfillment-service/tree/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1)).
 - CI/CD pipeline for building and testing the OSAC SP image.
 - Container registry for publishing the OSAC SP image.
