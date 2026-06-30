@@ -364,13 +364,12 @@ sequenceDiagram
             SPRM-->>PM: Error response
             PM->>DB: Delete records
             PM-->>CM: Error response
-            deactivate SPRM
 
         else SPRM returns 202 Accepted
             SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: PENDING}
-            deactivate SPRM
             PM-->>CM: 201 Created {Resource}
         end
+        deactivate SPRM
     end
 
     Note over SPRM: Async: SPRM consumes response<br/>from dcm.agents.responses

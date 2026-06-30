@@ -1015,7 +1015,7 @@ flowchart TD
         A[Platform event detected<br/>via Informer watch or polling]
         A --> B[Map platform status<br/>to DCM status enum]
         B --> C[Build CloudEvent v1.0]
-        C --> D[Publish to NATS<br/>dcm.{serviceType}]
+        C --> D["Publish to NATS<br/>dcm.{serviceType}"]
     end
 
     subgraph DCM Core
