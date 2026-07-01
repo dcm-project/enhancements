@@ -31,12 +31,18 @@ creation-date: 2026-06-29
    `UPDATING`. Is tracking previous state in the local mapping store acceptable,
    or should DCM define a single `PROGRESSING` state instead?
 
-3. **Host type mapping strategy:** OSAC clusters use predefined
-   [`host_type`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto)
-   identifiers (e.g., `acme_1tb`) rather than free cpu/memory/storage values.
-   DCM's cluster schema requires `nodes.worker.cpu`, `memory`, `storage`. Three
-   options are proposed in [Node Sizing](#node-sizing) — which should be the
-   default?
+3. **Node sizing granularity:** OSAC's
+   [`Clusters/Create`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_clusters_server.go)
+   validation derives each node set's `host_type` from the selected cluster
+   **template** — a client-supplied `host_type` that doesn't match the
+   template's own value is rejected, and the server overwrites it with the
+   template's value regardless. This means DCM cannot request an arbitrary
+   `cpu`/`memory` combination at create time; it can only select among the host
+   types that existing OSAC templates already expose (see
+   [Node Sizing](#node-sizing)). Should DCM's catalog items encode a specific
+   OSAC template per size tier (e.g., `small`/`medium`/`large` catalog items
+   each mapped to a different pre-defined template), or should DCM accept that
+   cluster sizing is coarser-grained than VM sizing for v1?
 
 ## Summary
 
@@ -334,9 +340,15 @@ SP reports.
 | supportedProvisioningTypes  | []string | Provisioning methods available (hypershift for v1) |
 | kubernetesSupportedVersions | []string | Kubernetes versions supported by this SP           |
 
-The SP populates these values based on the capabilities reported by the OSAC
-fulfillment service. The OSAC platform provisions clusters on bare metal
-infrastructure using Hosted Control Planes.
+OSAC has no capability-discovery API for these values — its
+[`Capabilities`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/capabilities_service.proto)
+service reports only authentication metadata (trusted OAuth token issuers), not
+supported platforms or versions. The SP therefore advertises
+`supportedPlatforms` and `supportedProvisioningTypes` as static values
+(`baremetal`, `hypershift`), since OSAC currently supports nothing else.
+`kubernetesSupportedVersions` is a hardcoded compatibility list maintained by
+the SP (see [Version Translation](#version-translation)), not a value queried
+from OSAC.
 
 #### Registration Process
 
@@ -398,14 +410,14 @@ The OSAC SP translates the DCM cluster request into an
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                | OSAC Field                  | Notes                                      |
-| ------------------------ | --------------------------- | ------------------------------------------ |
-| version                  | spec.release_image          | SP translates K8s version to OCP image     |
-| nodes.controlPlane.count | (managed by HCP)            | Hosted Control Planes manage CP internally |
-| nodes.worker.count       | spec.node_sets[w].size      | Number of worker nodes                     |
-| nodes.worker.cpu/memory  | spec.node_sets[w].host_type | See [Node Sizing](#node-sizing)            |
-| metadata.name            | metadata.name               | Cluster name (DNS label format)            |
-| providerHints.osac       | (see below)                 | OSAC-specific parameters                   |
+| DCM Field                | OSAC Field               | Notes                                                          |
+| ------------------------ | ------------------------ | -------------------------------------------------------------- |
+| version                  | spec.release_image       | SP translates K8s version to OCP image                         |
+| nodes.controlPlane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                     |
+| nodes.worker.count       | spec.node_sets[key].size | Number of worker nodes for template's key                      |
+| nodes.worker.cpu/memory  | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing) |
+| metadata.name            | metadata.name            | Cluster name (DNS label format)                                |
+| providerHints.osac       | (see below)              | OSAC-specific parameters                                       |
 
 ##### Node Sizing
 
@@ -413,18 +425,38 @@ OSAC clusters use
 [`ClusterNodeSet`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto)
 with `host_type` (a predefined identifier like `acme_1tb` from the
 [HostTypes service](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/host_types_service.proto))
-and `size` (node count). DCM's cluster schema uses free-form `cpu`, `memory`,
-`storage` values.
+and `size` (node count). Node-set keys (e.g. `compute`, `gpu`) are also defined
+by the template, not a fixed `worker`/`controlPlane` split.
 
-Three options for bridging this mismatch:
+Critically, `host_type` for each node-set key is **fixed by the OSAC cluster
+template selected for the request**:
+[`Clusters/Create`'s validation](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_clusters_server.go)
+rejects a client-supplied `host_type` that doesn't match the template's own
+value for that node-set key, and overwrites whatever is accepted with the
+template's value regardless. There is no request path where the SP computes a
+`host_type` from DCM's raw `cpu`/`memory`/`storage` values and has OSAC honor it
+at create time — the only lever available per request is `size` (worker count)
+for the node-set key the template already defines.
 
-| Option                      | Description                                                                     | Tradeoff                                 |
-| --------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
-| A. Admin-configured mapping | SP config maps DCM resource ranges to OSAC host types                           | Requires admin to maintain the table     |
-| B. HostTypes API lookup     | SP queries `GET /api/fulfillment/v1/host_types` at startup, selects closest fit | Heuristic; may surprise users            |
-| C. Template-driven          | DCM catalog item specifies the host_type via providerHints; SP passes through   | Simplest but moves complexity to catalog |
+DCM must therefore select a template whose node sets already provide the desired
+host type:
 
-See [Open Questions](#open-questions) for reviewer feedback request.
+- Each DCM catalog item for a cluster size tier (e.g. `small`, `medium`,
+  `large`) is configured with a different `providerHints.osac.templateId`, and
+  the corresponding OSAC template pre-defines the host type(s) appropriate for
+  that tier.
+- `nodes.worker.cpu`/`memory`/`storage` in the DCM request are informational
+  only for OSAC — the SP does not use them to select or override `host_type`.
+  Only `nodes.worker.count` is translated, to `size`.
+- Introducing a new host type for an existing cluster (a new node-set key not
+  already in the template) is only possible via `Update`
+  ([`validateNodeSetHostTypeImmutability`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_clusters_server.go#L456-L480)
+  only restricts _existing_ node-set host types from changing, not the addition
+  of new ones), which is a day-2 operation out of scope for v1 per
+  [Non-Goals](#non-goals).
+
+See [Open Questions](#open-questions) for reviewer feedback on how DCM's catalog
+items should be structured around this constraint.
 
 **Provider Hints (osac):**
 
@@ -435,7 +467,6 @@ See [Open Questions](#open-questions) for reviewer feedback request.
 | pullSecret   | string | No       | Pull secret reference for cluster image pulls  |
 | sshKey       | string | No       | SSH public key for node access                 |
 | releaseImage | string | No       | Specific OCP release image (overrides version) |
-| hostType     | string | No       | OSAC host_type for worker nodes (option C)     |
 
 **Example Request Payload:**
 
@@ -796,7 +827,7 @@ version to the appropriate OSAC `release_image` in
 | ID mapping data loss causes orphaned resources                               | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership                       |
 | OSAC platform version upgrades change the gRPC API                           | Pin to a specific OSAC API version; version negotiation on startup                                                           |
 | OIDC token expiry causes transient auth failures                             | Token refresh before expiry; 401 triggers immediate refresh and retry                                                        |
-| Host type mapping produces unexpected results                                | Admin-configurable mapping table; 422 error when no suitable host_type exists                                                |
+| DCM catalog size tiers don't line up with available OSAC templates           | Catalog admins provision one OSAC template per size tier in advance; `422` error when no matching template exists            |
 | Default network provisioning fails or is slow on a tenant's first VM request | Pre-provision default subnets for known tenants at SP startup; surface provisioning failure as `502` on VM create with retry |
 
 ## Design Details
@@ -911,10 +942,11 @@ logic (multi-hub placement, template-based automation, catalog management)
 without reimplementing it in the SP, and aligns with OSAC's intended integration
 model where external consumers go through the fulfillment API.
 
-A secondary drawback is the host_type mapping complexity for clusters. OSAC uses
-predefined host types rather than free-form resource specifications, requiring
-the SP to maintain a translation layer that may not perfectly satisfy all user
-requests.
+A secondary drawback is coarser-grained cluster sizing than DCM's schema
+implies. OSAC fixes each template's node-set host types server-side (see
+[Node Sizing](#node-sizing)), so DCM cannot request an arbitrary `cpu`/`memory`
+combination for cluster workers — only whichever discrete sizes the provisioned
+OSAC templates expose, selected via catalog items.
 
 ## Alternatives
 
