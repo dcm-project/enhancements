@@ -120,7 +120,6 @@ All service schemas share common fields defined once in
 
 ### ProviderHints Object
 
-
 | Field             | Required | Type           | Description                                                                                            |
 | :---------------- | :------- | :------------- | :----------------------------------------------------------------------------------------------------- |
 | \<provider-name\> | No       | map[string]any | Provider-specific configuration keyed by provider identifier (e.g., _kubevirt_, _vmware_, _openstack_) |
@@ -386,7 +385,6 @@ The following sections detail the Storage schema architecture for standalone
 persistent volumes. See
 [k8s-storage-sp](https://github.com/dcm-project/enhancements/blob/main/enhancements/k8s-storage-sp/k8s-storage-sp.md)
 for the Kubernetes reference Service Provider implementation.
->>>>>>> main
 
 #### Schema
 
@@ -416,7 +414,6 @@ attachment and permissions differently (e.g., AWS EBS sets multi-attach
 capability via volume type; GCP Persistent Disk sets mode at attach time). The
 CatalogItem admin configures this field based on the backend capabilities (e.g.,
 Ceph RBD only supports ReadWriteOnce; CephFS only supports ReadWriteMany).
->>>>>>> main
 
 ### Network
 
@@ -425,18 +422,19 @@ providing network access to workloads. Unlike managing networking as part of
 compute resources, this service type treats network services as first-class
 resources. Platform-specific configuration (service type, backend selection) is
 provided via _providerHints_.
+
 | Field | Required | Type                                | Description     |
 | :---- | :------- | :---------------------------------- | :-------------- |
 | ports | Yes      | array[[Port](#network-port-object)] | Ports to expose |
 
 #### Network port Object
 
-| Field      | Required | Type    | Description                                                          |
-| :--------- | :------- | :------ | :------------------------------------------------------------------- |
-| name       | No*      | string  | Port name. *Required when using providerHints.kubernetes.nodePorts   |
-| protocol   | No       | string  | Protocol (TCP, UDP, SCTP). Default: TCP                              |
-| port       | Yes      | integer | Service port (1-65535)                                               |
-| targetPort | Yes      | integer | Target pod port (1-65535)                                            |
+| Field      | Required | Type    | Description                                                        |
+| :--------- | :------- | :------ | :----------------------------------------------------------------- |
+| name       | No*      | string  | Port name. *Required when using providerHints.kubernetes.nodePorts |
+| protocol   | No       | string  | Protocol (TCP, UDP, SCTP). Default: TCP                            |
+| port       | Yes      | integer | Service port (1-65535)                                             |
+| targetPort | Yes      | integer | Target pod port (1-65535)                                          |
 
 > **Note:** When using `providerHints.kubernetes.nodePorts`, all ports must have
 > unique `name` fields. The keys in `nodePorts` must match these port names.
@@ -452,7 +450,6 @@ The Kubernetes Network Service Provider uses the following fields in
 | selector  | No       | map[string]string | Label selector to match target pods                |
 | clusterIP | No       | string            | Specific cluster IP allocation                     |
 | nodePorts | No       | map[string]int    | Map of port names to NodePort values (30000-32767) |
-
 
 ### Schema Compatibility
 
