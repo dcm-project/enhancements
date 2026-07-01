@@ -4,24 +4,38 @@ words:
   - machacekondra
   - ygalblum
   - jenniferubah
+  - chadcrum
   - croadfel
   - flocati
   - pkliczewski
   - gabriel-farache
-  - jordigilh
+  - Authorino
+  - codegen
+  - cutover
+  - FLPATH
+  - gorm
+  - ITSM
+  - jdoe
+  - Kessel
+  - Kuadrant
+  - kubeconfig
+  - oapi
+  - OSAC
   - rego
+  - RHDH
   - opa
   - dcm
   - dcm-api
+  - dcm-platform
+  - dcm-server
   - frontmatter
   - kubevirt
+  - monolith
+  - monorepo
+  - reactivatable
+  - serviceprovider
+  - SPDM
+  - SPRM
   - unhold
+  - Virt
   - virtualmachines
-  - osac
-  - baremetal
-  - hypershift
-  - kubeconfig
-  - grpcurl
-  - vcpu
-  - Authorino
-  - finalizer

@@ -188,7 +188,7 @@ these generic states before publishing the CloudEvent.
 ##### VM Status
 
 Providers must map their hypervisor-specific states to the following DCM
-Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `ERROR`, `DELETED`,
+Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `FAILED`, `DELETED`,
 `DELETING`, `PAUSED`, `STOPPING`.
 
 | DCM Generic Status | AWS EC2 Equivalent                              | Azure VM Equivalent      | VMWare Equivalent       |
@@ -203,7 +203,7 @@ Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `ERROR`, `DELETED`,
 | **STOPPING**       | `stopping`                                      | `stopping`               | `GuestOS Shutting Down` |
 
 _Note: If a provider has a state that is ambiguous, they should default to the
-closest "active" state or `ERROR` if functionality is impaired._
+closest "active" state or `FAILED` if functionality is impaired._
 
 ##### Container status
 
