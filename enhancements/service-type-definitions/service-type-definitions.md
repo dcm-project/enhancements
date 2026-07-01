@@ -415,6 +415,42 @@ capability via volume type; GCP Persistent Disk sets mode at attach time). The
 CatalogItem admin configures this field based on the backend capabilities (e.g.,
 Ceph RBD only supports ReadWriteOnce; CephFS only supports ReadWriteMany).
 
+### Network
+
+The network schema defines load balancing and service discovery resources for
+providing network access to workloads. Unlike managing networking as part of
+compute resources, this service type treats network services as first-class
+resources. Platform-specific configuration (service type, backend selection) is
+provided via _providerHints_.
+
+| Field | Required | Type                                | Description     |
+| :---- | :------- | :---------------------------------- | :-------------- |
+| ports | Yes      | array[[Port](#network-port-object)] | Ports to expose |
+
+#### Network port Object
+
+| Field      | Required | Type    | Description                                                        |
+| :--------- | :------- | :------ | :----------------------------------------------------------------- |
+| name       | No*      | string  | Port name. *Required when using providerHints.kubernetes.nodePorts |
+| protocol   | No       | string  | Protocol (TCP, UDP, SCTP). Default: TCP                            |
+| port       | Yes      | integer | Service port (1-65535)                                             |
+| targetPort | Yes      | integer | Target pod port (1-65535)                                          |
+
+> **Note:** When using `providerHints.kubernetes.nodePorts`, all ports must have
+> unique `name` fields. The keys in `nodePorts` must match these port names.
+
+#### Kubernetes Provider Hints
+
+The Kubernetes Network Service Provider uses the following fields in
+`providerHints.kubernetes`:
+
+| Field     | Required | Type              | Description                                        |
+| :-------- | :------- | :---------------- | :------------------------------------------------- |
+| type      | No       | string            | Service type (ClusterIP, NodePort, LoadBalancer)   |
+| selector  | No       | map[string]string | Label selector to match target pods                |
+| clusterIP | No       | string            | Specific cluster IP allocation                     |
+| nodePorts | No       | map[string]int    | Map of port names to NodePort values (30000-32767) |
+
 ### Schema Compatibility
 
 DCM supports only the current API version for each service type. Service
