@@ -740,6 +740,27 @@ These labels enable:
   natively since OSAC manages resources through its fulfillment service, not via
   direct Kubernetes API access.
 
+#### Default Network Provisioning
+
+`osac.public.v1.ComputeInstances/Create`
+[requires at least one entry](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_compute_instances_server.go#L208-L213)
+in `spec.network_attachments`, each referencing a
+[`Subnet`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/subnet_type.proto)
+in `READY` state. DCM's VM schema has no networking concept, so the SP
+provisions and manages a default network per tenant transparently, with no DCM
+schema change required:
+
+1. On the first VM request for a tenant, the SP checks (via `Subnets/List`
+   filtered by `metadata.tenant`) whether it has already provisioned a default
+   subnet for that tenant.
+2. If not, it creates a
+   [`VirtualNetwork`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/virtual_network_type.proto)
+   — omitting `network_class` so the platform's default `NetworkClass` is used —
+   and a `Subnet` under it, then waits for both to reach `READY`.
+3. The resulting subnet ID is cached per tenant in the SP's local mapping store.
+4. Every subsequent VM create for that tenant attaches
+   `network_attachments: [{subnet: "<cached-id>"}]` automatically.
+
 #### Status Polling
 
 The OSAC SP polls the fulfillment service (`osac.public.v1.Clusters/List` and
@@ -768,14 +789,15 @@ version to the appropriate OSAC `release_image` in
 
 ### Risks and Mitigations
 
-| Risk                                               | Mitigation                                                                                              |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| OSAC fulfillment service unavailable               | Health check detects connectivity loss; agent marks SP unhealthy; DCM routes to alternative providers   |
-| Status polling introduces latency                  | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback |
-| ID mapping data loss causes orphaned resources     | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership  |
-| OSAC platform version upgrades change the gRPC API | Pin to a specific OSAC API version; version negotiation on startup                                      |
-| OIDC token expiry causes transient auth failures   | Token refresh before expiry; 401 triggers immediate refresh and retry                                   |
-| Host type mapping produces unexpected results      | Admin-configurable mapping table; 422 error when no suitable host_type exists                           |
+| Risk                                                                         | Mitigation                                                                                                                   |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| OSAC fulfillment service unavailable                                         | Health check detects connectivity loss; agent marks SP unhealthy; DCM routes to alternative providers                        |
+| Status polling introduces latency                                            | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback                      |
+| ID mapping data loss causes orphaned resources                               | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership                       |
+| OSAC platform version upgrades change the gRPC API                           | Pin to a specific OSAC API version; version negotiation on startup                                                           |
+| OIDC token expiry causes transient auth failures                             | Token refresh before expiry; 401 triggers immediate refresh and retry                                                        |
+| Host type mapping produces unexpected results                                | Admin-configurable mapping table; 422 error when no suitable host_type exists                                                |
+| Default network provisioning fails or is slow on a tenant's first VM request | Pre-provision default subnets for known tenants at SP startup; surface provisioning failure as `502` on VM create with retry |
 
 ## Design Details
 
