@@ -70,9 +70,9 @@ envelope.
 
 ### User Stories
 
-- **As a Service Provider Developer**, I want to reliantly publish a status update message
-  ("fire and forget") so that I don't have to implement complex retry logic if
-  the DCM is briefly unavailable.
+- **As a Service Provider Developer**, I want to reliantly publish a status
+  update message ("fire and forget") so that I don't have to implement complex
+  retry logic if the DCM is briefly unavailable.
 - **As a Platform Admin**, I want to see the status of VMs update in real-time
   on my dashboard without waiting for a polling interval.
 - **As a Billing System Maintainer**, I want to listen to "Instance Stopped"
@@ -81,10 +81,10 @@ envelope.
 
 ### Risks and Mitigations
 
-| Risk                  | Mitigation                                                                                                                                        |
-| :-------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Message Loss**      | For critical transitions, we can use message system persistence to ensure at-least-once delivery with persistence, also to not overload database. |
-| **Flooding/Flapping** | Providers must implement "Debounce" logic to avoid sending updates for rapid status oscillation (e.g., running->error->running) within milliseconds.     |
+| Risk                  | Mitigation                                                                                                                                           |
+| :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Message Loss**      | For critical transitions, we can use message system persistence to ensure at-least-once delivery with persistence, also to not overload database.    |
+| **Flooding/Flapping** | Providers must implement "Debounce" logic to avoid sending updates for rapid status oscillation (e.g., running->error->running) within milliseconds. |
 
 ## Design Details
 
@@ -124,7 +124,8 @@ Providers must publish messages to a subject based on the service type:
 
 `dcm.{serviceType}`
 
-- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`).
+- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`,
+  `storage`).
 
 The service type determines the message schema and is the only routing-relevant
 token. All other context — provider identity, instance identifier, timestamps —
@@ -133,7 +134,7 @@ is carried in the CloudEvent envelope attributes (see section 3).
 ### 3. CloudEvents Format
 
 All messages must be valid JSON CloudEvents (v1.0). We currently define only
-very simple format for `VmStatus` and `ContainerStatus`.
+very simple format for `VmStatus`, `ContainerStatus`, and `StorageStatus`.
 
 ```golang
 type VmStatus struct {
@@ -144,6 +145,14 @@ type VmStatus struct {
 
 ```golang
 type ContainerStatus struct {
+  Id string  `json:"id"`
+  Status string `json:"status"`
+  Message string `json:"message"`
+}
+```
+
+```golang
+type StorageStatus struct {
   Id string  `json:"id"`
   Status string `json:"status"`
   Message string `json:"message"`
@@ -179,7 +188,7 @@ these generic states before publishing the CloudEvent.
 ##### VM Status
 
 Providers must map their hypervisor-specific states to the following DCM
-Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `ERROR`, `DELETED`,
+Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `FAILED`, `DELETED`,
 `DELETING`, `PAUSED`, `STOPPING`.
 
 | DCM Generic Status | AWS EC2 Equivalent                              | Azure VM Equivalent      | VMWare Equivalent       |
@@ -194,7 +203,7 @@ Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `ERROR`, `DELETED`,
 | **STOPPING**       | `stopping`                                      | `stopping`               | `GuestOS Shutting Down` |
 
 _Note: If a provider has a state that is ambiguous, they should default to the
-closest "active" state or `ERROR` if functionality is impaired._
+closest "active" state or `FAILED` if functionality is impaired._
 
 ##### Container status
 
@@ -209,6 +218,25 @@ but simplified for general consumption. **Target Statuses:** `PENDING`,
 | **SUCCEEDED**      | `Succeeded`, `Exited (0)`                          |
 | **FAILED**         | `Failed`, `CrashLoopBackOff`, `Exited (non-zero)`  |
 | **UNKNOWN**        | `Unknown` (Node lost)                              |
+
+##### Storage status
+
+For standalone storage volumes (e.g., Kubernetes PVCs), status reflects
+provisioning and binding lifecycle. **Target Statuses:** `PROVISIONING`,
+`RUNNING`, `FAILED`, `DELETING`, `DELETED`.
+
+| DCM Generic Status | Kubernetes PVC Equivalent                      |
+| :----------------- | :--------------------------------------------- |
+| **PROVISIONING**   | `Pending` (waiting for binding/provisioning)   |
+| **PROVISIONING**   | `Bound` with active resize conditions          |
+|                    | (`Resizing`, `FileSystemResizePending`)        |
+| **RUNNING**        | `Bound` (no active resize conditions)          |
+| **FAILED**         | `Lost` or unrecoverable binding failure        |
+| **DELETING**       | Deletion in progress (`deletionTimestamp` set) |
+| **DELETED**        | PVC not found                                  |
+
+See [k8s-storage-sp](../k8s-storage-sp/k8s-storage-sp.md) for the reference
+Kubernetes Storage SP status mapping.
 
 ##### Cluster status
 

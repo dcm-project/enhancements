@@ -14,12 +14,15 @@ see-also:
   - "/enhancements/state-management/service-provider-status-reporting.md"
   - "/enhancements/kubevirt-sp/kubevirt-sp.md"
   - "/enhancements/k8s-container-sp/k8s-container-sp.md"
+  - "/enhancements/k8s-storage-sp/k8s-storage-sp.md"
   - "/enhancements/acm-cluster-sp/acm-cluster-sp.md"
 ---
 
 # DCM User Flows
 
-This document summarizes the primary user flows in the DCM system, covering policy management, service type and catalog item management, service provider lifecycle, and end-to-end CatalogItemInstance creation.
+This document summarizes the primary user flows in the DCM system, covering
+policy management, service type and catalog item management, service provider
+lifecycle, and end-to-end CatalogItemInstance creation.
 
 ## Table of Contents
 
@@ -50,16 +53,16 @@ This document summarizes the primary user flows in the DCM system, covering poli
 
 The DCM system is composed of the following core components:
 
-| Component | Responsibility |
-|---|---|
-| **Catalog Manager** | Entry point for user requests; manages CatalogItems and CatalogItemInstances |
-| **Catalog DB** | Stores CatalogItems, CatalogItemInstances, and ServiceType definitions |
-| **Placement Manager** | Orchestrates instance creation; coordinates policy evaluation and SP selection |
-| **Policy Manager (Policy Engine)** | Validates, mutates, and selects Service Providers via REGO policies and OPA |
-| **SP Resource Manager** | Intermediary between Placement Manager and Service Providers; handles SP lookup and health validation |
-| **Service Registry** | Stores Service Provider registration, endpoints, and metadata |
-| **Service Providers** | Execute infrastructure provisioning (KubeVirt SP, K8s Container SP, ACM Cluster SP) |
-| **Messaging System** | Handles CloudEvents for asynchronous status reporting (NATS) |
+| Component                          | Responsibility                                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Catalog Manager**                | Entry point for user requests; manages CatalogItems and CatalogItemInstances                          |
+| **Catalog DB**                     | Stores CatalogItems, CatalogItemInstances, and ServiceType definitions                                |
+| **Placement Manager**              | Orchestrates instance creation; coordinates policy evaluation and SP selection                        |
+| **Policy Manager (Policy Engine)** | Validates, mutates, and selects Service Providers via REGO policies and OPA                           |
+| **SP Resource Manager**            | Intermediary between Placement Manager and Service Providers; handles SP lookup and health validation |
+| **Service Registry**               | Stores Service Provider registration, endpoints, and metadata                                         |
+| **Service Providers**              | Execute infrastructure provisioning (KubeVirt SP, K8s Container SP, K8s Storage SP, ACM Cluster SP)   |
+| **Messaging System**               | Handles CloudEvents for asynchronous status reporting (NATS)                                          |
 
 ```mermaid
 graph TB
@@ -102,11 +105,15 @@ graph TB
 
 ## 2. Managing Policies
 
-Policies control validation, mutation, and Service Provider selection for all resource requests. They are organized in a three-level hierarchy: **Global** (Super Admin), **Tenant** (Tenant Admin), and **User** (End User).
+Policies control validation, mutation, and Service Provider selection for all
+resource requests. They are organized in a three-level hierarchy: **Global**
+(Super Admin), **Tenant** (Tenant Admin), and **User** (End User).
 
 ### 2.1 Create Policy
 
-An administrator creates a policy by providing a name, type, priority, label selector, and REGO code. The Policy Manager validates uniqueness, compiles the REGO via OPA, and stores the policy metadata.
+An administrator creates a policy by providing a name, type, priority, label
+selector, and REGO code. The Policy Manager validates uniqueness, compiles the
+REGO via OPA, and stores the policy metadata.
 
 ```mermaid
 sequenceDiagram
@@ -133,6 +140,7 @@ sequenceDiagram
 ```
 
 **Policy payload example:**
+
 ```json
 {
   "name": "restrict-region",
@@ -146,7 +154,11 @@ sequenceDiagram
 
 ### 2.2 Policy Evaluation
 
-When a resource request arrives, the Policy Manager fetches all matching enabled policies, sorts them by level (Global → Tenant → User) then priority (ascending), and evaluates them in a chain-of-responsibility pipeline. Each policy can reject the request, apply patches (mutations), set constraints, and influence Service Provider selection.
+When a resource request arrives, the Policy Manager fetches all matching enabled
+policies, sorts them by level (Global → Tenant → User) then priority
+(ascending), and evaluates them in a chain-of-responsibility pipeline. Each
+policy can reject the request, apply patches (mutations), set constraints, and
+influence Service Provider selection.
 
 ```mermaid
 sequenceDiagram
@@ -183,6 +195,7 @@ sequenceDiagram
 ```
 
 **Evaluation request (Placement Manager → Policy Manager):**
+
 ```json
 {
   "service_instance": {
@@ -198,6 +211,7 @@ sequenceDiagram
 ```
 
 **Policy input (per policy, passed to OPA):**
+
 ```json
 {
   "spec": {
@@ -214,6 +228,7 @@ sequenceDiagram
 ```
 
 **Policy decision format (per policy, returned by OPA):**
+
 ```json
 {
   "rejected": false,
@@ -235,6 +250,7 @@ sequenceDiagram
 ```
 
 **Evaluation response (returned to Placement Manager):**
+
 ```json
 {
   "evaluatedServiceInstance": { "...": "final mutated spec" },
@@ -244,20 +260,26 @@ sequenceDiagram
 ```
 
 **Key rules:**
-- Lower-level policies cannot override constraints set by higher-level policies (e.g., a User policy cannot unlock a field locked by a Global policy).
+
+- Lower-level policies cannot override constraints set by higher-level policies
+  (e.g., a User policy cannot unlock a field locked by a Global policy).
 - A `rejected: true` from any policy immediately aborts evaluation (fail-fast).
 - Patches are applied cumulatively; the final payload reflects all mutations.
-- Status is `APPROVED` if no patches were applied, `MODIFIED` if the spec was mutated.
+- Status is `APPROVED` if no patches were applied, `MODIFIED` if the spec was
+  mutated.
 
 ---
 
 ## 3. Managing ServiceTypes
 
-ServiceTypes define provider-agnostic schemas for infrastructure resources. They use JSON Schema (draft 2020-12) for validation.
+ServiceTypes define provider-agnostic schemas for infrastructure resources. They
+use JSON Schema (draft 2020-12) for validation.
 
 ### 3.1 ServiceType Registration
 
-ServiceTypes are defined as JSON Schemas that describe the shape of a service request. All ServiceTypes share a common structure with `serviceType`, `metadata`, and optional `providerHints`.
+ServiceTypes are defined as JSON Schemas that describe the shape of a service
+request. All ServiceTypes share a common structure with `serviceType`,
+`metadata`, and optional `providerHints`.
 
 In V1, dynamic registration of `ServiceType` is not supported
 
@@ -274,66 +296,80 @@ graph LR
         CT[Container Schema]
         DBS[Database Schema]
         CL[Cluster Schema]
+        STG[Storage Schema]
     end
 
     CommonFields --> VM
     CommonFields --> CT
     CommonFields --> DBS
     CommonFields --> CL
+    CommonFields --> STG
 ```
 
 ### 3.2 Supported ServiceTypes
 
 #### VM (`serviceType: vm`)
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `vcpu.count` | integer | yes | Number of virtual CPUs |
-| `memory.size` | string | yes | Memory size (e.g., `"8GB"`) |
-| `storage.disks[]` | array | no | Disks; root disk must be named `"boot"` |
-| `guestOS.type` | string | yes | OS image (e.g., `"rhel-9"`, `"ubuntu-22.04"`) |
-| `access.sshPublicKey` | string | no | SSH public key for access |
+| Field                 | Type    | Required | Description                                   |
+| --------------------- | ------- | -------- | --------------------------------------------- |
+| `vcpu.count`          | integer | yes      | Number of virtual CPUs                        |
+| `memory.size`         | string  | yes      | Memory size (e.g., `"8GB"`)                   |
+| `storage.disks[]`     | array   | no       | Disks; root disk must be named `"boot"`       |
+| `guestOS.type`        | string  | yes      | OS image (e.g., `"rhel-9"`, `"ubuntu-22.04"`) |
+| `access.sshPublicKey` | string  | no       | SSH public key for access                     |
 
 #### Container (`serviceType: container`)
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `image.reference` | string | yes | Container image (e.g., `"quay.io/myapp:v1.2"`) |
-| `resources.cpu.min/max` | integer | yes | CPU requests/limits |
-| `resources.memory.min/max` | string | yes | Memory requests/limits |
-| `process.command` | array | no | Entrypoint command |
-| `process.env[]` | array | no | Environment variables |
-| `network.ports[]` | array | no | Container ports |
+| Field                      | Type    | Required | Description                                    |
+| -------------------------- | ------- | -------- | ---------------------------------------------- |
+| `image.reference`          | string  | yes      | Container image (e.g., `"quay.io/myapp:v1.2"`) |
+| `resources.cpu.min/max`    | integer | yes      | CPU requests/limits                            |
+| `resources.memory.min/max` | string  | yes      | Memory requests/limits                         |
+| `process.command`          | array   | no       | Entrypoint command                             |
+| `process.env[]`            | array   | no       | Environment variables                          |
+| `network.ports[]`          | array   | no       | Container ports                                |
 
 #### Database (`serviceType: database`)
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `engine` | string | yes | Database engine (e.g., `"postgresql"`) |
-| `version` | string | yes | Engine version |
-| `resources.cpu` | integer | yes | CPU allocation |
-| `resources.memory` | string | yes | Memory allocation |
-| `resources.storage` | string | yes | Storage allocation |
+| Field               | Type    | Required | Description                            |
+| ------------------- | ------- | -------- | -------------------------------------- |
+| `engine`            | string  | yes      | Database engine (e.g., `"postgresql"`) |
+| `version`           | string  | yes      | Engine version                         |
+| `resources.cpu`     | integer | yes      | CPU allocation                         |
+| `resources.memory`  | string  | yes      | Memory allocation                      |
+| `resources.storage` | string  | yes      | Storage allocation                     |
 
 #### Cluster (`serviceType: cluster`)
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `version` | string | yes | Kubernetes version |
-| `nodes.controlPlane.count` | integer | yes | Control plane node count (1, 3, or 5) |
-| `nodes.controlPlane.cpu/memory/storage` | various | yes | Control plane resources |
-| `nodes.worker.count` | integer | yes | Worker node count |
-| `nodes.worker.cpu/memory/storage` | various | yes | Worker node resources |
+| Field                                   | Type    | Required | Description                           |
+| --------------------------------------- | ------- | -------- | ------------------------------------- |
+| `version`                               | string  | yes      | Kubernetes version                    |
+| `nodes.controlPlane.count`              | integer | yes      | Control plane node count (1, 3, or 5) |
+| `nodes.controlPlane.cpu/memory/storage` | various | yes      | Control plane resources               |
+| `nodes.worker.count`                    | integer | yes      | Worker node count                     |
+| `nodes.worker.cpu/memory/storage`       | various | yes      | Worker node resources                 |
+
+#### Storage (`serviceType: storage`)
+
+| Field                                   | Type   | Required | Description                                                  |
+| --------------------------------------- | ------ | -------- | ------------------------------------------------------------ |
+| `capacity`                              | string | yes      | Volume size (e.g., `"100Gi"`, `"1TB"`)                       |
+| `providerHints.kubernetes.storageClass` | string | no       | Kubernetes StorageClass name                                 |
+| `providerHints.kubernetes.volumeMode`   | string | no       | `Filesystem` or `Block`                                      |
+| `providerHints.kubernetes.accessMode`   | string | no       | PVC access mode (e.g., `"ReadWriteOnce"`, `"ReadWriteMany"`) |
 
 ---
 
 ## 4. Managing CatalogItems
 
-CatalogItems wrap ServiceType schemas with defaults, validation rules, and editability constraints. They enable administrators to create curated service offerings for end users.
+CatalogItems wrap ServiceType schemas with defaults, validation rules, and
+editability constraints. They enable administrators to create curated service
+offerings for end users.
 
 ### 4.1 Create CatalogItem
 
-An administrator defines a CatalogItem by specifying the target ServiceType, field defaults, editability flags, and validation schemas.
+An administrator defines a CatalogItem by specifying the target ServiceType,
+field defaults, editability flags, and validation schemas.
 
 ```mermaid
 sequenceDiagram
@@ -348,6 +384,7 @@ sequenceDiagram
 ```
 
 **CatalogItem example:**
+
 ```yaml
 apiVersion: v1alpha1
 kind: CatalogItem
@@ -378,9 +415,38 @@ spec:
       default: "100GB"
 ```
 
+**Storage CatalogItem example:**
+
+```yaml
+apiVersion: v1alpha1
+kind: CatalogItem
+metadata:
+  name: standard-block-volume
+spec:
+  serviceType: storage
+  fields:
+    - path: "capacity"
+      editable: true
+      default: "100Gi"
+      validationSchema:
+        type: string
+        pattern: '^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$'
+    - path: "providerHints.kubernetes.storageClass"
+      editable: false
+      default: "gp3-csi"
+    - path: "providerHints.kubernetes.volumeMode"
+      editable: false
+      default: "Filesystem"
+    - path: "providerHints.kubernetes.accessMode"
+      editable: false
+      default: "ReadWriteOnce"
+```
+
 ### 4.2 CatalogItem to ServiceType Translation
 
-When a user orders an item from a CatalogItem, the system merges user input with CatalogItem defaults and validates against the field schemas, producing a ServiceType payload.
+When a user orders an item from a CatalogItem, the system merges user input with
+CatalogItem defaults and validates against the field schemas, producing a
+ServiceType payload.
 
 ```mermaid
 sequenceDiagram
@@ -408,7 +474,8 @@ sequenceDiagram
 
 ### 5.1 Service Provider Registration
 
-Service Providers register with DCM per service type. Registration is idempotent — re-registering with the same name updates the existing entry.
+Service Providers register with DCM per service type. Registration is idempotent
+— re-registering with the same name updates the existing entry.
 
 ```mermaid
 sequenceDiagram
@@ -429,6 +496,7 @@ sequenceDiagram
 ```
 
 **Registration payload example:**
+
 ```json
 {
   "name": "kubevirt-sp",
@@ -448,9 +516,12 @@ sequenceDiagram
 
 ### 5.2 Service Provider Health Checks
 
-DCM polls each registered Service Provider's `/health` endpoint at a configurable interval (default: every 10 seconds). Health status determines whether a provider can receive new requests.
+DCM polls each registered Service Provider's `/health` endpoint at a
+configurable interval (default: every 10 seconds). Health status determines
+whether a provider can receive new requests.
 
 #### Health State Diagram
+
 ```mermaid
 stateDiagram-v2
     [*] --> Ready: Registered
@@ -462,6 +533,7 @@ stateDiagram-v2
 ```
 
 #### Health Check Sequence Diagram
+
 ```mermaid
 sequenceDiagram
     participant DCM as DCM Health Checker
@@ -484,7 +556,9 @@ sequenceDiagram
 
 ### 5.3 Service Provider Status Reporting
 
-Service Providers report instance status changes to DCM via CloudEvents published to a messaging system (NATS). This decoupled approach supports multiple consumers (billing, auditing, etc.) and scales independently.
+Service Providers report instance status changes to DCM via CloudEvents
+published to a messaging system (NATS). This decoupled approach supports
+multiple consumers (billing, auditing, etc.) and scales independently.
 
 ```mermaid
 sequenceDiagram
@@ -497,7 +571,7 @@ sequenceDiagram
     Platform->>SP: State change event<br/>(via informer watch or polling)
     SP->>SP: Map platform status → DCM status
     SP->>SP: Build CloudEvent
-    SP->>MSG: Publish to:<br/>dcm.providers.{provider}.{serviceType}<br/>.instances.{instanceId}.status
+    SP->>MSG: Publish to NATS subject<br/>dcm.{serviceType}<br/>
 
     MSG->>DCM: Deliver event
     DCM->>DCM: Validate CloudEvent schema
@@ -510,21 +584,24 @@ sequenceDiagram
 
 **Status enums by ServiceType:**
 
-| VM | Container | Cluster |
-|---|---|---|
-| PROVISIONING | PENDING | CREATING |
-| RUNNING | RUNNING | ACTIVE |
-| STOPPED | SUCCEEDED | UPDATING |
-| PAUSED | FAILED | DEGRADED |
-| FAILED | UNKNOWN | DELETED |
-| DELETING | | |
-| DELETED | | |
+| VM           | Container | Cluster  | Storage      |
+| ------------ | --------- | -------- | ------------ |
+| PROVISIONING | PENDING   | CREATING | PROVISIONING |
+| RUNNING      | RUNNING   | ACTIVE   | RUNNING      |
+| STOPPED      | SUCCEEDED | UPDATING |              |
+| PAUSED       | FAILED    | DEGRADED |              |
+| FAILED       | UNKNOWN   | DELETED  | FAILED       |
+| DELETING     |           |          | DELETING     |
+| DELETED      |           |          | DELETED      |
 
 ---
 
 ## 6. CatalogItemInstance Creation (End-to-End)
 
-This is the primary user flow: creating an infrastructure resource from a CatalogItem. The request flows through the Catalog Manager, Placement Manager (with policy evaluation), SP Resource Manager, and finally to the selected Service Provider.
+This is the primary user flow: creating an infrastructure resource from a
+CatalogItem. The request flows through the Catalog Manager, Placement Manager
+(with policy evaluation), SP Resource Manager, and finally to the selected
+Service Provider.
 
 ### 6.1 Full Creation Flow
 
@@ -593,14 +670,16 @@ sequenceDiagram
 
     %% Continuous status reporting
     Note over SP,MSG: Async status reporting begins
-    SP->>MSG: Publish status CloudEvents<br/>as instance state changes
+    SP->>MSG: Publish status CloudEvents<br/>to dcm.{serviceType}
     MSG->>PM: Deliver status updates
     PM->>DB: UPSERT status
 ```
 
 ### 6.2 Placement Manager Flow
 
-The Placement Manager is the central orchestrator. It preserves the user's original intent, delegates policy evaluation, and coordinates with the SP Resource Manager.
+The Placement Manager is the central orchestrator. It preserves the user's
+original intent, delegates policy evaluation, and coordinates with the SP
+Resource Manager.
 
 ```mermaid
 flowchart TD
@@ -618,6 +697,7 @@ flowchart TD
 ```
 
 **Request payload (Catalog Manager → Placement Manager):**
+
 ```json
 {
   "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
@@ -633,6 +713,7 @@ flowchart TD
 ```
 
 **Response payload (Placement Manager → Catalog Manager):**
+
 ```json
 {
   "CatalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
@@ -644,7 +725,8 @@ flowchart TD
 
 ### 6.3 SP Resource Manager Flow
 
-The SP Resource Manager handles Service Provider lookup, health validation, and instance creation delegation.
+The SP Resource Manager handles Service Provider lookup, health validation, and
+instance creation delegation.
 
 ```mermaid
 flowchart TD
@@ -664,7 +746,8 @@ flowchart TD
 
 ### 6.4 Service Provider Instance Creation
 
-Each Service Provider translates the provider-agnostic ServiceType spec into platform-native resources.
+Each Service Provider translates the provider-agnostic ServiceType spec into
+platform-native resources.
 
 ```mermaid
 flowchart LR
@@ -682,11 +765,17 @@ flowchart LR
         C1[Receive Cluster spec] --> C2[Create HostedCluster and NodePool]
         C2 --> C3[Return requestId - PENDING]
     end
+
+    subgraph K8sStorageSP[K8s Storage SP]
+        D1[Receive Storage spec] --> D2[Create PersistentVolumeClaim]
+        D2 --> D3[Return requestId - PROVISIONING]
+    end
 ```
 
 ### 6.5 Continuous Status Reporting
 
-After instance creation, Service Providers continuously monitor the underlying platform and report status changes via CloudEvents.
+After instance creation, Service Providers continuously monitor the underlying
+platform and report status changes via CloudEvents.
 
 ```mermaid
 flowchart TD
@@ -694,7 +783,7 @@ flowchart TD
         A[Platform event detected<br/>via Informer watch or polling]
         A --> B[Map platform status<br/>to DCM status enum]
         B --> C[Build CloudEvent v1.0]
-        C --> D[Publish to NATS<br/>dcm.providers.provider.serviceType<br/>.instances.instanceId.status]
+        C --> D[Publish to NATS<br/>dcm.{serviceType}]
     end
 
     subgraph DCM Core
@@ -785,4 +874,32 @@ graph LR
     HC3 --> DC3
     HC4 --> DC4
     HC5 --> DC5
+```
+
+```mermaid
+graph LR
+    subgraph K8s PVC Phase
+        PVC1[Pending]
+        PVC2[Bound - resizing]
+        PVC3[Bound]
+        PVC4[Lost]
+        PVC5[deletionTimestamp set]
+        PVC6[Not Found]
+    end
+
+    subgraph DCM Storage Status
+        SS1[PROVISIONING]
+        SS2[PROVISIONING]
+        SS3[RUNNING]
+        SS4[FAILED]
+        SS5[DELETING]
+        SS6[DELETED]
+    end
+
+    PVC1 --> SS1
+    PVC2 --> SS2
+    PVC3 --> SS3
+    PVC4 --> SS4
+    PVC5 --> SS5
+    PVC6 --> SS6
 ```

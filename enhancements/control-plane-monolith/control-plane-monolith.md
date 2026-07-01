@@ -23,8 +23,9 @@ The control plane monolith merges `catalog-manager`, `placement-manager`,
 `policy-manager`, and `service-provider-manager` into one Git repository, one
 runtime process, and one deployable image. Today those managers run as separate
 services with HTTP between them on the synchronous provision path. The monolith
-uses in-process calls instead. Control plane state lives in one Postgres database
-with a merged schema. Service Providers and NATS remain outside this deployable.
+uses in-process calls instead. Control plane state lives in one Postgres
+database with a merged schema. Service Providers and NATS remain outside this
+deployable.
 
 ## Motivation
 
@@ -56,15 +57,15 @@ today.
 
 ### Target architecture
 
-| Topic | End state |
-| --- | --- |
-| Git | One monorepo for the four managers |
-| Runtime | One process |
-| Ship | One control-plane image |
-| Data | One Postgres database, merged schema |
-| Public HTTP | Monolith serves `/api/v1alpha1`. No separate api-gateway deployable initially |
-| catalog ↔ placement ↔ policy ↔ service-provider | In-process |
-| Failure | One outage affects the whole control plane |
+| Topic                                           | End state                                                                     |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| Git                                             | One monorepo for the four managers                                            |
+| Runtime                                         | One process                                                                   |
+| Ship                                            | One control-plane image                                                       |
+| Data                                            | One Postgres database, merged schema                                          |
+| Public HTTP                                     | Monolith serves `/api/v1alpha1`. No separate api-gateway deployable initially |
+| catalog ↔ placement ↔ policy ↔ service-provider | In-process                                                                    |
+| Failure                                         | One outage affects the whole control plane                                    |
 
 Illustrative layout:
 
@@ -100,11 +101,11 @@ with domain labels.
 catalog-manager → placement-manager → policy-manager → service-provider-manager.
 Each manager has its own Postgres database.
 
-| Manager | Main data | Responsibility |
-| --- | --- | --- |
-| catalog-manager | Catalog item instance | Catalog lifecycle |
-| placement-manager | Service type instance | Placement and provider selection |
-| policy-manager | Policy evaluation | Synchronous checks on the provision path |
+| Manager                  | Main data                | Responsibility                                   |
+| ------------------------ | ------------------------ | ------------------------------------------------ |
+| catalog-manager          | Catalog item instance    | Catalog lifecycle                                |
+| placement-manager        | Service type instance    | Placement and provider selection                 |
+| policy-manager           | Policy evaluation        | Synchronous checks on the provision path         |
 | service-provider-manager | Provider-facing instance | Provider registration, CRUD, and status via NATS |
 
 **Migration plan:**
@@ -128,31 +129,31 @@ Each manager has its own Postgres database.
 5. **CI and images:** one Containerfile, one Quay image. Deprecate four manager
    images.
 6. **Database:** merge the four manager schemas into one Postgres database and
-   one migration stream. Update api-gateway postgres init, compose, and subsystem
-   tests. We are not in production, so this is part of the first merge rather
-   than a follow-up migration.
+   one migration stream. Update api-gateway postgres init, compose, and
+   subsystem tests. We are not in production, so this is part of the first merge
+   rather than a follow-up migration.
 
 ### Risks and Mitigations
 
-| Risk | Mitigation |
-| --- | --- |
-| Blast radius: any fatal error affects whole plane | Domain boundaries in code, tests per package, trace labels per domain |
-| Longer CI when any domain changes | Accept for now. Split images rejected (see Alternatives) |
-| Large binary / memory footprint | Profile after merge. Scale replicas as a unit |
-| Schema merge across domains | Domain packages and migrations stay separated in code. Review FKs and naming in one schema |
-| No edge proxy at first | Add Traefik or ingress when TLS or multi-backend routing is required |
+| Risk                                              | Mitigation                                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Blast radius: any fatal error affects whole plane | Domain boundaries in code, tests per package, trace labels per domain                      |
+| Longer CI when any domain changes                 | Accept for now. Split images rejected (see Alternatives)                                   |
+| Large binary / memory footprint                   | Profile after merge. Scale replicas as a unit                                              |
+| Schema merge across domains                       | Domain packages and migrations stay separated in code. Review FKs and naming in one schema |
+| No edge proxy at first                            | Add Traefik or ingress when TLS or multi-backend routing is required                       |
 
 ## Design Details
 
 ### Synchronous path after merge
 
-| Area | Interim | Proposed |
-| --- | --- | --- |
-| catalog, placement, policy | HTTP | In-process |
-| catalog to service-provider | HTTP (via placement) | In-process |
-| API entrypoint | Traefik to four backends | Monolith HTTP port |
-| Postgres | Four separate databases | One database, merged schema |
-| OPA | HTTP from policy | Unchanged |
+| Area                        | Interim                  | Proposed                    |
+| --------------------------- | ------------------------ | --------------------------- |
+| catalog, placement, policy  | HTTP                     | In-process                  |
+| catalog to service-provider | HTTP (via placement)     | In-process                  |
+| API entrypoint              | Traefik to four backends | Monolith HTTP port          |
+| Postgres                    | Four separate databases  | One database, merged schema |
+| OPA                         | HTTP from policy         | Unchanged                   |
 
 ### Test Plan
 
@@ -165,9 +166,9 @@ Each manager has its own Postgres database.
 
 ### Upgrade / Downgrade Strategy
 
-- **Upgrade:** deploy monolith image with merged schema migrations, point clients
-  and compose at monolith port, and retire four manager deployments and four
-  control-plane databases.
+- **Upgrade:** deploy monolith image with merged schema migrations, point
+  clients and compose at monolith port, and retire four manager deployments and
+  four control-plane databases.
 - **Downgrade:** roll back to previous four-image layout via pinned image tags
   until the deprecation window ends.
 

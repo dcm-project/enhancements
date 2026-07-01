@@ -268,10 +268,10 @@ The `metadata.Capabilities` field advertises what this SP instance supports.
 Users and DCM can query registered providers to discover supported platforms,
 provisioning types, and Kubernetes versions before making requests.
 
-| Field                      | Type     | Description                                           |
-| -------------------------- | -------- | ----------------------------------------------------- |
-| supportedPlatforms         | []string | Platforms this SP can provision (kubevirt, baremetal) |
-| supportedProvisioningTypes | []string | Provisioning methods available (hypershift for v1)    |
+| Field                       | Type     | Description                                           |
+| --------------------------- | -------- | ----------------------------------------------------- |
+| supportedPlatforms          | []string | Platforms this SP can provision (kubevirt, baremetal) |
+| supportedProvisioningTypes  | []string | Provisioning methods available (hypershift for v1)    |
 | kubernetesSupportedVersions | []string | Kubernetes versions supported by this SP              |
 
 The SP populates these values based on:
@@ -280,8 +280,8 @@ The SP populates these values based on:
   the ACM hub cluster (KubeVirt infrastructure and/or Agent/InfraEnv resources).
 - **supportedProvisioningTypes**: For v1, this is always `["hypershift"]` as
   Hive-based provisioning is not supported in this version.
-- **kubernetesSupportedVersions**: Kubernetes versions that this SP supports.
-  A Cluster SP must advertise the Kubernetes versions it supports, not the
+- **kubernetesSupportedVersions**: Kubernetes versions that this SP supports. A
+  Cluster SP must advertise the Kubernetes versions it supports, not the
   platform-specific versions (e.g., OpenShift versions). The SP maintains an
   internal compatibility matrix to translate between Kubernetes versions and
   platform-specific versions. The implementation of this matrix (static
@@ -367,8 +367,8 @@ Users specify the provisioning method and platform configuration using
 
 **Version Field Handling:**
 
-The `version` field in the request specifies the desired Kubernetes version.
-The following rules apply:
+The `version` field in the request specifies the desired Kubernetes version. The
+following rules apply:
 
 - **Format**: Accepts either minor version (`1.29`) or full semantic version
   (`1.29.4`). If only minor version is specified, the SP selects the latest
@@ -551,12 +551,8 @@ set to `PENDING` after the resource is created.
 ```json
 {
   "results": [
-    {
-      /* cluster instance - same schema as POST response */
-    },
-    {
-      /* cluster instance - same schema as POST response */
-    }
+    {/* cluster instance - same schema as POST response */},
+    {/* cluster instance - same schema as POST response */}
   ],
   "next_page_token": "a1b2c3d4e5f6"
 }
@@ -719,14 +715,14 @@ event.SetData(cloudevents.ApplicationJSON, ClusterStatus{
 
 The following table maps HyperShift `HostedCluster` conditions to DCM statuses:
 
-| DCM Status   | HostedCluster Condition           | Description                                    |
-| ------------ | --------------------------------- | ---------------------------------------------- |
-| FAILED       | Degraded=True                     | Cluster is in degraded/failed state            |
-| READY        | Available=True, Progressing=False | Cluster is fully operational                   |
-| PROVISIONING | Progressing=True, Available=False | Control plane being provisioned                |
-| UNAVAILABLE  | Available=False, Progressing=False | Cluster is not available and not progressing   |
-| PENDING      | Progressing=Unknown               | Cluster creation initiated                     |
-| DELETED      | N/A                               | HostedCluster not found                        |
+| DCM Status   | HostedCluster Condition            | Description                                  |
+| ------------ | ---------------------------------- | -------------------------------------------- |
+| FAILED       | Degraded=True                      | Cluster is in degraded/failed state          |
+| READY        | Available=True, Progressing=False  | Cluster is fully operational                 |
+| PROVISIONING | Progressing=True, Available=False  | Control plane being provisioned              |
+| UNAVAILABLE  | Available=False, Progressing=False | Cluster is not available and not progressing |
+| PENDING      | Progressing=Unknown                | Cluster creation initiated                   |
+| DELETED      | N/A                                | HostedCluster not found                      |
 
 > **Note**: Statuses are evaluated in precedence order (top to bottom). For
 > example, if `Degraded=True`, the status is FAILED regardless of other
