@@ -8,7 +8,7 @@ reviewers:
   - "@machacekondra"
   - "@jenniferubah"
 approvers:
-  - ""
+  - TBD
 creation-date: 2026-06-03
 see-also:
   - "/enhancements/service-provider-health-check/service-provider-health-check.md"
@@ -353,9 +353,10 @@ Example:
 
 ##### `PUT /api/v1/agents/{agentId}/heartbeat` — Agent Heartbeat
 
-| Field     | Type              | Required | Description               |
-| --------- | ----------------- | -------- | ------------------------- |
-| timestamp | string (ISO 8601) | yes      | Agent's current timestamp |
+| Field       | Type              | Required | Description                                     |
+| ----------- | ----------------- | -------- | ----------------------------------------------- |
+| timestamp   | string (ISO 8601) | yes      | Agent's current timestamp                       |
+| consumerLag | integer           | yes      | Number of pending messages on the agent's topic |
 
 Response: `200 OK`
 
@@ -830,8 +831,15 @@ the messaging system is used for resource operations (creation requests, status
 updates), the heartbeat uses the existing REST channel that the agent already
 uses for registration.
 
+The agent self-reports the number of pending messages on its topic as
+`consumerLag` in each heartbeat. DCM compares this value against a global
+`consumerLagThreshold`. When `consumerLag` exceeds the threshold, DCM marks the
+agent as **Congested** and stops routing new requests to it. When `consumerLag`
+drops below the threshold on a subsequent heartbeat, DCM clears the Congested
+state.
+
 DCM tracks the last heartbeat timestamp for each agent. If no heartbeat is
-received within a configurable threshold, DCM marks the agent as unavailable.
+received within a configurable threshold, DCM marks the agent as Unavailable.
 
 On startup, the agent registers to DCM (as described in
 [Agent Registration Flow](#agent-registration-flow)). If the agent restarts, it
@@ -846,9 +854,15 @@ sequenceDiagram
     participant DB as Database
 
     loop Every {heartbeatInterval} seconds
-        AG->>DCM: PUT /api/v1/agents/{agentId}/heartbeat<br/>{timestamp}
+        AG->>DCM: PUT /api/v1/agents/{agentId}/heartbeat<br/>{timestamp, consumerLag}
         activate DCM
-        DCM->>DB: Update last heartbeat timestamp
+        DCM->>DB: Update heartbeat timestamp and lag
+        DCM->>DCM: Check consumerLag against threshold
+        alt consumerLag >= consumerLagThreshold
+            DCM->>DB: Mark agent as Congested
+        else consumerLag < consumerLagThreshold
+            DCM->>DB: Clear Congested state (if set)
+        end
         DB-->>DCM: Updated
         DCM-->>AG: 200 OK
         deactivate DCM
@@ -864,11 +878,16 @@ sequenceDiagram
 
 ##### Flow Description
 
-1. The agent periodically sends a heartbeat to DCM via a REST `PUT` call
-2. DCM updates the agent's last heartbeat timestamp in the database
-3. If DCM does not receive a heartbeat within the configured threshold, it marks
+1. The agent periodically sends a heartbeat to DCM via a REST `PUT` call,
+   including its current `consumerLag`
+2. DCM updates the agent's last heartbeat timestamp and consumer lag in the
+   database
+3. If `consumerLag` exceeds `consumerLagThreshold`, DCM marks the agent as
+   **Congested** and stops routing new requests to it. When the lag drops below
+   the threshold, DCM clears the Congested state
+4. If DCM does not receive a heartbeat within the configured threshold, it marks
    the agent as **Unavailable**
-4. When the agent restarts, its initial registration to DCM resets the heartbeat
+5. When the agent restarts, its initial registration to DCM resets the heartbeat
    tracker and the agent status
 
 #### SP Health Monitoring
@@ -1191,25 +1210,6 @@ agents, and behaviour under network partitions. This is deferred to a future
 iteration when the trade-offs are better understood and the maturity level of a
 DCM-native watch system can be assessed.
 
-## Cross-Cutting Impact
-
-The following enhancement documents will need to be updated to reflect the
-changes introduced by this enhancement. These updates will be done in subsequent
-PRs.
-
-| Document                                                                                           | Impact                                                                                                                                                                                                                                                                      |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md)                            | External SPs register to the agent instead of DCM. The existing registration API contract remains valid for the agent's REST API, but DCM's registration handler no longer receives SP registrations directly. Embedded SPs register internally and do not use this flow.   |
-| [Service Provider Health Check](../service-provider-health-check/service-provider-health-check.md) | Health polling responsibility shifts from DCM to the agent. DCM monitors agent health via heartbeats instead of polling individual SPs.                                                                                                                                     |
-| [SP Resource Manager](../sp-resource-manager/sp-resource-manager.md)                               | SPRM publishes creation requests to the agent's bus topic instead of calling SP REST endpoints directly. SPRM interacts with the agent (not individual SPs) for health status. From SPRM's perspective, the agent serves the same role as a SP: provisioning service types. |
-| [Placement Manager](../placement-manager/placement-manager.md)                                     | Policy evaluation may now include environment as a selection criterion. Placement Manager delegates to SPRM, which routes through the messaging system.                                                                                                                     |
-| [User Flows](../user-flows/user-flows.md)                                                          | End-to-end flows must include the agent layer between DCM and SPs.                                                                                                                                                                                                          |
-
-Additionally, DCM should monitor consumer lag on agent topics in a future
-iteration. If lag exceeds a configurable threshold, DCM could stop routing new
-requests to that agent to avoid further congestion. A new agent state (e.g.,
-"Congested") could be introduced for this purpose.
-
 ## Future Enhancements
 
 This section lists potential enhancements to the environment agent that are out
@@ -1239,16 +1239,32 @@ environment variable polling, or Kubernetes ConfigMap updates — and propagate
 them to DCM without downtime. Referenced in [Open Questions](#open-questions)
 (item 2).
 
-### DCM-Side Handling of Queued Requests (consolidation)
+### Agent-Declared Congestion Threshold
 
-When the agent holds a request because the SP for a given service type is
-unhealthy, it responds to DCM with a "queued" CloudEvent
-(`dcm.agent.request-queued`). The DCM Control Plane does not yet define how it
-surfaces this status to the end user, whether it applies a timeout, or whether
-it re-evaluates policies to re-route the request to a different
-agent/environment. A future iteration would formalize DCM's behavior for queued
-requests, including user visibility, timeout semantics, and potential re-routing
-strategies. Referenced in [Open Questions](#open-questions) (item 3).
+The current congestion mechanism relies on a single global
+`consumerLagThreshold` set by DCM and applied uniformly to all agents. This
+works as a baseline quality-of-service control but does not account for
+heterogeneous agent capacities — an edge agent with limited resources may become
+overloaded well before reaching a threshold that is comfortable for a
+well-provisioned datacenter agent. A future iteration would allow each agent to
+declare its own congestion threshold, reflecting its actual processing capacity.
+
+Two approaches are worth exploring:
+
+- **Agent-provided threshold:** The agent includes a `congestionThreshold` field
+  in the heartbeat (or at registration time). DCM uses this value instead of the
+  global threshold when evaluating that agent's `consumerLag`. DCM remains the
+  decision-maker.
+- **Agent self-declaration:** The agent directly reports a `congested` flag in
+  the heartbeat. DCM trusts the agent's own assessment of its capacity without
+  performing a comparison. This gives the agent full autonomy over congestion
+  signaling but reduces DCM's ability to enforce uniform QoS.
+
+Design considerations include: whether the global threshold acts as a
+floor/ceiling even when a per-agent value is present, how to prevent
+misconfigured agents from never declaring congestion, and whether the threshold
+should be static (set at registration) or dynamic (updated in each heartbeat as
+conditions change).
 
 ### Multiple SPs per Service Type (consolidation)
 
