@@ -120,14 +120,15 @@ up:
 
 ### Risks and Mitigations
 
-| Risk                                                                                                                    | Impact                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tenant model is hard to retrofit                                                                                        | Schema migrations affect every table and query                             | Define schema early; one database and one migration stream simplify coordination                                                                                                                                                                                                                                                                                                                                                                                        |
-| Auth adds latency to every request                                                                                      | User-perceived slowdown                                                    | JWT validation is local (cached JWKS, no IdP call per request)                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Breaking existing dev workflows                                                                                         | Developer friction                                                         | Seed migration creates admin actor from `DCM_ADMIN_SUBJECT` at first startup; local dev uses a containerized Keycloak with a pre-configured realm; long-lived dev tokens                                                                                                                                                                                                                                                                                                |
-| Keycloak becomes a single point of failure                                                                              | Auth outage blocks all API access                                          | Cached JWTs remain valid during short outages (no per-request IdP call); OAuth2-Proxy session cookies survive brief Keycloak downtime                                                                                                                                                                                                                                                                                                                                   |
-| OAuth2-Proxy is both auth and routing — its failure blocks all traffic, not just authenticated traffic                  | Total API outage                                                           | Liveness probe restarts the container; compose `restart: unless-stopped`; OAuth2-Proxy is a single static binary with minimal failure surface                                                                                                                                                                                                                                                                                                                           |
-| Header forgery via direct backend access — any process bypassing OAuth2-Proxy can forge X-Forwarded-\* identity headers | Full identity/tenant impersonation until inter-service auth is implemented | Defense in depth: (1) OAuth2-Proxy injects a shared-secret header (`X-Auth-Proxy-Secret`) that dcm-server validates on every request — requests with a missing or incorrect secret are rejected. The secret is a shared value configured as an environment variable in both containers via compose; (2) compose network isolation restricts dcm-server access; with the monolith, internal domain calls are in-process so this risk is limited to external access paths |
+| Risk                                                                                                                            | Impact                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tenant model is hard to retrofit                                                                                                | Schema migrations affect every table and query                             | Define schema early; one database and one migration stream simplify coordination                                                                                                                                                                                                                                                                                                                                                                                        |
+| Auth adds latency to every request                                                                                              | User-perceived slowdown                                                    | JWT validation is local (cached JWKS, no IdP call per request)                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Breaking existing dev workflows                                                                                                 | Developer friction                                                         | Seed migration creates admin actor from `DCM_ADMIN_SUBJECT` at first startup; local dev uses a containerized Keycloak with a pre-configured realm; long-lived dev tokens                                                                                                                                                                                                                                                                                                |
+| Keycloak becomes a single point of failure                                                                                      | Auth outage blocks all API access                                          | Cached JWTs remain valid during short outages (no per-request IdP call); OAuth2-Proxy session cookies survive brief Keycloak downtime                                                                                                                                                                                                                                                                                                                                   |
+| OAuth2-Proxy is both auth and routing — its failure blocks all traffic, not just authenticated traffic                          | Total API outage                                                           | Liveness probe restarts the container; compose `restart: unless-stopped`; OAuth2-Proxy is a single static binary with minimal failure surface                                                                                                                                                                                                                                                                                                                           |
+| Header forgery via direct backend access — any process bypassing OAuth2-Proxy can forge X-Forwarded-\* identity headers         | Full identity/tenant impersonation until inter-service auth is implemented | Defense in depth: (1) OAuth2-Proxy injects a shared-secret header (`X-Auth-Proxy-Secret`) that dcm-server validates on every request — requests with a missing or incorrect secret are rejected. The secret is a shared value configured as an environment variable in both containers via compose; (2) compose network isolation restricts dcm-server access; with the monolith, internal domain calls are in-process so this risk is limited to external access paths |
+| Service providers have no authentication mechanism — SP API calls (registration, instance management) fail when auth is enabled | SP compose profiles are non-functional with auth enabled                   | `AUTH_DISABLED=true` environment variable on dcm-server bypasses auth middleware and injects a default system tenant context. SP compose profiles set this flag until [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196) delivers service provider authentication. `AUTH_DISABLED` is a transitional mechanism — it must not be used in production deployments                                                                                              |
 
 ## Design Details
 
@@ -336,12 +337,14 @@ TTL (60s).
 
 ### 4. Tenant Isolation
 
-Every resource in DCM is scoped to a tenant. Isolation is enforced at the
+Domain resources in DCM are scoped to a tenant. Isolation is enforced at the
 application layer via middleware that injects a tenant filter into every
 database query. This is the standard approach used by multi-tenant platforms —
 it keeps filtering visible in the code, straightforward to debug, and extensible
 when cross-tenant access is introduced under
-[FLPATH-2799](https://redhat.atlassian.net/browse/FLPATH-2799).
+[FLPATH-2799](https://redhat.atlassian.net/browse/FLPATH-2799). Not all entities
+are tenant-scoped — service provider tables are system-scoped (see
+[Data Model Changes](#data-model-changes) below).
 
 #### Tenant-Scoped Query Middleware
 
@@ -361,12 +364,25 @@ safeguards.
 
 All existing entities in the merged schema gain a `tenant_id` column:
 
-| Domain          | Tables Affected                                            |
-| --------------- | ---------------------------------------------------------- |
-| catalog         | `catalog_items`, `catalog_item_instances`, `service_types` |
-| placement       | `resources`                                                |
-| policy          | `policies`                                                 |
-| serviceprovider | `service_type_instances`, `providers`                      |
+| Domain    | Tables Affected                                            |
+| --------- | ---------------------------------------------------------- |
+| catalog   | `catalog_items`, `catalog_item_instances`, `service_types` |
+| placement | `resources`                                                |
+| policy    | `policies`                                                 |
+
+Service provider tables (`providers`, `service_type_instances`) are
+intentionally excluded — providers are system-scoped shared infrastructure that
+must remain visible across all tenants for placement consideration. The
+[SP Registration Flow](/enhancements/sp-registration-flow/sp-registration-flow.md),
+[SP Resource Manager](/enhancements/sp-resource-manager/sp-resource-manager.md),
+and
+[Service Provider Health Check](/enhancements/service-provider-health-check/service-provider-health-check.md)
+enhancements describe providers as self-registering platform infrastructure with
+no tenant affinity. A provider registered under one tenant would be invisible to
+other tenants, breaking the placement engine's ability to consider all available
+infrastructure. Access control for provider operations is an RBAC concern
+addressed by [FLPATH-2799](https://redhat.atlassian.net/browse/FLPATH-2799), not
+a data isolation concern.
 
 ### 5. OpenAPI Security Scheme
 
