@@ -9,6 +9,7 @@ words:
   - flocati
   - pkliczewski
   - gabriel-farache
+  - jordigilh
   - Authorino
   - codegen
   - cutover
@@ -21,6 +22,7 @@ words:
   - kubeconfig
   - oapi
   - OSAC
+  - osac
   - rego
   - RHDH
   - opa
@@ -39,3 +41,8 @@ words:
   - unhold
   - Virt
   - virtualmachines
+  - baremetal
+  - hypershift
+  - grpcurl
+  - vcpu
+  - finalizer
