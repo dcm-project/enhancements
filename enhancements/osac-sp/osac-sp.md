@@ -324,13 +324,19 @@ OSAC fulfillment service.
 ### Registration Flow
 
 The OSAC SP registers with the environment agent on startup. Since registration
-is per service type, the SP makes two registration calls:
+is per service type, the SP makes two registration calls. The two calls use
+**different `name` values** — the agent's registration endpoint is idempotent on
+`name` alone (not `name`+`serviceType`), so registering both service types under
+the same name would make the second call an _update_ of the first, overwriting
+the `cluster` registration's `serviceType` instead of adding a second one (see
+[SP Registration Flow](../sp-registration-flow/sp-registration-flow.md#update-service-provider-capabilities-flow)).
+The single OSAC SP process registers as two distinct named providers:
 
 **Cluster registration:**
 
 ```json
 {
-  "name": "osac-sp",
+  "name": "osac-sp-cluster",
   "serviceType": "cluster",
   "endpoint": "https://osac-sp.example.com/api/v1alpha1/clusters"
 }
@@ -340,7 +346,7 @@ is per service type, the SP makes two registration calls:
 
 ```json
 {
-  "name": "osac-sp",
+  "name": "osac-sp-vm",
   "serviceType": "vm",
   "endpoint": "https://osac-sp.example.com/api/v1alpha1/vms"
 }
@@ -867,11 +873,11 @@ enhancement.
 
 **CloudEvents Fields:**
 
-| Field   | Value                                   |
-| ------- | --------------------------------------- |
-| Subject | `dcm.cluster` or `dcm.vm`               |
-| Type    | `dcm.status.cluster` or `dcm.status.vm` |
-| Source  | `dcm/providers/osac-sp`                 |
+| Field   | Value                                                                                                                        |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Subject | `dcm.cluster` or `dcm.vm`                                                                                                    |
+| Type    | `dcm.status.cluster` or `dcm.status.vm`                                                                                      |
+| Source  | `dcm/providers/osac-sp-cluster` or `dcm/providers/osac-sp-vm` (matches the registered provider `name` for that service type) |
 
 **Payload:**
 
