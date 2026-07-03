@@ -44,6 +44,24 @@ creation-date: 2026-06-29
    each mapped to a different pre-defined template), or should DCM accept that
    cluster sizing is coarser-grained than VM sizing for v1?
 
+4. **VM sizing: `cores`/`memory_gib` are already deprecated in OSAC.** OSAC now
+   has a live
+   [`InstanceTypes`](https://github.com/osac-project/fulfillment-service/blob/e5c4482dbbb9e508f7df912b86f7a5a1e5900607/proto/public/osac/public/v1/instance_types_service.proto)
+   catalog ([OSAC-46](https://redhat.atlassian.net/browse/OSAC-46), In
+   Progress), and `ComputeInstances/Create`
+   [already rejects](https://github.com/osac-project/fulfillment-service/blob/e5c4482dbbb9e508f7df912b86f7a5a1e5900607/internal/servers/private_compute_instances_server.go#L419-L433)
+   setting `instance_type` together with `cores`/`memory_gib` (mutually
+   exclusive), and returns a deprecation warning — _"Direct cores/memory_gib is
+   deprecated, use instance_type instead. This path will be removed in a future
+   release."_ — whenever `cores`/`memory_gib` are set without an
+   `instance_type`. No removal date is set yet. For v1 this enhancement maps
+   `vcpu.count`/`memory.size` directly to `cores`/`memory_gib` (works today, but
+   surfaces the warning on every create) rather than resolving a best-fit
+   `instance_type` from DCM's raw values — the same coarser-grained-sizing
+   tradeoff as Node Sizing (#3), but for VMs. Should the SP start resolving
+   `instance_type` now, or accept the deprecation warning until OSAC schedules
+   removal of the legacy fields?
+
 ## Summary
 
 The OSAC Service Provider (OSAC SP) is an external Service Provider that
@@ -544,24 +562,32 @@ The OSAC SP translates the DCM VM request into a
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                     | OSAC Field              | Notes                                  |
-| ----------------------------- | ----------------------- | -------------------------------------- |
-| vcpu.count                    | spec.cores              | Direct mapping (or spec.instance_type) |
-| memory.size                   | spec.memory_gib         | Convert to GiB integer                 |
-| storage.disks[boot].capacity  | spec.boot_disk.size_gib | Boot disk size in GiB                  |
-| storage.disks[*]              | spec.additional_disks   | Additional disks                       |
-| guestOS.type                  | spec.image              | Mapped to image source_ref             |
-| access.sshPublicKey           | spec.ssh_key            | SSH public key                         |
-| metadata.name                 | metadata.name           | Instance name (DNS label)              |
-| providerHints.osac.templateId | spec.template           | OSAC template reference                |
+| DCM Field                     | OSAC Field              | Notes                                                            |
+| ----------------------------- | ----------------------- | ---------------------------------------------------------------- |
+| vcpu.count                    | spec.cores              | Only when `providerHints.osac.instanceType` is unset — see below |
+| memory.size                   | spec.memory_gib         | Convert to GiB integer; only when `instanceType` is unset        |
+| storage.disks[boot].capacity  | spec.boot_disk.size_gib | Boot disk size in GiB                                            |
+| storage.disks[*]              | spec.additional_disks   | Additional disks                                                 |
+| guestOS.type                  | spec.image              | Mapped to image source_ref                                       |
+| access.sshPublicKey           | spec.ssh_key            | SSH public key                                                   |
+| metadata.name                 | metadata.name           | Instance name (DNS label)                                        |
+| providerHints.osac.templateId | spec.template           | OSAC template reference                                          |
 
 **Provider Hints (osac) for VMs:**
 
-| Field        | Type   | Required | Description                                 |
-| ------------ | ------ | -------- | ------------------------------------------- |
-| templateId   | string | Yes      | OSAC compute instance template              |
-| instanceType | string | No       | OSAC instance_type (overrides cores/memory) |
-| isWindows    | bool   | No       | Windows guest OS flag                       |
+| Field        | Type   | Required | Description                                                           |
+| ------------ | ------ | -------- | --------------------------------------------------------------------- |
+| templateId   | string | Yes      | OSAC compute instance template                                        |
+| instanceType | string | No       | OSAC instance_type name; mutually exclusive with `cores`/`memory_gib` |
+| isWindows    | bool   | No       | Windows guest OS flag                                                 |
+
+`instance_type` and `cores`/`memory_gib` are mutually exclusive on
+`ComputeInstances/Create` — setting both is rejected. When
+`providerHints.osac.instanceType` is set, the SP sends `spec.instance_type` and
+omits `spec.cores`/`spec.memory_gib` entirely (dropping `vcpu.count`/
+`memory.size` from the request). When it's unset, the SP falls back to the
+direct `cores`/`memory_gib` mapping, which OSAC currently accepts but flags as
+deprecated (see [Open Question 4](#open-questions)).
 
 **Response:** Returns `201 Created` with the VM resource in its initial state:
 
