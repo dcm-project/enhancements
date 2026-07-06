@@ -675,7 +675,7 @@ results to resources it manages.
       }
     }
   ],
-  "next_page_token": "eyJvZmZzZXQiOjUwfQ=="
+  "next_page_token": "opaque-token-offset-50"
 }
 ```
 
