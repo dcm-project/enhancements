@@ -231,6 +231,34 @@ sequenceDiagram
     end
 ```
 
+**Registration conflicts:** the agent enforces one SP per service type — the
+first SP to register for `cluster` or `vm` claims it, and any other SP
+registering for the same type is rejected with `409 Conflict`
+([Service Type Uniqueness](../environment-agent/environment-agent.md#service-type-uniqueness)).
+This matters for `vm` specifically, since OSAC SP is not necessarily the only SP
+capable of serving it (e.g., `kubevirt-sp` also registers `vm`). If the OSAC
+SP's `vm` registration is rejected because another SP already holds the slot,
+the OSAC SP logs the conflict and does **not** treat it as fatal to the whole
+process — `cluster` registration proceeds independently. The `vm` registration
+attempt is retried on the same periodic cadence as lease renewal (see diagram
+above), so OSAC SP automatically acquires the `vm` slot later if the incumbent
+SP's lease ever expires, without requiring an OSAC SP restart. Until it holds
+the slot, the agent simply never routes `vm` requests to OSAC SP in that
+environment — there is no separate unhealthy/degraded status to report for a
+registration it was never granted. Running multiple SPs for the same service
+type concurrently (e.g., failover or capacity-based routing between OSAC SP and
+`kubevirt-sp`) is out of scope until the agent supports it
+([Multiple SPs per Service Type](../environment-agent/environment-agent.md#multiple-sps-per-service-type-consolidation)).
+
+**Registration on agent restart:** the environment agent persists SP
+registrations to local storage, so an already-registered SP retains its service
+type slot across an agent restart — the slot is freed only if the SP fails to
+renew its lease before expiry, not simply because another SP registers first
+([SP Registration to Agent](../environment-agent/environment-agent.md#sp-registration-to-agent)).
+This means an agent restart does not, by itself, cause the OSAC SP to lose a
+service type slot to a competing SP as long as it keeps renewing its lease
+normally.
+
 #### SP Health Check
 
 OSAC SP exposes a `GET /health` endpoint that the environment agent polls to
