@@ -497,14 +497,19 @@ host type:
 **Resolution:** reviewers agreed cluster sizing is coarser-grained than VM
 sizing for v1 — each DCM catalog size tier is configured with a
 `providerHints.osac.templateId` pointing at a pre-provisioned OSAC template for
-that tier, per the mapping above. This means DCM catalog size tiers and OSAC
-template tiers are two independently-maintained sources of truth: whoever adds a
-new DCM size tier must also ensure a matching OSAC template exists, and there is
-no automated check that keeps them in sync. This is accepted for v1 on the
+that tier, per the mapping above. The OSAC SP does **not** maintain an internal
+size-tier matrix — it is a pass-through: whatever `templateId` arrives in
+`providerHints.osac` is sent to OSAC as-is (see
+[Catalog Independence](#catalog-independence)). The mapping is entirely
+expressed as DCM catalog item configuration, authored by whoever administers the
+DCM catalog. This still leaves DCM catalog size tiers and OSAC template tiers as
+two independently-maintained sources of truth: whoever adds a new DCM size tier
+must also ensure a matching OSAC template exists and wire the `templateId` by
+hand, with no automated check that keeps them in sync. Accepted for v1 on the
 assumption that size tiers change infrequently; if catalog churn makes the
-manual mapping error-prone in practice, revisit whether DCM needs a way to query
-the SP's supported size tiers (or vice versa) instead of the admin wiring them
-by hand.
+manual wiring error-prone in practice, revisit whether DCM needs a way to query
+the SP's supported size tiers (or vice versa) instead of relying on an admin to
+keep both catalogs aligned.
 
 **Provider Hints (osac):**
 
