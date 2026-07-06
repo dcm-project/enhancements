@@ -584,15 +584,15 @@ sequenceDiagram
 
 **Status enums by ServiceType:**
 
-| VM           | Container | Cluster  | Storage      |
-| ------------ | --------- | -------- | ------------ |
-| PROVISIONING | PENDING   | CREATING | PROVISIONING |
-| RUNNING      | RUNNING   | ACTIVE   | RUNNING      |
-| STOPPED      | SUCCEEDED | UPDATING |              |
-| PAUSED       | FAILED    | DEGRADED |              |
-| FAILED       | UNKNOWN   | DELETED  | FAILED       |
-| DELETING     |           |          | DELETING     |
-| DELETED      |           |          | DELETED      |
+| VM           | Container | Cluster     | Storage      |
+| ------------ | --------- | ----------- | ------------ |
+| PROVISIONING | PENDING   | PROGRESSING | PROVISIONING |
+| RUNNING      | RUNNING   | ACTIVE      | RUNNING      |
+| STOPPED      | SUCCEEDED | FAILED      |              |
+| PAUSED       | FAILED    | DEGRADED    |              |
+| FAILED       | UNKNOWN   | DELETED     | FAILED       |
+| DELETING     |           |             | DELETING     |
+| DELETED      |           |             | DELETED      |
 
 ---
 
