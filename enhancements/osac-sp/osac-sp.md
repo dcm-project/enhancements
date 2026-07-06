@@ -18,20 +18,7 @@ creation-date: 2026-06-29
 
 ## Open Questions
 
-1. **CLUSTER_STATE_FAILED mapping:** DCM's cluster lifecycle defines `CREATING`,
-   `ACTIVE`, `UPDATING`, `DEGRADED`, `DELETED` but not `FAILED`. OSAC has
-   [`CLUSTER_STATE_FAILED`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto).
-   Should `FAILED` map to `DEGRADED` (cluster unusable but exists) or should DCM
-   add a `FAILED` cluster status?
-
-2. **CREATING vs UPDATING distinction:** OSAC uses `CLUSTER_STATE_PROGRESSING`
-   for both initial provisioning and spec updates (confirmed in the
-   [feedback controller](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go)).
-   The SP must track per-cluster history to distinguish DCM `CREATING` from
-   `UPDATING`. Is tracking previous state in the local mapping store acceptable,
-   or should DCM define a single `PROGRESSING` state instead?
-
-3. **VM sizing: `cores`/`memory_gib` are already deprecated in OSAC.** OSAC now
+1. **VM sizing: `cores`/`memory_gib` are already deprecated in OSAC.** OSAC now
    has a live
    [`InstanceTypes`](https://github.com/osac-project/fulfillment-service/blob/e5c4482dbbb9e508f7df912b86f7a5a1e5900607/proto/public/osac/public/v1/instance_types_service.proto)
    catalog ([OSAC-46](https://redhat.atlassian.net/browse/OSAC-46), In
@@ -557,7 +544,7 @@ state:
 {
   "requestId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "name": "sovereign-ai-cluster-01",
-  "status": "CREATING",
+  "status": "PROGRESSING",
   "platform": "baremetal",
   "version": "1.29",
   "apiEndpoint": "",
@@ -622,7 +609,7 @@ The OSAC SP translates the DCM VM request into a
 omits `spec.cores`/`spec.memory_gib` entirely (dropping `vcpu.count`/
 `memory.size` from the request). When it's unset, the SP falls back to the
 direct `cores`/`memory_gib` mapping, which OSAC currently accepts but flags as
-deprecated (see [Open Question 4](#open-questions)).
+deprecated (see [Open Questions](#open-questions)).
 
 **Response:** Returns `201 Created` with the VM resource in its initial state:
 
@@ -718,7 +705,7 @@ results to resources it manages.
 
 - **ACTIVE**: Contains the base64-encoded kubeconfig retrieved via
   [`Clusters/GetKubeconfig`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/clusters_service.proto).
-- **CREATING/UPDATING**: Empty string. Credentials are not yet available.
+- **PROGRESSING**: Empty string. Credentials are not yet available.
 - **FAILED/DEGRADED**: Empty string.
 
 **Error Handling:**
@@ -798,8 +785,7 @@ The health check verifies:
 
 The OSAC SP maintains a mapping between DCM instance IDs and OSAC resource IDs.
 This mapping is stored locally and used to translate between DCM and OSAC
-identifiers on all operations. The mapping also tracks per-resource state
-history to support the CREATING/UPDATING distinction (see
+identifiers on all operations (see
 [Status Mapping](#status-mapping-osac-to-dcm)).
 
 **Rehydration:** Per the
@@ -930,26 +916,26 @@ The operator
 [feedback controller](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go)
 maps CRD phases to these states.
 
-| DCM Status | OSAC Signal                              | Source                | Notes                                             |
-| ---------- | ---------------------------------------- | --------------------- | ------------------------------------------------- |
-| CREATING   | `CLUSTER_STATE_PROGRESSING`              | `status.state`        | First observation (no prior ACTIVE)               |
-| ACTIVE     | `CLUSTER_STATE_READY`                    | `status.state`        |                                                   |
-| UPDATING   | `CLUSTER_STATE_PROGRESSING`              | `status.state`        | Was previously ACTIVE, now PROGRESSING again      |
-| DEGRADED   | `CLUSTER_CONDITION_TYPE_DEGRADED` (TRUE) | `status.conditions[]` | Defined in proto; not yet implemented in operator |
-| DELETED    | Cluster not found (404)                  | API response          |                                                   |
-| FAILED     | `CLUSTER_STATE_FAILED`                   | `status.state`        | See [Open Questions](#open-questions)             |
+| DCM Status  | OSAC Signal                              | Source                | Notes                                             |
+| ----------- | ---------------------------------------- | --------------------- | ------------------------------------------------- |
+| PROGRESSING | `CLUSTER_STATE_PROGRESSING`              | `status.state`        | Covers both initial provisioning and spec updates |
+| ACTIVE      | `CLUSTER_STATE_READY`                    | `status.state`        |                                                   |
+| DEGRADED    | `CLUSTER_CONDITION_TYPE_DEGRADED` (TRUE) | `status.conditions[]` | Defined in proto; not yet implemented in operator |
+| FAILED      | `CLUSTER_STATE_FAILED`                   | `status.state`        |                                                   |
+| DELETED     | Cluster not found (404)                  | API response          |                                                   |
 
-The SP tracks per-cluster state history in its local mapping store to
-distinguish `CREATING` from `UPDATING`, since OSAC uses `PROGRESSING` for both.
+Per
+[`service-provider-status-reporting.md`](../state-management/service-provider-status-reporting.md#cluster-status),
+DCM's cluster status enum uses a single `PROGRESSING` status for both create and
+update, so the SP does not need to track prior cluster state to distinguish them
+— it maps `CLUSTER_STATE_PROGRESSING` straight to `PROGRESSING` regardless of
+whether the request that triggered it was a create or an update.
 
 ```mermaid
 flowchart TD
-    A[OSAC reports CLUSTER_STATE_PROGRESSING] --> B{Was previously ACTIVE?}
-    B -->|No| C[Map to DCM CREATING]
-    B -->|Yes| D[Map to DCM UPDATING]
+    A[OSAC reports CLUSTER_STATE_PROGRESSING] --> B[Map to DCM PROGRESSING]
     E[OSAC reports CLUSTER_STATE_READY] --> F[Map to DCM ACTIVE]
     G[OSAC reports CLUSTER_STATE_FAILED] --> H[Map to DCM FAILED]
-    H --> I[See Open Questions]
     J["CLUSTER_CONDITION_TYPE_DEGRADED (TRUE)"] --> K[Map to DCM DEGRADED]
     L[Cluster not found in API] --> M[Map to DCM DELETED]
 ```
