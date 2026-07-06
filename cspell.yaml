@@ -41,6 +41,9 @@ words:
   - unhold
   - Virt
   - virtualmachines
+  - specversion
+  - datacontenttype
+  - myapp
   - baremetal
   - hypershift
   - grpcurl

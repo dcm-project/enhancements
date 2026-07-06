@@ -308,9 +308,19 @@ common fields: _serviceType, metadata, providerHints_
 
 #### Container port Object
 
-| Field         | Required | Type    | Description                                 |
-| :------------ | :------- | :------ | :------------------------------------------ |
-| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_) |
+| Field         | Required | Type    | Description                                                       |
+| :------------ | :------- | :------ | :---------------------------------------------------------------- |
+| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_)                       |
+| visibility    | No       | string  | Port visibility: _none_, _internal_, _external_ (default: _none_) |
+
+The `visibility` field controls how the port is exposed by the Service Provider:
+
+- `none` — the port is not exposed via any networking abstraction (no Service
+  created for this port)
+- `internal` — the port is exposed within the cluster (e.g., ClusterIP Service
+  in Kubernetes)
+- `external` — the port is exposed externally (e.g., LoadBalancer or NodePort
+  Service in Kubernetes)
 
 ### Database
 
