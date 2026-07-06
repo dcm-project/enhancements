@@ -31,20 +31,7 @@ creation-date: 2026-06-29
    `UPDATING`. Is tracking previous state in the local mapping store acceptable,
    or should DCM define a single `PROGRESSING` state instead?
 
-3. **Node sizing granularity:** OSAC's
-   [`Clusters/Create`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_clusters_server.go)
-   validation derives each node set's `host_type` from the selected cluster
-   **template** — a client-supplied `host_type` that doesn't match the
-   template's own value is rejected, and the server overwrites it with the
-   template's value regardless. This means DCM cannot request an arbitrary
-   `cpu`/`memory` combination at create time; it can only select among the host
-   types that existing OSAC templates already expose (see
-   [Node Sizing](#node-sizing)). Should DCM's catalog items encode a specific
-   OSAC template per size tier (e.g., `small`/`medium`/`large` catalog items
-   each mapped to a different pre-defined template), or should DCM accept that
-   cluster sizing is coarser-grained than VM sizing for v1?
-
-4. **VM sizing: `cores`/`memory_gib` are already deprecated in OSAC.** OSAC now
+3. **VM sizing: `cores`/`memory_gib` are already deprecated in OSAC.** OSAC now
    has a live
    [`InstanceTypes`](https://github.com/osac-project/fulfillment-service/blob/e5c4482dbbb9e508f7df912b86f7a5a1e5900607/proto/public/osac/public/v1/instance_types_service.proto)
    catalog ([OSAC-46](https://redhat.atlassian.net/browse/OSAC-46), In
@@ -58,9 +45,9 @@ creation-date: 2026-06-29
    `vcpu.count`/`memory.size` directly to `cores`/`memory_gib` (works today, but
    surfaces the warning on every create) rather than resolving a best-fit
    `instance_type` from DCM's raw values — the same coarser-grained-sizing
-   tradeoff as Node Sizing (#3), but for VMs. Should the SP start resolving
-   `instance_type` now, or accept the deprecation warning until OSAC schedules
-   removal of the legacy fields?
+   tradeoff accepted for [Node Sizing](#node-sizing), but for VMs. Should the SP
+   start resolving `instance_type` now, or accept the deprecation warning until
+   OSAC schedules removal of the legacy fields?
 
 ## Summary
 
@@ -479,8 +466,17 @@ host type:
   of new ones), which is a day-2 operation out of scope for v1 per
   [Non-Goals](#non-goals).
 
-See [Open Questions](#open-questions) for reviewer feedback on how DCM's catalog
-items should be structured around this constraint.
+**Resolution:** reviewers agreed cluster sizing is coarser-grained than VM
+sizing for v1 — each DCM catalog size tier is configured with a
+`providerHints.osac.templateId` pointing at a pre-provisioned OSAC template for
+that tier, per the mapping above. This means DCM catalog size tiers and OSAC
+template tiers are two independently-maintained sources of truth: whoever adds a
+new DCM size tier must also ensure a matching OSAC template exists, and there is
+no automated check that keeps them in sync. This is accepted for v1 on the
+assumption that size tiers change infrequently; if catalog churn makes the
+manual mapping error-prone in practice, revisit whether DCM needs a way to query
+the SP's supported size tiers (or vice versa) instead of the admin wiring them
+by hand.
 
 **Provider Hints (osac):**
 
