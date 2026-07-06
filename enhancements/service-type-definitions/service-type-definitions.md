@@ -35,10 +35,10 @@ Example:
 ## Summary
 
 This ADR defines provider-agnostic schemas for DCM service types. These schemas
-enable Service Providers to provision five core service types — virtual
-machines, containers, databases, Kubernetes clusters, and standalone storage —
-across different infrastructure platforms without vendor lock-in. The key
-principle is _portability first_: schemas contain only minimal fields common
+enable Service Providers to provision six core service types — virtual machines,
+containers, databases, Kubernetes clusters, standalone storage, and network
+services — across different infrastructure platforms without vendor lock-in. The
+key principle is _portability first_: schemas contain only minimal fields common
 across all implementations, with platform-specific configuration delegated to
 _providerHints_.
 
@@ -52,7 +52,7 @@ without breaking compatibility.
 
 - Define a generic schema that works for any serviceType, ensure portability,
   and allows extensibility without schema changes.
-- Define an initial set of five primary service types applying this pattern:
+- Define an initial set of six primary service types applying this pattern:
   - _VM_  
     Virtual machines with compute, storage, and OS specifications
   - _Container_  
@@ -64,6 +64,8 @@ without breaking compatibility.
     Database services with various engines (PostgreSQL, MySQL, etc.)
   - _Storage_  
     Standalone persistent volumes decoupled from compute service types
+  - _Network_  
+    Standalone network interfaces for exposing workloads
 
 ### Non-Goals
 
@@ -76,12 +78,11 @@ without breaking compatibility.
 - Provider-specific implementation details (each provider handles translation
   independently)
 - Additional service types beyond VMs, containers, databases, Kubernetes
-  clusters, and standalone storage (deferred to future phases)
-- Separately provisioned networks are _not_ included as a standalone service
-  type. Network interfaces bundled with compute (VM, container) remain in those
-  schemas. Standalone storage volumes are supported via the _storage_ service
-  type; disk size on VMs and ephemeral allocation on containers remain bundled
-  with compute where applicable.
+  clusters, standalone storage and networking interfaces (deferred to future
+  phases)
+- Standalone storage volumes are supported via the _storage_ service type; disk
+  size on VMs and ephemeral allocation on containers remain bundled with compute
+  where applicable.
 - Multiple service type schema versions. Initial release supports only the
   current schema version; service type versioning deferred to future phases.
 
@@ -99,17 +100,17 @@ All service schemas share common fields defined once in
 
 ## Schema Structure
 
-| Field         | Required | Type                                   | Description                                                                   | ReadOnly |
-| :------------ | :------- | :------------------------------------- | :---------------------------------------------------------------------------- | :------- |
-| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_, _storage_) | No       |
-| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                             | No       |
-| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                               | No       |
-| id            | No       | string                                 | Unique identifier for the resource                                            | Yes      |
-| status        | No       | string                                 | Current state of the resource                                                 | Yes      |
-| path          | No       | string                                 | Resource path or location                                                     | Yes      |
-| statusMessage | No       | string                                 | Message providing details about the current status                            | Yes      |
-| createTime    | No       | date-time                              | Timestamp when the resource was created                                       | Yes      |
-| updateTime    | No       | date-time                              | Timestamp when the resource was last updated                                  | Yes      |
+| Field         | Required | Type                                   | Description                                                                              | ReadOnly |
+| :------------ | :------- | :------------------------------------- | :--------------------------------------------------------------------------------------- | :------- |
+| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_, _storage_, _network_) | No       |
+| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                                        | No       |
+| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                                          | No       |
+| id            | No       | string                                 | Unique identifier for the resource                                                       | Yes      |
+| status        | No       | string                                 | Current state of the resource                                                            | Yes      |
+| path          | No       | string                                 | Resource path or location                                                                | Yes      |
+| statusMessage | No       | string                                 | Message providing details about the current status                                       | Yes      |
+| createTime    | No       | date-time                              | Timestamp when the resource was created                                                  | Yes      |
+| updateTime    | No       | date-time                              | Timestamp when the resource was last updated                                             | Yes      |
 
 ### Metadata Object
 
@@ -149,6 +150,8 @@ following serviceTypes:
   etc.)
 - Storage  
   Standalone persistent volumes (capacity, access mode) independent of compute
+- Network  
+  Standalone network interfaces for exposing workloads
 
 ### Virtual Machine
 
@@ -414,6 +417,70 @@ attachment and permissions differently (e.g., AWS EBS sets multi-attach
 capability via volume type; GCP Persistent Disk sets mode at attach time). The
 CatalogItem admin configures this field based on the backend capabilities (e.g.,
 Ceph RBD only supports ReadWriteOnce; CephFS only supports ReadWriteMany).
+
+### Network
+
+The network schema defines load balancing and service discovery resources for
+providing network access to workloads. Unlike managing networking as part of
+compute resources, this service type treats network services as first-class
+resources.
+
+#### When to Use Standalone Network
+
+The `network` service type creates network resources independently from
+workloads.
+
+**Use standalone `network` when:**
+
+- Exposing existing workloads that were created without network configuration
+- Managing network lifecycle independently from workload lifecycle
+- Creating endpoints for manually-managed pods or external resources
+
+**Use `visibility` field when:**
+
+- Creating a new workload that needs immediate network exposure
+- Network resource should be tied to workload lifecycle (created/deleted
+  together)
+
+| Field            | Required | Type                                | Description                                              |
+| :--------------- | :------- | :---------------------------------- | :------------------------------------------------------- |
+| ports            | Yes      | array[[Port](#network-port-object)] | Ports to expose                                          |
+| loadBalancerType | No       | string                              | Load balancer tier: `network` (L4) or `application` (L7) |
+
+#### Network port Object
+
+| Field      | Required | Type    | Description                                                                                                                                       |
+| :--------- | :------- | :------ | :------------------------------------------------------------------------------------------------------------------------------------------------ |
+| name       | No*      | string  | Port name. *Required when using providerHints.kubernetes.nodePorts. Must be DNS-compatible (RFC 1035). Pattern: `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$` |
+| protocol   | No       | string  | Protocol (TCP, UDP, SCTP). Default: TCP                                                                                                           |
+| port       | Yes      | integer | Service port (1-65535)                                                                                                                            |
+| targetPort | Yes      | integer | Target pod port (1-65535)                                                                                                                         |
+
+> **Note:** When using `providerHints.kubernetes.nodePorts`, all ports must have
+> unique `name` fields. The keys in `nodePorts` must match these port names.
+
+#### loadBalancerType
+
+Specifies the load balancing tier for the network service: Layer 4 (transport
+layer) or Layer 7 (application layer). When omitted, creates a basic service
+without load balancer infrastructure.
+
+- **Default:** omitted (no load balancer)
+- **Values:**
+  - `network`: Layer 4 load balancing (TCP/UDP)
+  - `application`: Layer 7 load balancing (HTTP/HTTPS) with routing capabilities
+  - omitted: Basic service without load balancer
+
+#### Kubernetes Provider Hints
+
+The Kubernetes Network Service Provider uses the following fields in
+`providerHints.kubernetes`:
+
+| Field     | Required | Type              | Description                                                                                                                                                                                                                                                                                                                |
+| :-------- | :------- | :---------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| selector  | No       | map[string]string | Label selector to match target pods                                                                                                                                                                                                                                                                                        |
+| clusterIP | No       | string            | Specific cluster IP allocation or "None" for headless                                                                                                                                                                                                                                                                      |
+| nodePorts | No       | map[string]int    | Map of port names to NodePort values (30000-32767). The Kubernetes Service type is inferred from the combination of `loadBalancerType` and `nodePorts` presence. See [Service Type Inference](https://github.com/dcm-project/enhancements/blob/main/enhancements/k8s-network-sp/k8s-network-sp.md#service-type-inference). |
 
 ### Schema Compatibility
 
