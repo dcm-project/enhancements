@@ -591,8 +591,8 @@ sequenceDiagram
 | STOPPED      | SUCCEEDED | FAILED      |              |
 | PAUSED       | FAILED    | DEGRADED    |              |
 | FAILED       | UNKNOWN   | DELETED     | FAILED       |
-| DELETING     |           |             | DELETING     |
-| DELETED      |           |             | DELETED      |
+| DELETING     |           | UNAVAILABLE | DELETING     |
+| DELETED      |           | DELETING    | DELETED      |
 
 ---
 

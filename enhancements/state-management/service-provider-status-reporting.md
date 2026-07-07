@@ -242,15 +242,18 @@ Kubernetes Storage SP status mapping.
 
 For managed clusters (e.g., K8s clusters), the status reflects the health of the
 control plane and worker nodes as a single unit. **Target Statuses:**
-`PROGRESSING`, `ACTIVE`, `DEGRADED`, `FAILED`, `DELETED`.
+`PROGRESSING`, `ACTIVE`, `DEGRADED`, `UNAVAILABLE`, `FAILED`, `DELETING`,
+`DELETED`.
 
-| DCM Generic Status | Kubernetes                                                             |
-| :----------------- | :--------------------------------------------------------------------- |
-| **PROGRESSING**    | Cluster is being provisioned, or a rolling upgrade is in progress.     |
-| **ACTIVE**         | Control plane is healthy and minimum worker nodes are ready.           |
-| **DEGRADED**       | Control plane is reachable, but critical components are unhealthy.     |
-| **FAILED**         | Provisioning or an update failed and requires intervention to recover. |
-| **DELETED**        | Cluster resources have been de-provisioned.                            |
+| DCM Generic Status | Kubernetes                                                                                         |
+| :----------------- | :------------------------------------------------------------------------------------------------- |
+| **PROGRESSING**    | Cluster is being provisioned (API may not yet be reachable), or a rolling upgrade is in progress.  |
+| **ACTIVE**         | Control plane is healthy and minimum worker nodes are ready.                                       |
+| **DEGRADED**       | Control plane is reachable, but critical components are unhealthy.                                 |
+| **UNAVAILABLE**    | Control plane was previously available but is now unreachable and not progressing toward recovery. |
+| **FAILED**         | Provisioning or an update failed and requires intervention to recover.                             |
+| **DELETING**       | Deletion has been requested; cluster teardown is in progress.                                      |
+| **DELETED**        | Cluster resources have been de-provisioned.                                                        |
 
 _Note: `PROGRESSING` intentionally does not distinguish initial provisioning
 from a subsequent update — Service Providers are not required to track prior
