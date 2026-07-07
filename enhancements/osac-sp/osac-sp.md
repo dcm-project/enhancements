@@ -724,18 +724,36 @@ Sends a `osac.public.v1.Clusters/Delete` gRPC call to the OSAC fulfillment
 service, which triggers the OSAC operator to decommission the cluster. Returns
 `204 No Content`.
 
-**Deletion is synchronous from the API's perspective, asynchronous for
-infrastructure teardown:** `Clusters/Delete` removes the cluster record
-immediately — subsequent `Get`/`List` calls return `404 Not Found` right away.
-The actual Hosted Control Plane teardown happens in the background: the
-operator's
-[`handleDelete`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/clusterorder_controller.go)
-holds a Kubernetes finalizer on the `ClusterOrder` CR and waits for AAP to
-decommission the hosted cluster before releasing it. `ClusterState` has no
-`DELETING` value (only `PROGRESSING`, `READY`, `FAILED`) — the SP has no
-intermediate status to report. As soon as the SP's next poll (or the delete call
-itself) observes a 404, it publishes `DELETED` and removes the entry from its
-local mapping store.
+**Deletion is asynchronous at the API level, not just for infrastructure
+teardown:** `Clusters/Delete` does not remove the cluster record immediately.
+The fulfillment service's
+[`dao.Delete()`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/database/dao/generic_dao_delete.go#L178-L192)
+sets `deletion_timestamp` on the record; since a finalizer is always present
+after creation, it fires an `Updated` event instead of a `Deleted` event, and
+`Get`/`List` **keep returning the object** — not `404` — until the record is
+archived. The
+[cluster reconciler](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/controllers/cluster/cluster_reconciler_function.go#L359-L403)
+picks up the timestamp, issues the Kubernetes delete, and clears its finalizer
+in the **same pass** — without waiting for confirmation the CR is actually gone.
+Once no finalizers remain, the DAO archives the record and `Get`/`List` start
+returning `404`. In practice this means the cluster can disappear from OSAC's
+API before the underlying Hosted Control Plane teardown finishes. `ClusterState`
+has no `DELETING` value (only `PROGRESSING`, `READY`, `FAILED`) — the SP has no
+intermediate status to report — so it polls silently and, like `acm-cluster-sp`,
+publishes `DELETED` and removes the entry from its local mapping store as soon
+as it observes the `404`.
+
+This is a known gap being actively worked on OSAC's side, not just a stale SP
+assumption: [OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) tracks
+that the cluster feedback controller's `handleDelete` is a literal TODO, and
+[OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391) tracks adding
+`DELETING`/`DELETE_FAILED` states to `Cluster` (both targeted for OSAC v0.2).
+VMs don't have this gap today: the
+[`computeinstance` reconciler's `delete()`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/controllers/computeinstance/computeinstance_reconciler_function.go#L291-L325)
+waits for the underlying Kubernetes object to be confirmed gone before clearing
+its finalizer, so a VM's `404` reliably means the VM is actually torn down — the
+opposite tradeoff from clusters (slower to report `DELETED`, but no window where
+the API says "gone" while the infrastructure is still being cleaned up).
 
 ```mermaid
 sequenceDiagram
@@ -747,10 +765,12 @@ sequenceDiagram
     AG->>SP: DELETE /api/v1alpha1/clusters/{clusterId}
     SP->>SP: Look up OSAC ID from mapping store
     SP->>FS: osac.public.v1.Clusters/Delete (gRPC)
+    FS->>FS: Set deletion_timestamp (record still returned by Get/List)
     FS-->>SP: OK
     SP-->>AG: 204 No Content
-    OP->>OP: Reconcile deletion (async)
-    Note over SP: Next poll detects cluster removed
+    OP->>OP: Issue K8s delete, clear finalizer (does not wait for teardown)
+    FS->>FS: No finalizers left -> archive record (now 404)
+    Note over SP: Next poll observes 404
     SP->>SP: Publish DELETED status, remove from cache
 ```
 

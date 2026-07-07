@@ -46,3 +46,5 @@ words:
   - grpcurl
   - vcpu
   - finalizer
+  - finalizers
+  - computeinstance
