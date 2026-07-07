@@ -98,33 +98,66 @@ credentials flow:
 3. The JWT is passed as a bearer token on all gRPC calls to the OSAC fulfillment
    service.
 
-For multi-tenant fleet management, OSAC does **not** support Keycloak token
-exchange (RFC 8693) — the realm configuration explicitly sets
-`standard.token.exchange.enabled: false`
-([realm.json](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/it/charts/keycloak/files/realm.json)),
-and
-[`AUTH.md`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/docs/AUTH.md)
-documents only client credentials for service accounts and group-based tenancy
-for users. Instead, OSAC resolves tenancy from Keycloak group membership:
-Authorino maps the caller's Keycloak groups (or, for service accounts, the
-`admin_groups` claim) into a `tenants` claim, which the fulfillment service uses
-to determine assignable, default, and visible tenants for each request. A
-service account granted an admin role receives the universal tenant set `["*"]`
-and can see and manage resources across all tenants without per-tenant
-credentials. The OSAC SP authenticates as a single service account; OSAC lets
-that caller set a resource's
+For multi-tenant fleet management, OSAC does **not** support Keycloak's standard
+token exchange grant (RFC 8693) for the CLI client —
+`standard.token.exchange.enabled: false` on the `osac-cli` client in
+[realm.json](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/it/charts/keycloak/files/realm.json)
+— but this is scoped to same-realm client-to-client exchange, not identity
+provider (IdP) brokered exchange (see below).
+
+Tenancy resolution no longer goes through Authorino: as of
+[`58c8ac44`](https://github.com/osac-project/fulfillment-service/commit/58c8ac447b083ef5115b4901e1fa46a8bfdcb682),
+OSAC replaced Authorino with in-process JWT validation and OPA-based
+authorization. The
+[`GrpcAuthnInterceptor`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/auth_jwks_cache.go#L142-L154)
+validates bearer tokens against JWKS discovered from a **list** of trusted
+issuer URLs (`--grpc-authn-trusted-token-issuers`, already multi-valued in the
+Go API), and the
+[`GrpcAuthzInterceptor`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/grpc_authz_interceptor.go#L472-L493)
+extracts `organization`/`organizations`/`groups` and `realm_access.roles` claims
+and evaluates them against an embedded
+[Rego policy](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/policies/authz.rego#L67-L96)
+to determine assignable, default, and visible tenants for each request. A caller
+with the right realm role receives the universal tenant set `["*"]` and can
+manage resources across all tenants without per-tenant credentials. The OSAC SP
+authenticates as a single service account; OSAC lets that caller set a
+resource's
 [`metadata.tenant`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/metadata_type.proto#L42-L43)
 explicitly on create, validated against the assignable tenant set
-[determined from the JWT's `tenants` claim](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/default_tenancy_logic.go#L59-L75).
-**This is not yet wired end-to-end today, though:** DCM-to-SP credential
-exchange and tenant propagation are explicitly out of scope for
+[determined from the token's claims](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/default_tenancy_logic.go#L59-L75).
+
+**This is not yet wired end-to-end today:** DCM-to-SP credential exchange and
+tenant propagation are explicitly out of scope for
 [`authentication.md`](../authentication/authentication.md#non-goals), tracked
 separately by [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196),
 and the DCM create flow currently calls the SP with no tenant identifier on the
 wire. Until that lands, the OSAC SP has no per-request tenant value to set and
 falls back to its own service account's default tenant for every object it
-creates — true DCM-tenant-to-OSAC-tenant scoping depends on FLPATH-4196 defining
-how tenant context reaches the SP.
+creates.
+
+OSAC maintainers confirmed two paths to close this gap once FLPATH-4196 defines
+a DCM-issued, tenant-scoped token, treating DCM as an internal component rather
+than exchanging tokens through the disabled client-to-client grant:
+
+1. **Register DCM as a second trusted issuer.** Since
+   `--grpc-authn-trusted-token-issuers` already accepts a list, this is a
+   config-only change on OSAC's side (plus a small Helm chart update, since
+   `auth.issuerUrl` is
+   [currently single-valued](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/charts/service/values.yaml)).
+   The tradeoff: DCM's JWTs would need to natively carry OSAC's expected claim
+   names (`organization`/`organizations`/`groups`), which is unlikely without
+   OSAC-specific changes to how DCM mints tokens.
+2. **Configure Keycloak IdP-brokered token exchange.** Register DCM as an
+   [`identityProviders`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/it/charts/keycloak/files/realm.json)
+   entry (currently empty) and enable token exchange from that IdP, so Keycloak
+   — not DCM or OSAC — reshapes the DCM token into Keycloak's native claim
+   vocabulary before OSAC ever validates it. This is net-new Keycloak
+   configuration (no scaffolding exists today) but avoids DCM needing to know
+   OSAC's specific claim shape.
+
+Both options remove the OSAC-side blocker but still depend on DCM emitting a
+signed, tenant-scoped token in the first place — the underlying gap remains
+FLPATH-4196, not anything on OSAC's end.
 
 ### Multi-Hub Topology
 
