@@ -325,7 +325,7 @@ Plus common fields: _serviceType, metadata, providerHints_
 | version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                    |
 | resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                 |
 | replicas  | No       | integer                                 | Number of replicas to create (default: 1)                     |
-| port      | No       | integer                                 | Port for the database to listen on (Default: engine default)  |
+| network   | No       | [Network](#database-network-object)     | Network configuration                                         |
 
 #### Database resources Object
 
@@ -350,6 +350,21 @@ Plus common fields: _serviceType, metadata, providerHints_
 | :---- | :------- | :----- | :--------------------------------------------------- |
 | min   | Yes      | string | Minimum guaranteed memory with unit (e.g., 1GB, 2GB) |
 | max   | Yes      | string | Maximum allowed memory with unit (e.g, 2GB, 4GB)     |
+
+#### Database network Object
+
+| Field      | Required | Type    | Description                                 |
+| :--------- | :------- | :------ | :------------------------------------------ |
+| port       | No       | integer | Port for the database to listen on          |
+| visibility | No       | string  | Database visibility: _internal_, _external_ |
+
+The `visibility` field controls how the database's port is exposed by the
+Service Provider:
+
+- `internal` - the port is exposed within the Service Provider's platform (For
+  Kubernetes, creates only a `Service` resource of `ClusterIP` type)
+- `external` - the port is exposed externally (For Kubernetes, creates a
+  `Service` resource of `LoadBalancer` or `NodePort` type)
 
 ### Kubernetes Cluster
 
