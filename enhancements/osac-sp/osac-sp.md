@@ -18,23 +18,8 @@ creation-date: 2026-06-29
 
 ## Open Questions
 
-1. **VM sizing: `cores`/`memory_gib` are already deprecated in OSAC.** OSAC now
-   has a live
-   [`InstanceTypes`](https://github.com/osac-project/fulfillment-service/blob/e5c4482dbbb9e508f7df912b86f7a5a1e5900607/proto/public/osac/public/v1/instance_types_service.proto)
-   catalog ([OSAC-46](https://redhat.atlassian.net/browse/OSAC-46), In
-   Progress), and `ComputeInstances/Create`
-   [already rejects](https://github.com/osac-project/fulfillment-service/blob/e5c4482dbbb9e508f7df912b86f7a5a1e5900607/internal/servers/private_compute_instances_server.go#L419-L433)
-   setting `instance_type` together with `cores`/`memory_gib` (mutually
-   exclusive), and returns a deprecation warning — _"Direct cores/memory_gib is
-   deprecated, use instance_type instead. This path will be removed in a future
-   release."_ — whenever `cores`/`memory_gib` are set without an
-   `instance_type`. No removal date is set yet. For v1 this enhancement maps
-   `vcpu.count`/`memory.size` directly to `cores`/`memory_gib` (works today, but
-   surfaces the warning on every create) rather than resolving a best-fit
-   `instance_type` from DCM's raw values — the same coarser-grained-sizing
-   tradeoff accepted for [Node Sizing](#node-sizing), but for VMs. Should the SP
-   start resolving `instance_type` now, or accept the deprecation warning until
-   OSAC schedules removal of the legacy fields?
+N/A — all open questions raised during review have been resolved; see the
+resolution notes in [Node Sizing](#node-sizing) and [VM Sizing](#vm-sizing).
 
 ## Summary
 
@@ -619,7 +604,32 @@ The OSAC SP translates the DCM VM request into a
 omits `spec.cores`/`spec.memory_gib` entirely (dropping `vcpu.count`/
 `memory.size` from the request). When it's unset, the SP falls back to the
 direct `cores`/`memory_gib` mapping, which OSAC currently accepts but flags as
-deprecated (see [Open Questions](#open-questions)).
+deprecated (see [VM Sizing](#vm-sizing)).
+
+##### VM Sizing
+
+OSAC now has a live
+[`InstanceTypes`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/instance_types_service.proto)
+catalog ([OSAC-46](https://redhat.atlassian.net/browse/OSAC-46), In Progress),
+and `ComputeInstances/Create`
+[already rejects](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_compute_instances_server.go#L419-L433)
+setting `instance_type` together with `cores`/`memory_gib` (mutually exclusive),
+and returns a deprecation warning — _"Direct cores/memory_gib is deprecated, use
+instance_type instead. This path will be removed in a future release."_ —
+whenever `cores`/`memory_gib` are set without an `instance_type`. No removal
+date is set yet.
+
+**Resolution:** reviewers agreed to keep the direct mapping for v1 —
+`vcpu.count`/`memory.size` map straight to `cores`/`memory_gib`, and the SP
+accepts the deprecation warning on every VM create rather than resolving a
+best-fit `instance_type` from DCM's raw values. `InstanceTypes/List` already
+exposes `spec.cores`/`spec.memory_gib` per type
+([`instance_type_type.proto#L85-L100`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/instance_type_type.proto#L85-L100)),
+so best-fit matching is technically feasible today, but `OSAC-46` is still **In
+Progress** — the catalog's shape may still change before it's done, and building
+matching logic against a moving target isn't worth the churn risk yet. Revisit
+once OSAC-46 stabilizes and a removal date for the direct `cores`/`memory_gib`
+fields is set.
 
 **Response:** Returns `201 Created` with the VM resource in its initial state:
 
