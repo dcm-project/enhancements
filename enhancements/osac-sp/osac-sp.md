@@ -98,6 +98,33 @@ credentials flow:
 3. The JWT is passed as a bearer token on all gRPC calls to the OSAC fulfillment
    service.
 
+```mermaid
+sequenceDiagram
+    participant User
+    participant DCM as DCM Control Plane
+    participant AG as Environment Agent
+    participant SP as OSAC SP
+    participant KC as OSAC Keycloak
+    participant FS as OSAC Fulfillment Service
+
+    Note over SP,KC: SP startup — independent of any DCM request
+    SP->>KC: OAuth2 client credentials grant (SP's own client ID/secret)
+    KC-->>SP: JWT (SP's own service account identity, universal tenant `["*"]`)
+
+    Note over User,FS: Per-request flow, today
+    User->>DCM: Authenticated request (OAuth2-Proxy + Keycloak, DCM's realm)
+    DCM->>DCM: Resolve ActorID/TenantID (DCM-internal only)
+    DCM->>AG: Publish creation request — no token, no tenant identifier
+    AG->>SP: Route to OSAC SP — no token, no tenant identifier
+    SP->>FS: Create (gRPC), bearer = SP's own JWT
+    Note over SP,FS: metadata.tenant defaults to SP's own default tenant —<br/>DCM's tenant never crosses this boundary
+    FS-->>SP: 201 Created
+```
+
+The SP is never handed a DCM token to begin with — it mints its own, independent
+of whatever request triggered the call — so there is no tenant context to carry
+through to OSAC today.
+
 For multi-tenant fleet management, OSAC does **not** support Keycloak's standard
 token exchange grant (RFC 8693) for the CLI client —
 `standard.token.exchange.enabled: false` on the `osac-cli` client in
@@ -147,17 +174,62 @@ than exchanging tokens through the disabled client-to-client grant:
    The tradeoff: DCM's JWTs would need to natively carry OSAC's expected claim
    names (`organization`/`organizations`/`groups`), which is unlikely without
    OSAC-specific changes to how DCM mints tokens.
-2. **Configure Keycloak IdP-brokered token exchange.** Register DCM as an
-   [`identityProviders`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/it/charts/keycloak/files/realm.json)
-   entry (currently empty) and enable token exchange from that IdP, so Keycloak
-   — not DCM or OSAC — reshapes the DCM token into Keycloak's native claim
-   vocabulary before OSAC ever validates it. This is net-new Keycloak
-   configuration (no scaffolding exists today) but avoids DCM needing to know
-   OSAC's specific claim shape.
+2. **Cross-realm token exchange via DCM's own Keycloak realm.** DCM already
+   operates its own Keycloak realm for user authentication
+   ([`authentication.md`](../authentication/authentication.md)) — extending it
+   to also issue SP-facing tokens avoids DCM's token-minting code needing to
+   know OSAC's claim shape at all. As of Keycloak 26.5, the
+   [recommended mechanism](https://www.keycloak.org/2026/01/jwt-authorization-grant)
+   for this is a two-hop chain, not the deprecated external-to-internal
+   exchange: the SP first uses
+   [Standard Token Exchange V2](https://www.keycloak.org/securing-apps/token-exchange)
+   (RFC 8693) against DCM's realm to exchange its DCM token for one scoped to
+   OSAC's realm as the `audience`, then presents that token as a
+   [JWT Authorization Grant](https://www.keycloak.org/2026/01/jwt-authorization-grant)
+   (RFC 7523) to OSAC's realm, which mints a native OSAC-realm token. OSAC's
+   realm needs DCM's realm configured as a Keycloak OIDC identity provider with
+   the JWT Authorization Grant enabled, and claim mappers translating DCM's
+   claims into `organization`/`groups`. Keycloak — not DCM's or OSAC's own code
+   — owns the claim translation.
 
-Both options remove the OSAC-side blocker but still depend on DCM emitting a
-signed, tenant-scoped token in the first place — the underlying gap remains
-FLPATH-4196, not anything on OSAC's end.
+```mermaid
+sequenceDiagram
+    participant DCM as DCM Control Plane
+    participant DKC as DCM Keycloak Realm
+    participant AG as Environment Agent
+    participant SP as OSAC SP
+    participant OKC as OSAC Keycloak Realm
+    participant FS as OSAC Fulfillment Service
+
+    Note over DCM,DKC: Once FLPATH-4196 defines DCM-issued,<br/>tenant-scoped tokens from DCM's own realm
+    DCM->>DKC: Obtain token (tenant claim, DCM's own shape)
+    DCM->>AG: Publish creation request + DCM-realm token
+    AG->>SP: Route to OSAC SP + DCM-realm token
+
+    alt Option 1: DCM registered as a second trusted issuer
+        SP->>FS: Create (gRPC), bearer = DCM-realm token, unmodified
+        FS->>FS: Validate against DCM issuer (2nd entry in trusted-issuers list)
+        FS->>FS: Extract organization/groups claims directly from DCM's token
+    else Option 2: Cross-realm exchange (RFC 8693 + RFC 7523)
+        SP->>DKC: Token Exchange (RFC 8693), audience = OSAC realm
+        DKC-->>SP: JWT scoped to OSAC realm, still DCM-signed
+        SP->>OKC: JWT Authorization Grant (RFC 7523), assertion = prior JWT
+        OKC-->>SP: Native OSAC-realm token (organization/groups via IdP mappers)
+        SP->>FS: Create (gRPC), bearer = OSAC-realm token
+        FS->>FS: Validate against OSAC's own realm (existing trusted issuer)
+    end
+
+    FS->>FS: Resolve assignable tenant from claims, validate metadata.tenant
+    FS-->>SP: 201 Created, tenant-scoped
+```
+
+In both options the SP relays or exchanges a token DCM minted — it never mints
+one of its own on DCM's behalf. Option 2 is the SP actively calling Keycloak's
+exchange endpoints (twice), not a passive relay; Option 1 is a simpler
+passthrough but couples DCM's token shape to OSAC's claim vocabulary. Both
+remove the OSAC-side blocker but still depend on DCM emitting a signed,
+tenant-scoped token in the first place — the underlying gap remains FLPATH-4196,
+not anything on OSAC's end.
 
 ### Multi-Hub Topology
 
