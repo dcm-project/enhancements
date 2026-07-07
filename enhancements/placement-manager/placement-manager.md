@@ -13,6 +13,7 @@ reviewers:
 creation-date: 2026-01-09
 see-also:
   - "/enhancements/environment-agent/environment-agent.md"
+  - "/enhancements/declarative-api/declarative-api.md"
 ---
 
 # Placement Manager
@@ -20,12 +21,13 @@ see-also:
 ## Summary
 
 The Placement Manager orchestrates resource requests within DCM core. It
-receives user requests through the Catalog Manager, validates and enriches them
-through the Policy Manager (which now selects an Agent), and delegates instance
-creation and deletion to the SP Resource Manager, which routes through the
-Messaging System to an Agent. The Placement Manager also handles timeout logic
-for both queued requests (Agent reports SP is unhealthy) and pending requests
-(Agent never acknowledged the creation CloudEvent after retries).
+receives resolved application graphs from the Catalog Manager. It builds the
+dependency DAG, validates and enriches each resource through the Policy (which
+now selects an Agent). Then it delegates resource creation and deletion, in DAG
+order, to the SP Resource Manager, which routes through the Messaging System to
+an Agent. The Placement Manager also handles timeout logic for both queued
+requests (Agent reports SP is unhealthy) and pending requests (Agent never
+acknowledged the creation CloudEvent after retries).
 
 ## Motivation
 
@@ -33,15 +35,16 @@ for both queued requests (Agent reports SP is unhealthy) and pending requests
 
 - Define end-to-end flow for creating resources
 - Define end-to-end flow for deleting resources (deletion flow)
-- Define _Create_, _Read_, _Delete_ endpoints for Placement Manager
-- Define how Placement Manager interacts with other services within DCM core
-  (Catalog Manager, Policy Manager, SP Resource Manager)
-- Define orchestration responsibilities for Placement Manager
+- Define how Placement Manager interacts with other domains within DCM core
+- Define orchestration responsibilities such as DAG compilation, per-resource
+  policy validation and DAG order provisioning driven by dependency readiness
 - Define queued-request timeout logic for agent-based routing
 
 ### Non-Goals
 
-- Define Update endpoint, as this is out of scope for the first version (v1).
+- Define Update operation, as this is out of scope for the first version (v1).
+- Graph-wide policy evaluation within a single request over the full DAG
+  snapshot.
 
 ## Proposal
 
@@ -97,14 +100,17 @@ flowchart TD
 - Receives resource creation and deletion requests from users
 - Provides REST API endpoints for _create_, _read_, _delete_ operations on
   catalog instances
+- Calls Placement Manager to admit a run and to delete resources in batch
 - Returns responses and error messages to users
 
 #### Policy Manager
 
-- Sends requests for validation via
-  `POST /api/v1alpha1/policies:evaluateRequest`
-- Provides `available_agents` metadata as input in the evaluation request
-  payload
+- Placement fetches `available_agents` once per run admission, then calls
+  `POST /api/v1/engine/evaluate` once per resource in the graph with that shared
+  list
+- Receives `APPROVED/MODIFIED` or `DENIED` per resource. All resources must pass
+  before any provisioning starts
+- `available_agents` is included in each evaluation request payload
 - Optionally includes `exclude_agents` to exclude agents from consideration
   (e.g., after a queued-request timeout)
 - Receives validated/mutated payload and selected Agent (`agentName`)
@@ -113,7 +119,7 @@ flowchart TD
 
 #### SP Resource Manager
 
-- Delegates instance creation, read, and delete operations to SP Resource
+- Delegates instance creation, read, and delete per resource to SP Resource
   Manager
 - Forwards `agentName`, `serviceType`, and `spec` in requests
 - SPRM publishes to the agent's messaging topic
@@ -121,34 +127,46 @@ flowchart TD
 - Reports back: success (202), error, or queued status
 - When SPRM reports "queued" status, PM handles timeout logic (see
   [Queued-Request Handling](#queued-request-handling))
+- **Status consumer (SPRM):** consumes Agent status events (for example from
+  `dcm.agents.responses`), updates service-type instance rows in the
+  control-plane database, and notifies Placement **in-process** when a resource
+  reaches `Ready`. Placement uses that signal to bind apply-time CEL and trigger
+  creates for the next DAG level (see
+  [Status-driven DAG progression](#status-driven-dag-progression))
 
 #### Database
 
-- Stores the intent (original request) of the user request
-- Stores validated request (including `agentName`) and enables rehydration
-  process
-- Maintains record of all resources created through Placement Manager
+- Stores per-resource rows for each admitted node (`name`, `spec`, compiled
+  `requires_resources`, `dagLevel`, `agentName`, status, and related fields)
+- Stores validated request per resource and enables rehydration
+- Maintains records of all resources created through Placement Manager
 
-### API Endpoints
+### Placement service operations
 
-The CRUD endpoints are consumed by the Catalog Manager to create and manage
-resources.
+Catalog invokes these operations in-process via the placement client. They are
+not exposed as a public Placement OpenAPI surface.
 
-#### Endpoints Overview
+#### Operations overview
 
-| Method | Endpoint                       | Description                    |
-| ------ | ------------------------------ | ------------------------------ |
-| POST   | /api/v1/resources              | Create a resource              |
-| GET    | /api/v1/resources              | List all resources             |
-| GET    | /api/v1/resources/{resourceId} | Get a resource                 |
-| DELETE | /api/v1/resources/{resourceId} | Delete a resource              |
-| GET    | /api/v1/health                 | Placement Manager health check |
+| Method | Operation         | Description                                                           |
+| ------ | ----------------- | --------------------------------------------------------------------- |
+| POST   | `CreateResources` | Admit a run; create one or more resources (single- or multi-resource) |
+| GET    | `ListResources`   | List applications (each with nested `resources[]`)                    |
+| GET    | `GetResource`     | Get a single resource by `id`                                         |
+| DELETE | `DeleteResources` | Delete one or more resources by id (single- or batch)                 |
 
-**POST /api/v1/resources - Create a resource.**
+_Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
+`resourceIds[]` and stored on the catalog item instance). An optional internal
+batch id may group resource rows within Placement; it is not exposed to Catalog.
 
-The POST endpoint creates a resource that is supported by DCM. The resource
-request is an instance of a catalog item and originates from the user (UI)
-through the Catalog Manager.
+_CreateResources_: Admit a run (single or multi-resource graph).
+
+Catalog calls Placement after catalog resolution. The request carries the
+`catalogItemInstanceId` and a resolved `resources[]` graph with one or more
+nodes (names, specs, and declared dependencies). A single-node graph is valid
+for single-resource catalog items. Multiple nodes form a multi-resource run.
+Placement builds the DAG, runs policy once per resource, persists the run, and
+starts provisioning for DAG level 0.
 
 Snippet of the request body
 
@@ -161,162 +179,227 @@ requestBody:
         type: object
         required:
           - catalogItemInstanceId
-          - spec
+          - resources
         properties:
           catalogItemInstanceId:
             type: string
             description: The ID of the catalog item instance
             example: "4baa35eb-e70d-4d37-867d-0f4efa21d05c"
-          spec:
-            type: object
+          resources:
+            type: array
+            minItems: 1
             description: |
-              Service specification following one of the supported service type
-              schemas (VMSpec, ContainerSpec, DatabaseSpec, or ClusterSpec).
-              The `serviceType` field within the spec determines which Agent
-              and Service Provider can fulfill the request.
-            additionalProperties: true
+              One resource from the resolved catalog graph (name, spec, and
+              optional requiresResources). CEL wiring is already in spec.
+            items:
+              type: object
+              required:
+                - name
+                - spec
+              properties:
+                name:
+                  type: string
+                  description: Unique resource name
+                  example: "ordersDb"
+                spec:
+                  type: object
+                  description: |
+                    Service specification following one of the supported service type
+                    schemas (VMSpec, ContainerSpec, DatabaseSpec, ClusterSpec, etc.).
+                  additionalProperties: true
+                requiresResources:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    Optional explicit dependency names.
 ```
 
-Example of payload for incoming VM catalog instance request
+Example: multi-resource catalog instance (dev app with database + container)
 
 ```json
 {
   "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-  "spec": {
-    "serviceType": "vm",
-    "vcpu": { "count": 2 },
-    "memory": { "size": "2GB" },
-    "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
-    "guestOS": { "type": "fedora-39" },
-    "access": {
-      "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
+  "resources": [
+    {
+      "name": "ordersDb",
+      "dagLevel": 0,
+      "agentName": "postgres-sp",
+      "spec": {
+        "serviceType": "database",
+        "engine": "postgresql",
+        "version": "16",
+        "metadata": { "name": "orders-db" }
+      }
     },
-    "metadata": { "name": "fedora-vm" }
+    {
+      "name": "app",
+      "requiresResources": ["ordersDb"],
+      "agentName": "container-sp",
+      "dagLevel": 1,
+      "spec": {
+        "serviceType": "container",
+        "image": { "reference": "registry.example.com/orders-api:1.0" },
+        "process": {
+          "env": [
+            {
+              "name": "DATABASE_URL",
+              "value": "${ordersDb.connectionString}"
+            }
+          ]
+        },
+        "metadata": { "name": "orders-api" }
+      }
+    }
+  ]
+}
+```
+
+Example of response (`202 Accepted`):
+
+```json
+{
+  "resourceIds": [
+    "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+    "c66be104-eea3-4246-975c-e6cc9b32d74d"
+  ]
+}
+```
+
+Catalog persists `resourceIds` on the catalog item instance. Placement keeps
+orchestration state on each resource row; level-0 creates are initiated before
+the response returns (level 1+ continue asynchronously when dependencies are
+`Ready`).
+
+**ListResources**: List admitted applications.
+
+Each `applications[]` entry is one catalog item instance
+(`catalogItemInstanceId`). Nested `resources[]` holds provisioned nodes for that
+instance (`id` per node).
+
+Example response:
+
+```json
+{
+  "applications": [
+    {
+      "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
+      "resources": [
+        {
+          "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+          "name": "ordersDb",
+          "path": "resources/696511df-1fcb-4f66-8ad5-aeb828f383a0",
+          "agentName": "postgres-sp",
+          "approvalStatus": "approved",
+          "status": "Running",
+          "dagLevel": 0,
+          "spec": {
+            "serviceType": "database",
+            "engine": "postgresql",
+            "version": "16",
+            "metadata": { "name": "orders-db" }
+          }
+        },
+        {
+          "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
+          "name": "app",
+          "path": "resources/c66be104-eea3-4246-975c-e6cc9b32d74d",
+          "agentName": "container-sp",
+          "approvalStatus": "approved",
+          "status": "Running",
+          "requiresResources": ["ordersDb"],
+          "dagLevel": 1,
+          "spec": {
+            "serviceType": "container",
+            "image": { "reference": "registry.example.com/orders-api:1.0" },
+            "metadata": { "name": "orders-api" }
+          }
+        }
+      ]
+    },
+    {
+      "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
+      "resources": [
+        {
+          "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+          "name": "webserver",
+          "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+          "agentName": "kubevirt-sp",
+          "approvalStatus": "approved",
+          "status": "Running",
+          "dagLevel": 0,
+          "spec": {
+            "serviceType": "vm",
+            "vcpu": { "count": 2 },
+            "memory": { "size": "2GB" },
+            "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
+            "guestOS": { "type": "ubuntu-22.04" },
+            "metadata": { "name": "ubuntu-vm" }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**GetResource**: Get a single resource by id.
+
+Returns one provisioned resource by its `id`. The response includes
+`catalogItemInstanceId` and a nested `resources` object with the resource row
+(`id`, `dagLevel`, `spec`, and related fields).
+
+Example of Response Payload
+
+```json
+{
+  "catalogItemInstanceId": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
+  "resources": {
+    "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+    "name": "webserver",
+    "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+    "agentName": "kubevirt-sp",
+    "approvalStatus": "approved",
+    "dagLevel": 0,
+    "spec": {
+      "serviceType": "vm",
+      "vcpu": { "count": 4 },
+      "memory": { "size": "2GB" },
+      "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
+      "guestOS": { "type": "ubuntu-22.04" },
+      "metadata": { "name": "ubuntu-vm" }
+    }
   }
 }
 ```
 
-Response payload: Returns 201 Created if successful.
+**DeleteResources**: Delete one or more resources (single or batch).
+
+Accepts `resourceIds[]` with one or more provisioned resource ids. A single id
+removes one resource. Multiple ids remove a batch (for example when deleting a
+catalog item instance or canceling a run). Placement forwards delete request per
+resource to SP Resource Manager. Deletion order may follow reverse DAG levels
+when dependencies require it (children before parents where applicable).
+
+Request Example:
 
 ```json
 {
-  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-  "agentName": "prod-eu-agent",
-  "spec": {
-    "serviceType": "vm",
-    "vcpu": { "count": 2 },
-    "memory": { "size": "2GB" },
-    "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
-    "guestOS": { "type": "fedora-39" },
-    "metadata": { "name": "fedora-vm" }
-  },
-  "approvalStatus": "pending",
-  "createTime": "2026-05-03T12:00:00Z",
-  "updateTime": "2026-05-03T12:00:00Z"
+  "resourceIds": [
+    "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+    "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
+  ]
 }
 ```
 
-**Note**: This is **only** an example of the payload.
-
-**GET /api/v1/resources** List all resources according to AEP standards.
-
-Example of Response Payload
+Response Example
 
 ```json
 {
-  "resources": [
-    {
-      "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
-      "path": "resources/696511df-1fcb-4f66-8ad5-aeb828f383a0",
-      "catalogItemInstanceId": "52540146-6212-4514-b534-0c3127b2836f",
-      "agentName": "prod-us-agent",
-      "spec": {
-        "serviceType": "container",
-        "image": { "reference": "docker.io/nginx:latest" },
-        "resources": {
-          "cpu": { "min": 1, "max": 2 },
-          "memory": { "min": "512MB", "max": "1GB" }
-        },
-        "metadata": { "name": "nginx-container" }
-      },
-      "approvalStatus": "approved",
-      "createTime": "2026-05-03T12:00:00Z",
-      "updateTime": "2026-05-03T12:30:00Z"
-    },
-    {
-      "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
-      "path": "resources/c66be104-eea3-4246-975c-e6cc9b32d74d",
-      "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-      "agentName": "prod-eu-agent",
-      "spec": {
-        "serviceType": "database",
-        "engine": "postgresql",
-        "version": "15",
-        "resources": { "cpu": 2, "memory": "8GB", "storage": "100GB" },
-        "metadata": { "name": "postgres-001" }
-      },
-      "approvalStatus": "approved",
-      "createTime": "2026-05-03T12:00:00Z",
-      "updateTime": "2026-05-03T12:30:00Z"
-    },
-    {
-      "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-      "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-      "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-      "agentName": "prod-eu-agent",
-      "spec": {
-        "serviceType": "vm",
-        "vcpu": { "count": 2 },
-        "memory": { "size": "2GB" },
-        "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
-        "guestOS": { "type": "ubuntu-22.04" },
-        "metadata": { "name": "ubuntu-vm" }
-      },
-      "approvalStatus": "approved",
-      "createTime": "2026-05-03T12:00:00Z",
-      "updateTime": "2026-05-03T12:30:00Z"
-    }
-  ],
-  "nextPageToken": ""
-}
-```
-
-**GET /api/v1/resources/{resourceId}** Get a resource based on id.
-
-Example of Response Payload
-
-```json
-{
-  "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "catalogItemInstanceId": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
-  "agentName": "prod-eu-agent",
-  "spec": {
-    "serviceType": "vm",
-    "vcpu": { "count": 4 },
-    "memory": { "size": "2GB" },
-    "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
-    "guestOS": { "type": "ubuntu-22.04" },
-    "metadata": { "name": "ubuntu-vm" }
-  },
-  "approvalStatus": "approved",
-  "createTime": "2026-05-03T12:00:00Z",
-  "updateTime": "2026-05-03T12:30:00Z"
-}
-```
-
-**DELETE /api/v1/resources/{resourceId}** Delete a resource based on id.
-
-**GET /api/v1/health** Retrieve the health status of Placement Manager.
-
-Example of Response Payload
-
-```json
-{
-  "status": "healthy",
-  "path": "health"
+  "results": [
+    { "resourceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0" },
+    { "resourceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781" }
+  ]
 }
 ```
 
@@ -324,8 +407,14 @@ Example of Response Payload
 
 ### Service Creation Flow
 
-The following sequence diagram illustrates the complete flow for creating a
-resource via the `POST /api/v1/resources` endpoint.
+The following sequence diagram illustrates admitting a multi-resource run via
+`POST /api/v1/resources`. Placement compiles the DAG, evaluates policy once per
+resource (all must pass before any create), then provisions level 0 via SPRM and
+the Agent messaging path. **Later DAG levels are not driven by the synchronous
+response to Catalog** — the SPRM status consumer updates instance rows in the
+control-plane database and notifies Placement in-process when a dependency is
+`Ready`, so Placement can enqueue the next level (aligned with
+[Declarative API](/enhancements/declarative-api/declarative-api.md)).
 
 ```mermaid
 sequenceDiagram
@@ -335,71 +424,87 @@ sequenceDiagram
     participant DB as Placement DB
     participant PE as Policy Manager
     participant SPRM as SP Resource Manager
+    participant MS as Messaging System
+    participant AG as Agent
 
-    CM->>PM: POST /api/v1/resources<br/>{catalogItemInstanceId, spec}
+    CM->>PM: POST /api/v1/resources<br/>{catalogItemInstanceId, resources[]}
     activate PM
 
-    PM->>DB: Store intent<br/>{originalRequest}
-    DB-->>PM: Intent stored
+    PM->>PM: Build DAG (CEL edges + requiresResources)<br/>Detect cycles, assign levels
+    alt Compile or DAG error
+        PM-->>CM: 4xx compile error
+    else Compile ok
 
-    PM->>DB: Fetch available agents<br/>(healthy, non-Congested)
-    DB-->>PM: available_agents list
+        PM->>DB: Store intent<br/>{originalRequest}
+        DB-->>PM: Intent stored
 
-    PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {spec}, available_agents}
-    activate PE
+        PM->>DB: Fetch available agents<br/>(healthy, non-Congested)
+        DB-->>PM: available_agents list
 
-    PE-->>PM: Validated/mutated payload<br/>& selectedAgent
-    deactivate PE
-
-    alt Policy validation fails
-        PM->>DB: Delete intent record
-        PM-->>CM: Error response (policy rejection)
-    else Policy validation succeeds
-
-        PM->>DB: Store validated request<br/>{validatedPayload, agentName}
-
-        PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
-        activate SPRM
-
-        alt SPRM returns error (404/503)
-            SPRM-->>PM: Error response
-            PM->>DB: Delete records
-            PM-->>CM: Error response
-
-        else SPRM returns 202 Accepted
-            SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: PENDING}
-            PM-->>CM: 201 Created {Resource}
+        loop each resource in graph
+            PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {spec}, available_agents}
+            PE-->>PM: APPROVED/MODIFIED or DENIED<br/>{validatedPayload, selectedAgent}
         end
-        deactivate SPRM
-    end
 
-    Note over SPRM: Async: SPRM consumes response<br/>from dcm.agents.responses
+        alt Any resource denied
+            PM->>DB: Delete intent record
+            PM-->>CM: PolicyRejected (aggregated)
+        else All resources pass
 
-    opt SPRM notifies PM of QUEUED status
-        SPRM->>PM: Notify: instance QUEUED<br/>{instanceId, agentName}
-        Note over PM: Start queuedRequestTimeout timer
+            PM->>DB: Persist per-resource rows<br/>(requires_resources, dagLevel,<br/> validated spec, agentName)
+            DB-->>PM: Validated request stored
 
-        alt Timeout expires (or timeout = 0)
-            PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
-            Note over PM: Re-evaluate excluding current agent
+            loop each resource at DAG level 0
+                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
+                SPRM->>MS: Publish creation CloudEvent<br/>to agent topic
+                MS->>AG: Deliver to Agent
+                SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: PENDING}
+            end
 
-            PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {spec}, available_agents, exclude_agents: [agentName]}
-            activate PE
-            PE-->>PM: New selectedAgent or no match
-            deactivate PE
+            PM-->>CM: 202 Accepted<br/>{resourceIds[]}
 
-            alt Alternative agent found
-                PM->>SPRM: POST /api/v1/service-type-instances<br/>{newAgentName, serviceType, spec}
+            Note over AG,SPRM: Status path (async, in-process to Placement)
+            AG-)SPRM: status event (Ready + outputs)
+            Note over SPRM: Status consumer updates<br/>control-plane instance row
+            SPRM->>DB: update resource row (Ready, outputs)
+            SPRM->>PM: OnResourceReady (in-process)
+
+            loop each resource at next DAG level when deps Ready
+                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
+                SPRM->>MS: Publish creation CloudEvent
+                MS->>AG: Deliver to Agent
                 SPRM-->>PM: 202 Accepted
-                PM-->>CM: 201 Created {Resource}
-            else No agent available
-                PM->>DB: Delete records
-                PM-->>CM: Error: no agent available
+            end
+
+            opt SPRM notifies PM of QUEUED status (creation)
+                SPRM->>PM: instance QUEUED<br/>{instanceId, agentName}
+                Note over PM: queuedRequestTimeout →<br/>cancel, re-evaluate with exclude_agents
             end
         end
     end
     deactivate PM
 ```
+
+#### Status-driven DAG progression
+
+After level 0, provisioning continues **asynchronously**. This path is separate
+from the synchronous `202 Accepted` returned to Catalog.
+
+1. The Agent publishes status events (for example on `dcm.agents.responses`).
+2. The SPRM status consumer ingests those events and updates the corresponding
+   service-type instance row in the control-plane database (status, outputs, and
+   related fields).
+3. When a resource reaches `Ready`, the status consumer notifies Placement.
+4. Placement checks dependents via each row's `requires_resources` and
+   `dagLevel`. For resources at the next level whose dependencies are all
+   `Ready`, Placement binds dependency outputs, then calls SPRM to create those
+   instances.
+5. Repeat steps 3 to 4 while resources are still provisioning.
+6. When all resources reach terminal success, the process is complete.
+7. When any resource reports a terminal failure, Placement initiates rollback
+   and cleanup: provisioning halts, tear down already provisioned resources in
+   the graph (typically reverse DAG order via `DeleteResources`), and delete
+   resource in the DB.
 
 #### Flow Description
 
@@ -417,15 +522,16 @@ sequenceDiagram
 
 3. **Fetch Available Agents**
 
-- Placement Manager queries the Agent Registry for healthy, non-Congested agents
-  that support the requested service type
-- The resulting `available_agents` list is passed to the Policy Manager for
-  evaluation
+- After DAG compile, Placement Manager queries the Agent Registry **once per run
+  admission** for healthy, non-Congested agents
+- The resulting `available_agents` list is reused for every policy evaluation in
+  this iteration (same list passed into each `evaluateRequest`)
 
 4. **Policy Validation**
 
-- Placement Manager forwards the request to Policy Manager with
-  `available_agents` and optional `exclude_agents`
+- Placement loops over each resource in the graph and calls Policy with that
+  resource's spec and the shared `available_agents` list (optional
+  `exclude_agents` on re-evaluation paths such as queued-request timeout)
 - Policy Manager evaluates requests against policies
 - Policy Manager returns:
   - Approved or rejected
@@ -437,14 +543,15 @@ sequenceDiagram
   - Placement Manager returns error response to Catalog Manager
   - Request processing stops
 - If policy validation succeeds:
-  - Placement Manager stores the validated request in Placement DB which
-    includes the validated/mutated payload and selected `agentName`
+  - Placement Manager persists a resource row per graph node with validated
+    spec, `agentName`, compiled `requires_resources`, and `dagLevel`
 
 5. **Store Validated Request**
 
-- Placement Manager persists the validated/mutated payload along with the
-  `agentName` returned by the Policy Manager
-- This enables rehydration and audit
+- After all resources pass policy, Placement persists one row per graph node
+  with compiled `requires_resources` (CEL + explicit deps), `dagLevel`,
+  validated spec, and selected `agentName`. Orchestration and retries use these
+  fields.
 
 6. **Instance Creation**
 
@@ -455,11 +562,16 @@ sequenceDiagram
   - **SPRM returns error (404/503)**: Error response returned to Placement
     Manager. The record is deleted from Placement DB. Placement Manager forwards
     the error to Catalog Manager. Request processing stops.
-  - **SPRM returns 202 Accepted**: Instance creation is in progress. Placement
-    Manager returns 201 Created to Catalog Manager with a full `Resource`
-    object. The resource is now in a `PENDING` state.
+  - **SPRM returns 202 Accepted**: Level 0 resources are in progress. Placement
+    returns `202 Accepted` with `resourceIds[]` to Catalog with a full
+    `Resource` object. The resource row is `PENDING` until the status consumer
+    reports progress.
 
-7. **Queued-Request Handling (Asynchronous)**
+7. **Status-driven DAG progression (asynchronous)**
+
+See [Status-driven DAG progression](#status-driven-dag-progression).
+
+8. **Queued-Request Handling (Asynchronous)**
 
 - After SPRM returns 202, it continues to consume responses from
   `dcm.agents.responses`. If the Agent reports a `dcm.agent.request-queued`
@@ -476,7 +588,7 @@ sequenceDiagram
   - If no alternative agent is available: PM deletes records from Placement DB
     and returns an error to Catalog Manager
 
-8. **Pending-Request Timeout (Asynchronous)**
+9. **Pending-Request Timeout (Asynchronous)**
 
 - SPRM runs a periodic sweep of instance records in `PENDING` status. If a
   record has been `PENDING` longer than `pendingRequestTimeout` and the agent is
@@ -504,8 +616,10 @@ sequenceDiagram
 
 ### Service Deletion Flow
 
-The following sequence diagram illustrates the complete flow for deleting a
-resource via the `DELETE /api/v1/resources/{resourceId}` endpoint.
+The following sequence diagram illustrates batch deletion via
+`DELETE /api/v1/resources`. Placement orders deletes by reverse DAG levels when
+dependencies require it, then delegates each delete to SPRM and the Agent
+messaging path.
 
 ```mermaid
 sequenceDiagram
@@ -514,36 +628,45 @@ sequenceDiagram
     participant PM as Placement Manager
     participant DB as Placement DB
     participant SPRM as SP Resource Manager
+    participant MS as Messaging System
+    participant AG as Agent
 
-    CM->>PM: DELETE /api/v1/resources/{resourceId}
+    CM->>PM: DELETE /api/v1/resources<br/>{resourceIds[]}
     activate PM
 
-    PM->>DB: Lookup resource<br/>Get agentName, serviceType, instanceId
+    PM->>PM: Order deletes<br/>(reverse DAG levels when required)
 
-    PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
-    activate SPRM
+    loop each resourceId (dependency order)
+        PM->>DB: Lookup resource<br/>{agentName, serviceType, instanceId}
+        DB-->>PM: Resource record
 
-    alt SPRM returns error
-        SPRM-->>PM: Error response
-        PM-->>CM: Error response
-    else SPRM returns 202 Accepted
-        SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: DELETING}
-        PM->>DB: Update resource status to DELETING
-        PM-->>CM: 200 OK
-    end
-    deactivate SPRM
+        PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
+        activate SPRM
 
-    Note over SPRM: Async: SPRM consumes response<br/>from dcm.agents.responses
-
-    opt SPRM notifies PM of QUEUED status
-        SPRM->>PM: Notify: deletion QUEUED<br/>{instanceId, agentName}
-        Note over PM: Resource stays DELETING.<br/>Deletion cannot be re-routed<br/>to a different agent.<br/>The Agent holds the request in<br/>its retry topic and will process<br/>it when the SP recovers.
+        alt SPRM returns error
+            SPRM-->>PM: Error response
+        else SPRM returns 202 Accepted
+            SPRM->>MS: Publish deletion CloudEvent<br/>to agent topic
+            MS->>AG: Deliver to Agent
+            SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: DELETING}
+            PM->>DB: Update resource status to DELETING
+        end
+        deactivate SPRM
     end
 
-    alt Agent reports SP recovered — deletion processed
-        SPRM->>PM: Notify: deletion acknowledged<br/>{instanceId, status: DELETING}
-    else Agent reports SP Unavailable — deletion rejected
-        Note over SPRM: SPRM enqueues the deletion<br/>in the cleanup queue for<br/>deferred retry.<br/>Resource stays DELETING.
+    PM-->>CM: 202 Accepted<br/>{results[]}
+
+    Note over AG,SPRM: Async responses via dcm.agents.responses
+
+    opt SPRM notifies PM of QUEUED status (deletion)
+        SPRM->>PM: deletion QUEUED<br/>{instanceId, agentName}
+        Note over PM: Resource stays DELETING.<br/>Agent retry topic resolves<br/>when SP recovers.
+    end
+
+    alt Agent acknowledges deletion
+        SPRM->>PM: deletion acknowledged
+    else Agent rejects (SP Unavailable)
+        Note over SPRM: Enqueue in cleanup queue<br/>for deferred retry
     end
     deactivate PM
 ```
@@ -598,12 +721,22 @@ sequenceDiagram
 | `pendingRequestTimeout`    | Duration | `60s`   | How long SPRM waits before acting on a `PENDING` instance record that has not received an agent response. Each retry resets the window. Configured at the SPRM level; included here for visibility since PM handles the escalation path.                                                                                                                                                                                     |
 | `pendingRequestMaxRetries` | integer  | `3`     | Maximum number of times SPRM re-publishes the creation CloudEvent before escalating to PM. When set to `0`, SPRM escalates immediately on the first timeout. Configured at the SPRM level.                                                                                                                                                                                                                                   |
 
+#### DAG and CEL
+
+| Step       | Action                                                                                          |
+| ---------- | ----------------------------------------------------------------------------------------------- |
+| Input      | Resolved `resources[]` from Catalog (names, spec, requiresResources)                            |
+| Compile    | Merge CEL + `requiresResources` into dependencies; cycle detection; assign `dagLevel` per row   |
+| Persist    | `requires_resources` and `dagLevel` on each resource row                                        |
+| CEL phases | Plan-time (params, literals) before create; apply-time (dependency outputs) when deps are Ready |
+
 ### Key Characteristics/Notes
 
 - **Intent Preservation**: Original user request is stored before processing for
   audit and rehydration purposes
 - **Policy-Driven**: Agent selection and request validation are handled by
-  Policy Manager
+  Policy Manager. No single batch policy call in v1. Hence, every node is
+  evaluated separately and all must pass before provisioning starts.
 - **Agent-Based Selection**: Service Provider selection is no longer a direct
   concern of the Placement Manager. The Policy Engine selects an Agent based on
   environment, service types, and cost. The Agent internally selects the SP.
@@ -622,8 +755,12 @@ sequenceDiagram
   agent's cancel topic to prevent stale message processing.
 - **Error Handling**: Clear error paths for policy rejections, instance creation
   failures, and queued-request timeouts
-- **State Management**: Both original intent and validated request are stored
-  for complete request lifecycle tracking and rehydration purposes
+- **State Management**: Per-resource rows (including `requires_resources` and
+  `dagLevel`) are stored for lifecycle tracking, orchestration, and rehydration
+- **Status-driven waves**: After level 0, the SPRM status consumer updates
+  service type instance rows and notifies Placement in-process when a resource
+  is `Ready`. Placement then enqueues the next DAG level (see
+  [Status-driven DAG progression](#status-driven-dag-progression)).
 
 ### Future Improvements
 
@@ -633,3 +770,6 @@ sequenceDiagram
   excluding agents)
 - PM-level request priority/ordering (prioritize certain requests over others
   when re-evaluating)
+- Graph-level policy evaluation: a single Policy request over the full DAG
+  snapshot (for example `evaluateGraph`), so cross-resource rules run without
+  per-resource round-trips

@@ -71,3 +71,8 @@ words:
   - databasespec
   - clusterspec
   - CAPI
+  - dagLevel
+  - evaluateGraph
+  - graphwide
+  - OnResourceReady
+  - rehydration
