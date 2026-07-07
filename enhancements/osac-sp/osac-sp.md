@@ -126,10 +126,20 @@ Authorino maps the caller's Keycloak groups (or, for service accounts, the
 to determine assignable, default, and visible tenants for each request. A
 service account granted an admin role receives the universal tenant set `["*"]`
 and can see and manage resources across all tenants without per-tenant
-credentials. The OSAC SP authenticates as a single service account; if DCM needs
-to scope OSAC SP operations to a specific tenant, the tenant is set explicitly
-via the resource's `metadata.tenant` field on create, not via a separate token
-per organization.
+credentials. The OSAC SP authenticates as a single service account; OSAC lets
+that caller set a resource's
+[`metadata.tenant`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/metadata_type.proto#L42-L43)
+explicitly on create, validated against the assignable tenant set
+[determined from the JWT's `tenants` claim](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/default_tenancy_logic.go#L59-L75).
+**This is not yet wired end-to-end today, though:** DCM-to-SP credential
+exchange and tenant propagation are explicitly out of scope for
+[`authentication.md`](../authentication/authentication.md#non-goals), tracked
+separately by [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196),
+and the DCM create flow currently calls the SP with no tenant identifier on the
+wire. Until that lands, the OSAC SP has no per-request tenant value to set and
+falls back to its own service account's default tenant for every object it
+creates — true DCM-tenant-to-OSAC-tenant scoping depends on FLPATH-4196 defining
+how tenant context reaches the SP.
 
 ### Multi-Hub Topology
 
