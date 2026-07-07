@@ -65,8 +65,40 @@ without duplicating OSAC's existing orchestration logic.
 - Multi-hub placement logic — OSAC handles hub selection internally; DCM
   placement selects the environment agent, not the SP.
 - OSAC internal components (operator, AAP playbooks, networking controllers).
+- Per-DCM-tenant isolation within OSAC — the OSAC SP authenticates as a single
+  service account assigned to one OSAC Organization, so v1 is single-tenant from
+  OSAC's perspective: every DCM tenant's clusters and VMs land in the same OSAC
+  Organization and share the same default network. Propagating DCM's own tenant
+  identity into SP-to-provider calls depends on
+  [FLPATH-4115](https://redhat.atlassian.net/browse/FLPATH-4115) (DCM
+  multi-tenancy and isolation), which has not yet landed. See
+  [Authentication](#authentication) for details.
 
 ## Proposal
+
+### User Stories
+
+#### Story 1: Provision an OpenShift Cluster
+
+As a DCM user, I want to request an OpenShift cluster through DCM so that I
+receive a fully provisioned cluster with credentials, without needing to
+interact with OSAC directly.
+
+#### Story 2: Provision a VM
+
+As a DCM user, I want to request a VM through DCM so that I receive a running
+compute instance with connectivity details, without needing to interact with
+OSAC directly.
+
+#### Story 3: Query Resource Status
+
+As a DCM user, I want to check the status of my provisioning request so that I
+know when my resource is ready and can retrieve access credentials.
+
+#### Story 4: Delete a Resource
+
+As a DCM user, I want to delete a cluster or VM I no longer need so that
+infrastructure resources are released.
 
 ### Assumptions
 
@@ -88,6 +120,12 @@ without duplicating OSAC's existing orchestration logic.
 
 ### Authentication
 
+**This flow is single-tenant in v1:** the OSAC SP authenticates to OSAC as one
+shared service account, so every DCM tenant's requests resolve to the same
+OSAC-side Organization. Per-DCM-tenant isolation is an explicit non-goal (see
+[Non-Goals](#non-goals)), pending
+[FLPATH-4115](https://redhat.atlassian.net/browse/FLPATH-4115).
+
 OSAC uses Keycloak as its identity provider with standard OIDC support. The OSAC
 SP authenticates against the OSAC fulfillment service using the OAuth 2.0 client
 credentials flow:
@@ -108,29 +146,23 @@ sequenceDiagram
     participant FS as OSAC Fulfillment Service
 
     Note over SP,KC: SP startup — independent of any DCM request
-    SP->>KC: OAuth2 client credentials grant (SP's own client ID/secret)
-    KC-->>SP: JWT (SP's own service account identity, universal tenant `["*"]`)
+    SP->>KC: OAuth2 client credentials grant
+    KC-->>SP: JWT (organization claim = SP's assigned Organization)
 
     Note over User,FS: Per-request flow, today
-    User->>DCM: Authenticated request (OAuth2-Proxy + Keycloak, DCM's realm)
+    User->>DCM: Authenticated request
     DCM->>DCM: Resolve ActorID/TenantID (DCM-internal only)
-    DCM->>AG: Publish creation request — no token, no tenant identifier
-    AG->>SP: Route to OSAC SP — no token, no tenant identifier
+    DCM->>AG: Publish creation request (no token)
+    AG->>SP: Route to OSAC SP (no token)
     SP->>FS: Create (gRPC), bearer = SP's own JWT
-    Note over SP,FS: metadata.tenant defaults to SP's own default tenant —<br/>DCM's tenant never crosses this boundary
+    Note over SP,FS: metadata.tenant = SP's assigned Organization<br/>(same value for every DCM tenant)
     FS-->>SP: 201 Created
 ```
 
 The SP is never handed a DCM token to begin with — it mints its own, independent
-of whatever request triggered the call — so there is no tenant context to carry
-through to OSAC today.
-
-For multi-tenant fleet management, OSAC does **not** support Keycloak's standard
-token exchange grant (RFC 8693) for the CLI client —
-`standard.token.exchange.enabled: false` on the `osac-cli` client in
-[realm.json](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/it/charts/keycloak/files/realm.json)
-— but this is scoped to same-realm client-to-client exchange, not identity
-provider (IdP) brokered exchange (see below).
+of whatever request triggered the call — so there is no way for DCM's own tenant
+identity to reach OSAC today. Every DCM tenant's resources land under the same
+OSAC Organization assigned to the SP's service account.
 
 Tenancy resolution no longer goes through Authorino: as of
 [`58c8ac44`](https://github.com/osac-project/fulfillment-service/commit/58c8ac447b083ef5115b4901e1fa46a8bfdcb682),
@@ -144,92 +176,20 @@ Go API), and the
 extracts `organization`/`organizations`/`groups` and `realm_access.roles` claims
 and evaluates them against an embedded
 [Rego policy](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/policies/authz.rego#L67-L96)
-to determine assignable, default, and visible tenants for each request. A caller
-with the right realm role receives the universal tenant set `["*"]` and can
-manage resources across all tenants without per-tenant credentials. The OSAC SP
-authenticates as a single service account; OSAC lets that caller set a
-resource's
-[`metadata.tenant`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/metadata_type.proto#L42-L43)
-explicitly on create, validated against the assignable tenant set
-[determined from the token's claims](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/default_tenancy_logic.go#L59-L75).
+to determine assignable, default, and visible tenants for each request. The
+[`organization` claim](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/policies/authz.rego#L67-L88)
+in the caller's JWT — populated by Keycloak's Organizations feature — is what
+drives this: the OSAC SP authenticates as a single service account provisioned
+with its own Organization in OSAC's realm, so
+[`metadata.tenant` resolves to that Organization automatically](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/default_tenancy_logic.go#L77-L94)
+on every create call — the SP does not set it explicitly, and it never falls
+into
+[`SharedTenant`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/tenancy_logic.go#L46-L47),
+OSAC's universally-visible `"shared"` tenant, unless the SP's service account is
+misconfigured with universal (admin) access instead of a scoped Organization.
 
-**This is not yet wired end-to-end today:** DCM-to-SP credential exchange and
-tenant propagation are explicitly out of scope for
-[`authentication.md`](../authentication/authentication.md#non-goals), tracked
-separately by [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196),
-and the DCM create flow currently calls the SP with no tenant identifier on the
-wire. Until that lands, the OSAC SP has no per-request tenant value to set and
-falls back to its own service account's default tenant for every object it
-creates.
-
-OSAC maintainers confirmed two paths to close this gap once FLPATH-4196 defines
-a DCM-issued, tenant-scoped token, treating DCM as an internal component rather
-than exchanging tokens through the disabled client-to-client grant:
-
-1. **Register DCM as a second trusted issuer.** Since
-   `--grpc-authn-trusted-token-issuers` already accepts a list, this is a
-   config-only change on OSAC's side (plus a small Helm chart update, since
-   `auth.issuerUrl` is
-   [currently single-valued](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/charts/service/values.yaml)).
-   The tradeoff: DCM's JWTs would need to natively carry OSAC's expected claim
-   names (`organization`/`organizations`/`groups`), which is unlikely without
-   OSAC-specific changes to how DCM mints tokens.
-2. **Cross-realm token exchange via DCM's own Keycloak realm.** DCM already
-   operates its own Keycloak realm for user authentication
-   ([`authentication.md`](../authentication/authentication.md)) — extending it
-   to also issue SP-facing tokens avoids DCM's token-minting code needing to
-   know OSAC's claim shape at all. As of Keycloak 26.5, the
-   [recommended mechanism](https://www.keycloak.org/2026/01/jwt-authorization-grant)
-   for this is a two-hop chain, not the deprecated external-to-internal
-   exchange: the SP first uses
-   [Standard Token Exchange V2](https://www.keycloak.org/securing-apps/token-exchange)
-   (RFC 8693) against DCM's realm to exchange its DCM token for one scoped to
-   OSAC's realm as the `audience`, then presents that token as a
-   [JWT Authorization Grant](https://www.keycloak.org/2026/01/jwt-authorization-grant)
-   (RFC 7523) to OSAC's realm, which mints a native OSAC-realm token. OSAC's
-   realm needs DCM's realm configured as a Keycloak OIDC identity provider with
-   the JWT Authorization Grant enabled, and claim mappers translating DCM's
-   claims into `organization`/`groups`. Keycloak — not DCM's or OSAC's own code
-   — owns the claim translation.
-
-```mermaid
-sequenceDiagram
-    participant DCM as DCM Control Plane
-    participant DKC as DCM Keycloak Realm
-    participant AG as Environment Agent
-    participant SP as OSAC SP
-    participant OKC as OSAC Keycloak Realm
-    participant FS as OSAC Fulfillment Service
-
-    Note over DCM,DKC: Once FLPATH-4196 defines DCM-issued,<br/>tenant-scoped tokens from DCM's own realm
-    DCM->>DKC: Obtain token (tenant claim, DCM's own shape)
-    DCM->>AG: Publish creation request + DCM-realm token
-    AG->>SP: Route to OSAC SP + DCM-realm token
-
-    alt Option 1: DCM registered as a second trusted issuer
-        SP->>FS: Create (gRPC), bearer = DCM-realm token, unmodified
-        FS->>FS: Validate against DCM issuer (2nd entry in trusted-issuers list)
-        FS->>FS: Extract organization/groups claims directly from DCM's token
-    else Option 2: Cross-realm exchange (RFC 8693 + RFC 7523)
-        SP->>DKC: Token Exchange (RFC 8693), audience = OSAC realm
-        DKC-->>SP: JWT scoped to OSAC realm, still DCM-signed
-        SP->>OKC: JWT Authorization Grant (RFC 7523), assertion = prior JWT
-        OKC-->>SP: Native OSAC-realm token (organization/groups via IdP mappers)
-        SP->>FS: Create (gRPC), bearer = OSAC-realm token
-        FS->>FS: Validate against OSAC's own realm (existing trusted issuer)
-    end
-
-    FS->>FS: Resolve assignable tenant from claims, validate metadata.tenant
-    FS-->>SP: 201 Created, tenant-scoped
-```
-
-In both options the SP relays or exchanges a token DCM minted — it never mints
-one of its own on DCM's behalf. Option 2 is the SP actively calling Keycloak's
-exchange endpoints (twice), not a passive relay; Option 1 is a simpler
-passthrough but couples DCM's token shape to OSAC's claim vocabulary. Both
-remove the OSAC-side blocker but still depend on DCM emitting a signed,
-tenant-scoped token in the first place — the underlying gap remains FLPATH-4196,
-not anything on OSAC's end.
+Per-DCM-tenant isolation is out of scope for this version (see
+[Non-Goals](#non-goals)).
 
 ### Multi-Hub Topology
 
@@ -383,30 +343,6 @@ sequenceDiagram
     end
 ```
 
-### User Stories
-
-#### Story 1: Provision an OpenShift Cluster
-
-As a DCM user, I want to request an OpenShift cluster through DCM so that I
-receive a fully provisioned cluster with credentials, without needing to
-interact with OSAC directly.
-
-#### Story 2: Provision a VM
-
-As a DCM user, I want to request a VM through DCM so that I receive a running
-compute instance with connectivity details, without needing to interact with
-OSAC directly.
-
-#### Story 3: Query Resource Status
-
-As a DCM user, I want to check the status of my provisioning request so that I
-know when my resource is ready and can retrieve access credentials.
-
-#### Story 4: Delete a Resource
-
-As a DCM user, I want to delete a cluster or VM I no longer need so that
-infrastructure resources are released.
-
 ### SP Configuration
 
 The OSAC SP supports configuration options that control how it connects to the
@@ -536,14 +472,15 @@ The OSAC SP translates the DCM cluster request into an
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                | OSAC Field               | Notes                                                          |
-| ------------------------ | ------------------------ | -------------------------------------------------------------- |
-| version                  | spec.release_image       | SP translates K8s version to OCP image                         |
-| nodes.controlPlane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                     |
-| nodes.worker.count       | spec.node_sets[key].size | Number of worker nodes for template's key                      |
-| nodes.worker.cpu/memory  | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing) |
-| metadata.name            | metadata.name            | Cluster name (DNS label format)                                |
-| providerHints.osac       | (see below)              | OSAC-specific parameters                                       |
+| DCM Field                | OSAC Field               | Notes                                                                                                                  |
+| ------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| resourceId               | id                       | DCM-issued identifier from the creation request, set as `Cluster.id` — see [Idempotent Creation](#idempotent-creation) |
+| version                  | spec.release_image       | SP translates K8s version to OCP image                                                                                 |
+| nodes.controlPlane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                                                                             |
+| nodes.worker.count       | spec.node_sets[key].size | Number of worker nodes for template's key                                                                              |
+| nodes.worker.cpu/memory  | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing)                                                         |
+| metadata.name            | metadata.name            | Cluster name (DNS label format)                                                                                        |
+| providerHints.osac       | (see below)              | OSAC-specific parameters                                                                                               |
 
 ##### Node Sizing
 
@@ -612,6 +549,7 @@ keep both catalogs aligned.
 
 ```json
 {
+  "resourceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "version": "1.29",
   "nodes": {
     "controlPlane": {
@@ -637,6 +575,11 @@ keep both catalogs aligned.
 }
 ```
 
+`resourceId` is generated by the environment agent's control-plane side (see
+[Creation Request](../environment-agent/environment-agent.md#cloudevent-message-definitions))
+and forwarded unchanged through the agent to this endpoint. See
+[Idempotent Creation](#idempotent-creation) for how the SP uses it.
+
 **Response:** Returns `201 Created` with the cluster resource in its initial
 state:
 
@@ -661,12 +604,18 @@ state:
 }
 ```
 
+`requestId` in the response is the same value as `resourceId` in the request —
+it is not a newly generated identifier (see
+[Idempotent Creation](#idempotent-creation)).
+
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
 - **401 Unauthorized**: OIDC token expired or invalid (SP-to-OSAC auth failure)
 - **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
-- **409 Conflict**: Cluster with the same `metadata.name` already exists
+- **409 Conflict**: A cluster with the same `resourceId` or `metadata.name`
+  already exists — see [Idempotent Creation](#idempotent-creation) for how a
+  `resourceId` conflict is handled
 - **422 Unprocessable Entity**: No suitable host_type for requested resources
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -684,16 +633,21 @@ The OSAC SP translates the DCM VM request into a
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                     | OSAC Field              | Notes                                                            |
-| ----------------------------- | ----------------------- | ---------------------------------------------------------------- |
-| vcpu.count                    | spec.cores              | Only when `providerHints.osac.instanceType` is unset — see below |
-| memory.size                   | spec.memory_gib         | Convert to GiB integer; only when `instanceType` is unset        |
-| storage.disks[boot].capacity  | spec.boot_disk.size_gib | Boot disk size in GiB                                            |
-| storage.disks[*]              | spec.additional_disks   | Additional disks                                                 |
-| guestOS.type                  | spec.image              | Mapped to image source_ref                                       |
-| access.sshPublicKey           | spec.ssh_key            | SSH public key                                                   |
-| metadata.name                 | metadata.name           | Instance name (DNS label)                                        |
-| providerHints.osac.templateId | spec.template           | OSAC template reference                                          |
+| DCM Field                     | OSAC Field              | Notes                                                                                                                          |
+| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| resourceId                    | id                      | DCM-issued identifier from the creation request, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
+| vcpu.count                    | spec.cores              | Only when `providerHints.osac.instanceType` is unset — see below                                                               |
+| memory.size                   | spec.memory_gib         | Convert to GiB integer; only when `instanceType` is unset                                                                      |
+| storage.disks[boot].capacity  | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                                          |
+| storage.disks[*]              | spec.additional_disks   | Additional disks                                                                                                               |
+| guestOS.type                  | spec.image              | Mapped to image source_ref                                                                                                     |
+| access.sshPublicKey           | spec.ssh_key            | SSH public key                                                                                                                 |
+| metadata.name                 | metadata.name           | Instance name (DNS label)                                                                                                      |
+| providerHints.osac.templateId | spec.template           | OSAC template reference                                                                                                        |
+
+As with cluster creation, `resourceId` is generated by the environment agent's
+control-plane side and forwarded unchanged through the agent to this endpoint —
+see [Idempotent Creation](#idempotent-creation).
 
 **Provider Hints (osac) for VMs:**
 
@@ -750,12 +704,17 @@ fields is set.
 }
 ```
 
+`requestId` in the response is the same value as `resourceId` in the request —
+see [Idempotent Creation](#idempotent-creation).
+
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
 - **401 Unauthorized**: OIDC token expired or invalid
 - **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
-- **409 Conflict**: VM with the same `metadata.name` already exists
+- **409 Conflict**: A VM with the same `resourceId` or `metadata.name` already
+  exists — see [Idempotent Creation](#idempotent-creation) for how a
+  `resourceId` conflict is handled
 - **422 Unprocessable Entity**: Unsupported configuration
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -907,7 +866,7 @@ sequenceDiagram
 - **500 Internal Server Error**: Unexpected error during deletion
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
 
-#### GET /api/v1alpha1/vms (List) / GET /api/v1alpha1/vms/{vmId} / DELETE
+#### GET /api/v1alpha1/vms (List) / GET /api/v1alpha1/vms/{vmId} / DELETE /api/v1alpha1/vms/{vmId}
 
 VM endpoints follow the same patterns as cluster endpoints, using
 `osac.public.v1.ComputeInstances` methods (`List`, `Get`, `Delete`). Pagination
@@ -926,22 +885,100 @@ The health check verifies:
 
 ### Implementation Details/Notes/Constraints
 
+#### Idempotent Creation
+
+Per the
+[environment agent's message definitions](../environment-agent/environment-agent.md#cloudevent-message-definitions),
+the `dcm.request.create` event DCM publishes already carries a DCM-generated
+`resourceId`, specifically so that a duplicate delivery — e.g. after a
+[split-brain agent failover](../environment-agent/environment-agent.md#risks-and-mitigations)
+— can be recognized as a retry instead of creating a second resource. The agent
+forwards this `resourceId` unchanged in the `POST` body to the SP.
+
+OSAC's fulfillment service already supports this pattern natively: its generic
+create path
+[accepts a caller-supplied `id`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/database/dao/generic_dao_create.go#L65-L69)
+and only generates one when the field is left empty:
+
+```go
+// Generate an identifier if needed:
+id := r.object.GetId()
+if id == "" {
+	id = uuid.New()
+}
+```
+
+— and a second `Create` call for an `id` that already exists is
+[rejected with `AlreadyExists`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/database/dao/generic_dao_create.go#L213-L218)
+rather than silently duplicating the resource, since the column is unique:
+
+```go
+case pgerrcode.UniqueViolation:
+	return &ErrAlreadyExists{
+		Table: r.dao.table,
+		ID:    id,
+		Name:  name,
+	}
+```
+
+which the
+[generic server surfaces as a real gRPC status](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/generic_server.go#L479-L482)
+the SP can branch on:
+
+```go
+var alreadyExistsErr *dao.ErrAlreadyExists
+if errors.As(err, &alreadyExistsErr) {
+	return grpcstatus.Errorf(grpccodes.AlreadyExists, "%s", alreadyExistsErr.Error())
+}
+```
+
+The OSAC SP sets `resourceId` as `Cluster.id`/`ComputeInstance.id` on every
+`Create` call instead of leaving it empty. On a retried request with the same
+`resourceId`, OSAC's `AlreadyExists` response is treated as success: the SP
+fetches the existing object by `id` and returns it as if the create had just
+succeeded, rather than surfacing an error to DCM.
+
+```mermaid
+sequenceDiagram
+    participant DCM as DCM Control Plane
+    participant AG as Environment Agent
+    participant SP as OSAC SP
+    participant FS as OSAC Fulfillment Service
+
+    Note over DCM,AG: Normal path
+    DCM->>AG: PUBLISH dcm.request.create<br/>{resourceId, serviceType, spec}
+    AG->>SP: POST /api/v1alpha1/clusters<br/>{resourceId, ...spec}
+    SP->>FS: Clusters/Create<br/>(Cluster.id = resourceId)
+    FS-->>SP: 201 Created
+    SP-->>AG: 201 Created {requestId: resourceId}
+    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resourceId, status: PROVISIONING}
+
+    Note over DCM,AG: Retry path — same resourceId,<br/>e.g. after agent failover mid-flight
+    DCM->>AG: PUBLISH dcm.request.create<br/>{resourceId, serviceType, spec}
+    AG->>SP: POST /api/v1alpha1/clusters<br/>{resourceId, ...spec}
+    SP->>FS: Clusters/Create<br/>(Cluster.id = resourceId)
+    FS-->>SP: AlreadyExists (id already taken)
+    SP->>FS: Clusters/Get(resourceId)
+    FS-->>SP: Existing Cluster object
+    SP-->>AG: 201 Created {requestId: resourceId}<br/>(idempotent — no duplicate created)
+    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resourceId, status: PROVISIONING}
+```
+
 #### ID Mapping
 
-The OSAC SP maintains a mapping between DCM instance IDs and OSAC resource IDs.
-This mapping is stored locally and used to translate between DCM and OSAC
-identifiers on all operations (see
+Because `resourceId` is set directly as OSAC's own `id` at creation time (see
+[Idempotent Creation](#idempotent-creation)), the two identifiers are the same
+value — the SP does not need a separate translation table to go from a DCM
+identifier to an OSAC one. `GET`/`DELETE` on
+`/api/v1alpha1/clusters/{clusterId}` and `/api/v1alpha1/vms/{vmId}` use that
+same value directly as OSAC's `id` (see
 [Status Mapping](#status-mapping-osac-to-dcm)).
 
-**Rehydration:** Per the
-[rehydration flow](../rehydration-flow/rehydration-flow.md), DCM rehydrates a
-resource by issuing an ordinary `POST` with a new `instanceId` to create the
-replacement, followed by an ordinary (deferred) `DELETE` on the old `instanceId`
-once the new one is ready. Both calls are standard lifecycle operations from the
-SP's point of view — the new `instanceId` gets its own mapping entry pointing to
-a new OSAC resource, and the old entry is removed independently when its
-`DELETE` is processed. The SP requires no rehydration-specific logic: the two
-instance IDs are never correlated in the mapping store.
+**Rehydration:** From the SP's perspective, rehydration is indistinguishable
+from an ordinary create followed by an ordinary delete for a different
+`resourceId` — the SP has no rehydration-specific logic. See
+[Rehydration Flow](../rehydration-flow/rehydration-flow.md) for how DCM
+generates the new `resourceId` and defers the old resource's deletion.
 
 #### Ownership Tracking
 
@@ -950,15 +987,19 @@ The SP sets
 on every created resource:
 
 - `metadata.labels["dcm.io/managed-by"] = "dcm"`
-- `metadata.labels["dcm.io/instance-id"] = "<DCM-UUID>"`
+- `metadata.labels["dcm.io/instance-id"] = "<resourceId>"`
 - `metadata.labels["dcm.io/service-type"] = "cluster"` or `"vm"`
+
+`dcm.io/instance-id` duplicates the object's own `id` (see
+[Idempotent Creation](#idempotent-creation)) as a queryable label rather than a
+separate identifier.
 
 These labels enable:
 
 - Filtering owned resources via OSAC's CEL filter:
   `this.metadata.labels["dcm.io/managed-by"] == "dcm"`
-- Reconciliation after ID mapping data loss (matching OSAC resources back to DCM
-  IDs)
+- Reconciliation if DCM's own instance records are lost (listing OSAC resources
+  by `dcm.io/managed-by` and reading `id`/`dcm.io/instance-id` back)
 - No Kubernetes labels are needed — OSAC's metadata API handles ownership
   natively since OSAC manages resources through its fulfillment service, not via
   direct Kubernetes API access.
@@ -970,12 +1011,12 @@ These labels enable:
 in `spec.network_attachments`, each referencing a
 [`Subnet`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/subnet_type.proto)
 in `READY` state. DCM's VM schema has no networking concept, so the SP
-provisions and manages a default network per tenant transparently, with no DCM
-schema change required:
+provisions and manages a default network transparently, with no DCM schema
+change required:
 
-1. On the first VM request for a tenant, the SP checks (via `Subnets/List`
-   filtered by `metadata.tenant`) whether it has already provisioned a default
-   subnet for that tenant.
+1. On the first VM request, the SP checks (via `Subnets/List` filtered by
+   `metadata.tenant`) whether it has already provisioned a default subnet for
+   that tenant.
 2. If not, it creates a
    [`VirtualNetwork`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/virtual_network_type.proto)
    — omitting `network_class` so the platform's default `NetworkClass` is used —
@@ -983,6 +1024,10 @@ schema change required:
 3. The resulting subnet ID is cached per tenant in the SP's local mapping store.
 4. Every subsequent VM create for that tenant attaches
    `network_attachments: [{subnet: "<cached-id>"}]` automatically.
+
+Since `metadata.tenant` resolves to the SP's single assigned Organization (see
+[Non-Goals](#non-goals)), this logic provisions one shared default subnet for
+all DCM tenants today, not one per tenant.
 
 #### Status Polling
 
