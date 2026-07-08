@@ -225,7 +225,7 @@ a client-specified ID provided via the `?id=` query parameter (validated against
 AEP-122 pattern `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`). Kubernetes resource
 names are server-assigned using the `generateName` mechanism with
 `metadata.name` as the prefix (e.g., `"web-app-"`). If a container with the same
-`metadata.name` already exists, the K8s Container SP returns a `409 Conflict`
+`dcm-instance-id` already exists, the K8s Container SP returns a `409 Conflict`
 error response without modifying the existing resource.
 
 **providerHints:**
@@ -317,8 +317,7 @@ set to `PENDING` after the resource is created.
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
-- **409 Conflict**: Deployment with the same `metadata.name` already exists in
-  the configured namespace
+- **409 Conflict**: Container with the same `dcm-instance-id` already exists
 - **500 Internal Server Error**: Unexpected error during resource creation
 
 #### GET /api/v1alpha1/containers
