@@ -197,7 +197,7 @@ resources.
 | GET    | /api/v1alpha1/containers               | List all containers           |
 | GET    | /api/v1alpha1/containers/{containerId} | Get a container instance      |
 | DELETE | /api/v1alpha1/containers/{containerId} | Delete a container instance   |
-| GET    | /api/v1alpha1/health                   | K8s Container SP health check |
+| GET    | /api/v1alpha1/containers/health        | K8s Container SP health check |
 
 ##### AEP Compliance
 
@@ -248,6 +248,10 @@ current implementation.
 ```json
 {
   "spec": {
+    "serviceType": "container",
+    "metadata": {
+      "name": "web-app"
+    },
     "image": { "reference": "quay.io/myapp:v1.2" },
     "resources": {
       "cpu": { "min": 1, "max": 2 },
@@ -266,18 +270,16 @@ current implementation.
         { "containerPort": 8080, "visibility": "external" },
         { "containerPort": 9090, "visibility": "internal" }
       ]
-    },
-    "metadata": {
-      "name": "web-app"
-    },
-    "serviceType": "container"
+    }
   }
 }
 ```
 
-> **Note**: The request body uses a `CreateContainerRequest` wrapper with a
-> `spec` field containing the container input fields. The response is a bare
-> Container without the wrapper.
+The request and response use the same `Container` schema. The `spec` field
+contains the container input fields as defined in the
+[Container Schema](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#containers).
+Server-generated read-only fields (`id`, `path`, `status`, `createTime`,
+`updateTime`, `service`, `spec.metadata.namespace`) appear only in the response.
 
 **Response:** Returns `201 Created` with the following payload. The status is
 set to `PENDING` after the resource is created.
@@ -291,9 +293,31 @@ set to `PENDING` after the resource is created.
   "status": "PENDING",
   "createTime": "2026-01-21T10:00:00Z",
   "updateTime": "2026-01-21T10:00:00Z",
-  "metadata": {
-    "name": "web-app",
-    "namespace": "production"
+  "spec": {
+    "serviceType": "container",
+    "metadata": {
+      "name": "web-app",
+      "namespace": "production"
+    },
+    "image": { "reference": "quay.io/myapp:v1.2" },
+    "resources": {
+      "cpu": { "min": 1, "max": 2 },
+      "memory": { "min": "1GB", "max": "2GB" }
+    },
+    "process": {
+      "command": ["/app/start"],
+      "args": ["--config", "/etc/config.yaml"],
+      "env": [
+        { "name": "ENV", "value": "production" },
+        { "name": "LOG_LEVEL", "value": "info" }
+      ]
+    },
+    "network": {
+      "ports": [
+        { "containerPort": 8080, "visibility": "external" },
+        { "containerPort": 9090, "visibility": "internal" }
+      ]
+    }
   },
   "service": {
     "name": "web-app-k7x2m",
@@ -309,10 +333,10 @@ set to `PENDING` after the resource is created.
 
 > **Note**: The `service` field is included only when a Service is created
 > (i.e., when at least one port has `visibility` != `none`). The `service.ports`
-> array reflects all non-none ports from the request's `network.ports[]`,
+> array reflects all non-none ports from the request's `spec.network.ports[]`,
 > confirming that a single Service exposes all applicable container ports. The
-> `metadata.namespace` field reflects the namespace configured in the SP. The
-> `service.name` is the server-assigned Kubernetes Service resource name.
+> `spec.metadata.namespace` field reflects the namespace configured in the SP.
+> The `service.name` is the server-assigned Kubernetes Service resource name.
 
 **Error Handling:**
 
@@ -348,16 +372,24 @@ set to `PENDING` after the resource is created.
       "status": "RUNNING",
       "createTime": "2026-01-20T08:00:00Z",
       "updateTime": "2026-01-20T08:01:30Z",
-      "network": {
-        "ip": "10.244.0.25",
-        "ports": [
-          { "containerPort": 8080, "visibility": "external" },
-          { "containerPort": 9090, "visibility": "internal" }
-        ]
-      },
-      "metadata": {
-        "name": "web-app",
-        "namespace": "production"
+      "spec": {
+        "serviceType": "container",
+        "metadata": {
+          "name": "web-app",
+          "namespace": "production"
+        },
+        "image": { "reference": "quay.io/myapp:v1.2" },
+        "resources": {
+          "cpu": { "min": 1, "max": 2 },
+          "memory": { "min": "1GB", "max": "2GB" }
+        },
+        "network": {
+          "ip": "10.244.0.25",
+          "ports": [
+            { "containerPort": 8080, "visibility": "external" },
+            { "containerPort": 9090, "visibility": "internal" }
+          ]
+        }
       },
       "service": {
         "name": "web-app-k7x2m",
@@ -376,13 +408,21 @@ set to `PENDING` after the resource is created.
       "status": "FAILED",
       "createTime": "2026-01-20T09:00:00Z",
       "updateTime": "2026-01-20T09:02:00Z",
-      "network": {
-        "ip": "10.244.0.26",
-        "ports": [{ "containerPort": 3000, "visibility": "internal" }]
-      },
-      "metadata": {
-        "name": "api-gateway",
-        "namespace": "production"
+      "spec": {
+        "serviceType": "container",
+        "metadata": {
+          "name": "api-gateway",
+          "namespace": "production"
+        },
+        "image": { "reference": "docker.io/api-gw:v3.1" },
+        "resources": {
+          "cpu": { "min": 1, "max": 1 },
+          "memory": { "min": "512MB", "max": "1GB" }
+        },
+        "network": {
+          "ip": "10.244.0.26",
+          "ports": [{ "containerPort": 3000, "visibility": "internal" }]
+        }
       },
       "service": {
         "name": "api-gateway-m9p3q",
@@ -397,12 +437,20 @@ set to `PENDING` after the resource is created.
       "status": "PENDING",
       "createTime": "2026-01-20T10:00:00Z",
       "updateTime": "2026-01-20T10:00:00Z",
-      "network": {
-        "ports": [{ "containerPort": 5000, "visibility": "none" }]
-      },
-      "metadata": {
-        "name": "worker-service",
-        "namespace": "production"
+      "spec": {
+        "serviceType": "container",
+        "metadata": {
+          "name": "worker-service",
+          "namespace": "production"
+        },
+        "image": { "reference": "quay.io/worker:v2.0" },
+        "resources": {
+          "cpu": { "min": 2, "max": 4 },
+          "memory": { "min": "1GB", "max": "4GB" }
+        },
+        "network": {
+          "ports": [{ "containerPort": 5000, "visibility": "none" }]
+        }
       }
     }
   ],
@@ -411,11 +459,12 @@ set to `PENDING` after the resource is created.
 ```
 
 **Note:** The response includes fully-populated resources as required by
-AEP-132. Each container instance includes all available fields (id, path,
-status, timestamps, network, metadata, service) to match the detail level of the
-GET single resource endpoint. The `service` field is omitted for containers
-where all ports have `visibility=none`. The `externalIP` field is included only
-for LoadBalancer type Services when an external IP has been assigned.
+AEP-132. Each container instance includes all fields (read-only envelope fields
+plus the full `spec` with all input fields echoed back) to match the detail
+level of the GET single resource endpoint. The `service` field is omitted for
+containers where all ports have `visibility=none`. The `externalIP` field is
+included only for LoadBalancer type Services when an external IP has been
+assigned.
 
 **Error Handling:**
 
@@ -447,16 +496,32 @@ for LoadBalancer type Services when an external IP has been assigned.
   "status": "RUNNING",
   "createTime": "2026-01-21T10:00:00Z",
   "updateTime": "2026-01-21T10:01:30Z",
-  "network": {
-    "ip": "10.244.0.25",
-    "ports": [
-      { "containerPort": 8080, "visibility": "external" },
-      { "containerPort": 9090, "visibility": "internal" }
-    ]
-  },
-  "metadata": {
-    "name": "web-app",
-    "namespace": "production"
+  "spec": {
+    "serviceType": "container",
+    "metadata": {
+      "name": "web-app",
+      "namespace": "production"
+    },
+    "image": { "reference": "quay.io/myapp:v1.2" },
+    "resources": {
+      "cpu": { "min": 1, "max": 2 },
+      "memory": { "min": "1GB", "max": "2GB" }
+    },
+    "process": {
+      "command": ["/app/start"],
+      "args": ["--config", "/etc/config.yaml"],
+      "env": [
+        { "name": "ENV", "value": "production" },
+        { "name": "LOG_LEVEL", "value": "info" }
+      ]
+    },
+    "network": {
+      "ip": "10.244.0.25",
+      "ports": [
+        { "containerPort": 8080, "visibility": "external" },
+        { "containerPort": 9090, "visibility": "internal" }
+      ]
+    }
   },
   "service": {
     "name": "web-app-k7x2m",
@@ -475,9 +540,9 @@ for LoadBalancer type Services when an external IP has been assigned.
 > container (all ports have `visibility=none`). The `service.ports` array shows
 > all ports exposed by the single Service created for this container. The
 > `service.name` is the server-assigned Kubernetes Service resource name. On
-> GET, the `visibility` field on response ports is inferred from the Service
-> type: `internal` for ClusterIP, `external` for LoadBalancer/NodePort, `none`
-> if no Service exists.
+> GET, the `visibility` field on `spec.network.ports` is inferred from the
+> Service type: `internal` for ClusterIP, `external` for LoadBalancer/NodePort,
+> `none` if no Service exists.
 
 **Error Handling:**
 
@@ -497,7 +562,7 @@ Remove a single container instance (`Deployment` with cascading delete for
 - **404 Not Found**: Container with the specified `containerId` does not exist
 - **500 Internal Server Error**: Unexpected error during resource deletion
 
-#### GET /api/v1alpha1/health
+#### GET /api/v1alpha1/containers/health
 
 **Description:** Retrieve the health status for the Kubernetes Container Service
 Provider API.
