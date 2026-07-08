@@ -146,17 +146,17 @@ Example request payload:
 ```json
 {
   "name": "k8s-container-sp",
-  "service_type": "container",
-  "schema_version": "v1alpha1",
-  "display_name": "Kubernetes Container Service Provider",
+  "serviceType": "container",
+  "schemaVersion": "v1alpha1",
+  "displayName": "Kubernetes Container Service Provider",
   "endpoint": "https://k8s-container-sp.example.com/api/v1alpha1/containers",
   "operations": ["CREATE", "DELETE", "READ"],
   "metadata": {
     "zone": "us-east-1b",
-    "region_code": "us-east-1",
+    "regionCode": "us-east-1",
     "resources": {
-      "total_cpu": "200",
-      "total_memory": "2TB"
+      "totalCpu": "200",
+      "totalMemory": "2TB"
     }
   }
 }
@@ -170,8 +170,8 @@ the
 
 **K8s Container SP-specific requirements:**
 
-- `service_type` field must be set to `"container"`
-- `schema_version` field must be set to `"v1alpha1"`
+- `serviceType` field must be set to `"container"`
+- `schemaVersion` field must be set to `"v1alpha1"`
 - `operations` field must include at minimum: `CREATE`, `READ`, `DELETE`
 - `metadata.resources` fields may or may not define the cluster capacity **at
   the time of registration**
@@ -289,8 +289,8 @@ set to `PENDING` after the resource is created.
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "path": "containers/123e4567-e89b-12d3-a456-426614174000",
   "status": "PENDING",
-  "create_time": "2026-01-21T10:00:00Z",
-  "update_time": "2026-01-21T10:00:00Z",
+  "createTime": "2026-01-21T10:00:00Z",
+  "updateTime": "2026-01-21T10:00:00Z",
   "metadata": {
     "name": "web-app",
     "namespace": "production"
@@ -326,16 +326,16 @@ set to `PENDING` after the resource is created.
 
 **Query Parameters:**
 
-- `max_page_size` (optional): Maximum number of resources to return in a single
+- `maxPageSize` (optional): Maximum number of resources to return in a single
   page. Default: 50.
-- `page_token` (optional): Token indicating the starting point for the page.
+- `pageToken` (optional): Token indicating the starting point for the page.
 
 **Process Flow:**
 
 1. Handler receives `GET` request with optional pagination parameters.
 2. Calls `ListContainersFromCluster()` with pagination context.
 3. Returns fully-populated container resources per AEP-132.
-4. Response includes pagination metadata (`next_page_token`).
+4. Response includes pagination metadata (`nextPageToken`).
 
 **Example Response Payload:**
 
@@ -346,8 +346,8 @@ set to `PENDING` after the resource is created.
       "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "path": "containers/696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "status": "RUNNING",
-      "create_time": "2026-01-20T08:00:00Z",
-      "update_time": "2026-01-20T08:01:30Z",
+      "createTime": "2026-01-20T08:00:00Z",
+      "updateTime": "2026-01-20T08:01:30Z",
       "network": {
         "ip": "10.244.0.25",
         "ports": [
@@ -374,8 +374,8 @@ set to `PENDING` after the resource is created.
       "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
       "path": "containers/c66be104-eea3-4246-975c-e6cc9b32d74d",
       "status": "FAILED",
-      "create_time": "2026-01-20T09:00:00Z",
-      "update_time": "2026-01-20T09:02:00Z",
+      "createTime": "2026-01-20T09:00:00Z",
+      "updateTime": "2026-01-20T09:02:00Z",
       "network": {
         "ip": "10.244.0.26",
         "ports": [{ "containerPort": 3000, "visibility": "internal" }]
@@ -395,8 +395,8 @@ set to `PENDING` after the resource is created.
       "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
       "path": "containers/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
       "status": "PENDING",
-      "create_time": "2026-01-20T10:00:00Z",
-      "update_time": "2026-01-20T10:00:00Z",
+      "createTime": "2026-01-20T10:00:00Z",
+      "updateTime": "2026-01-20T10:00:00Z",
       "network": {
         "ports": [{ "containerPort": 5000, "visibility": "none" }]
       },
@@ -406,7 +406,7 @@ set to `PENDING` after the resource is created.
       }
     }
   ],
-  "next_page_token": "a1b2c3d4e5f6"
+  "nextPageToken": "a1b2c3d4e5f6"
 }
 ```
 
@@ -445,8 +445,8 @@ for LoadBalancer type Services when an external IP has been assigned.
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "path": "containers/123e4567-e89b-12d3-a456-426614174000",
   "status": "RUNNING",
-  "create_time": "2026-01-21T10:00:00Z",
-  "update_time": "2026-01-21T10:01:30Z",
+  "createTime": "2026-01-21T10:00:00Z",
+  "updateTime": "2026-01-21T10:01:30Z",
   "network": {
     "ip": "10.244.0.25",
     "ports": [
