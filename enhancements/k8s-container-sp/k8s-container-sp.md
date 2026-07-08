@@ -365,7 +365,7 @@ set to `PENDING` after the resource is created.
 
 ```json
 {
-  "results": [
+  "containers": [
     {
       "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "path": "containers/696511df-1fcb-4f66-8ad5-aeb828f383a0",
