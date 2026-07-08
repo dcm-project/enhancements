@@ -31,10 +31,9 @@ see-also:
 
 This enhancement introduces identity management and authentication to DCM. It
 establishes an Auth Provider strategy using OAuth2-Proxy as the auth proxy,
-defines the actor and tenant data models, propagates identity context through
-the request chain, and enforces tenant isolation at the data layer. This
-resolves the authentication and identity gaps explicitly deferred by every
-existing DCM enhancement.
+defines the actor data model, and propagates authenticated identity through the
+request chain. This resolves the authentication and identity gaps explicitly
+deferred by every existing DCM enhancement.
 
 ## Motivation
 
@@ -42,15 +41,12 @@ DCM currently has no authentication or authorization enforcement. This means:
 
 - Any client with network access can call any API endpoint without
   authentication
-- The Policy Engine assumes `userId` and `tenantId` are available during
-  evaluation, but no component provides them
+- The Policy Engine assumes `userId` is available during evaluation, but no
+  component provides it
 - The ACM Cluster SP exposes kubeconfig credentials in unauthenticated GET
   responses
 - The RHDH Backstage plugin already obtains and forwards OAuth2 bearer tokens to
   the gateway, which ignores them
-- Multi-tenancy cannot be enforced without tenant identity in the data model
-- The policy hierarchy (Global > Tenant > User) cannot function without knowing
-  who the caller is
 
 Every existing enhancement explicitly defers authentication and authorization as
 a non-goal. This enhancement is the foundation those deferrals depend on.
@@ -61,14 +57,11 @@ a non-goal. This enhancement is the foundation those deferrals depend on.
   at the auth proxy layer, with Keycloak as the V1 identity provider
 - Establish proxy-level authentication using OAuth2-Proxy as a reverse proxy in
   front of dcm-server
-- Define the actor data model (users, service accounts) and tenant data model
-- Propagate authenticated identity (actor ID, tenant ID, actor type) through the
-  request context to all domain handlers in dcm-server
+- Define the actor data model (users, service accounts)
+- Propagate authenticated identity (actor ID, actor type) through the request
+  context to all domain handlers in dcm-server
 - Add `securitySchemes` to the OpenAPI specification and replace the current
   no-auth middleware with actor middleware in the HTTP handler chain
-- Enforce tenant isolation via application-level query middleware that scopes
-  all database operations to the authenticated tenant, backed by a CI lint rule
-  that fails the build when tenant scoping is missing from query sites
 - Add CLI authentication (`dcm login`) using OIDC Device Authorization Grant so
   the CLI is usable when gateway auth is enforced
 
@@ -77,6 +70,9 @@ a non-goal. This enhancement is the foundation those deferrals depend on.
 - **Authorization / RBAC** (role-based access control, permission matrices, role
   assignment APIs) — tracked separately under
   [FLPATH-2799](https://redhat.atlassian.net/browse/FLPATH-2799)
+- **Multi-tenancy and tenant isolation** (tenant data model, tenant-scoped
+  queries, cross-tenant access control) — tracked separately under
+  [FLPATH-4115](https://redhat.atlassian.net/browse/FLPATH-4115)
 - **Service Provider authentication** (SP registration auth, DCM-to-SP
   credential exchange, NATS messaging auth) — tracked by
   [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196)
@@ -87,12 +83,9 @@ a non-goal. This enhancement is the foundation those deferrals depend on.
 
 1. **Platform Admin** configures an identity provider so all API access requires
    authentication
-2. **Consumer Developer** authenticates via SSO and browses the tenant-scoped
-   service catalog
-3. **Tenant Admin** manages policies and catalog items within their tenant
-   boundary
-4. **Policy Engine** receives verified `userId` and `tenantId` to apply the
-   Global > Tenant > User hierarchy
+2. **Consumer Developer** authenticates via SSO and browses the service catalog
+3. **Policy Engine** receives verified `userId` to evaluate policies against the
+   authenticated caller
 
 ### Implementation Details/Notes/Constraints
 
@@ -109,25 +102,25 @@ analysis).
 The codebase already has the scaffolding for auth — it just needs to be wired
 up:
 
-| Component                                                                | Current State                                   | Integration Point                                                                               |
-| ------------------------------------------------------------------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Auth Proxy                                                               | Not deployed                                    | Deploy OAuth2-Proxy as reverse proxy in front of dcm-server                                     |
-| [dcm-server](https://github.com/dcm-project/control-plane) (all domains) | No auth middleware configured                   | Insert actor middleware in the HTTP handler chain; add tenant-scoping to all domain query sites |
-| [OpenAPI specs](https://github.com/dcm-project/control-plane)            | 401/403 responses defined, no `securitySchemes` | Add Bearer token security scheme                                                                |
-| [CLI (`dcm`)](https://github.com/dcm-project/cli)                        | Plain HTTP client, no auth headers              | Add token acquisition (device flow or token file) and `Authorization: Bearer` header injection  |
-| RHDH plugin                                                              | SSO token exchange already implemented          | OAuth2-Proxy validates the tokens it already sends                                              |
-| [Policy domain](https://github.com/dcm-project/control-plane)            | Global/Tenant/User hierarchy defined            | Enforce hierarchy using verified identity from request context                                  |
+| Component                                                                | Current State                                   | Integration Point                                                                              |
+| ------------------------------------------------------------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Auth Proxy                                                               | Not deployed                                    | Deploy OAuth2-Proxy as reverse proxy in front of dcm-server                                    |
+| [dcm-server](https://github.com/dcm-project/control-plane) (all domains) | No auth middleware configured                   | Insert actor middleware in the HTTP handler chain                                              |
+| [OpenAPI specs](https://github.com/dcm-project/control-plane)            | 401/403 responses defined, no `securitySchemes` | Add Bearer token security scheme                                                               |
+| [CLI (`dcm`)](https://github.com/dcm-project/cli)                        | Plain HTTP client, no auth headers              | Add token acquisition (device flow or token file) and `Authorization: Bearer` header injection |
+| RHDH plugin                                                              | SSO token exchange already implemented          | OAuth2-Proxy validates the tokens it already sends                                             |
+| [Policy domain](https://github.com/dcm-project/control-plane)            | Policy hierarchy defined                        | Provide verified identity from request context for policy evaluation                           |
 
 ### Risks and Mitigations
 
-| Risk                                                                                                                    | Impact                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tenant model is hard to retrofit                                                                                        | Schema migrations affect every table and query                             | Define schema early; one database and one migration stream simplify coordination                                                                                                                                                                                                                                                                                                                                                                                        |
-| Auth adds latency to every request                                                                                      | User-perceived slowdown                                                    | JWT validation is local (cached JWKS, no IdP call per request)                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Breaking existing dev workflows                                                                                         | Developer friction                                                         | Seed migration creates admin actor from `DCM_ADMIN_SUBJECT` at first startup; local dev uses a containerized Keycloak with a pre-configured realm; long-lived dev tokens                                                                                                                                                                                                                                                                                                |
-| Keycloak becomes a single point of failure                                                                              | Auth outage blocks all API access                                          | Cached JWTs remain valid during short outages (no per-request IdP call); OAuth2-Proxy session cookies survive brief Keycloak downtime                                                                                                                                                                                                                                                                                                                                   |
-| OAuth2-Proxy is both auth and routing — its failure blocks all traffic, not just authenticated traffic                  | Total API outage                                                           | Liveness probe restarts the container; compose `restart: unless-stopped`; OAuth2-Proxy is a single static binary with minimal failure surface                                                                                                                                                                                                                                                                                                                           |
-| Header forgery via direct backend access — any process bypassing OAuth2-Proxy can forge X-Forwarded-\* identity headers | Full identity/tenant impersonation until inter-service auth is implemented | Defense in depth: (1) OAuth2-Proxy injects a shared-secret header (`X-Auth-Proxy-Secret`) that dcm-server validates on every request — requests with a missing or incorrect secret are rejected. The secret is a shared value configured as an environment variable in both containers via compose; (2) compose network isolation restricts dcm-server access; with the monolith, internal domain calls are in-process so this risk is limited to external access paths |
+| Risk                                                                                                                            | Impact                                                              | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth adds latency to every request                                                                                              | User-perceived slowdown                                             | JWT validation is local (cached JWKS, no IdP call per request)                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Breaking existing dev workflows                                                                                                 | Developer friction                                                  | Seed migration creates admin actor from `DCM_ADMIN_SUBJECT` at first startup; local dev uses a containerized Keycloak with a pre-configured realm; long-lived dev tokens                                                                                                                                                                                                                                                                                                |
+| Keycloak becomes a single point of failure                                                                                      | Auth outage blocks all API access                                   | Cached JWTs remain valid during short outages (no per-request IdP call); OAuth2-Proxy session cookies survive brief Keycloak downtime                                                                                                                                                                                                                                                                                                                                   |
+| OAuth2-Proxy is both auth and routing — its failure blocks all traffic, not just authenticated traffic                          | Total API outage                                                    | Liveness probe restarts the container; compose `restart: unless-stopped`; OAuth2-Proxy is a single static binary with minimal failure surface                                                                                                                                                                                                                                                                                                                           |
+| Header forgery via direct backend access — any process bypassing OAuth2-Proxy can forge X-Forwarded-\* identity headers         | Full identity impersonation until inter-service auth is implemented | Defense in depth: (1) OAuth2-Proxy injects a shared-secret header (`X-Auth-Proxy-Secret`) that dcm-server validates on every request — requests with a missing or incorrect secret are rejected. The secret is a shared value configured as an environment variable in both containers via compose; (2) compose network isolation restricts dcm-server access; with the monolith, internal domain calls are in-process so this risk is limited to external access paths |
+| Service providers have no authentication mechanism — SP API calls (registration, instance management) fail when auth is enabled | SP compose profiles are non-functional with auth enabled            | `AUTH_DISABLED=true` environment variable on dcm-server bypasses auth middleware. SP compose profiles set this flag until [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196) delivers service provider authentication. `AUTH_DISABLED` is a transitional mechanism — it must not be used in production deployments                                                                                                                                          |
 
 ## Design Details
 
@@ -148,10 +141,10 @@ performs OAuth2 `client_credentials` token exchange against Red Hat SSO
 **Bootstrap:** The initial admin account is seeded at deploy time via the
 `DCM_ADMIN_SUBJECT` environment variable, which contains the Keycloak `sub`
 claim of the platform administrator. On first startup, dcm-server runs a seed
-migration that creates a default tenant and an admin actor linked to that
-Keycloak subject through an identity binding. No custom token endpoint, JWKS
-endpoint, or local password storage is needed — all authentication flows go
-through Keycloak and OAuth2-Proxy.
+migration that creates an admin actor linked to that Keycloak subject through an
+identity binding. No custom token endpoint, JWKS endpoint, or local password
+storage is needed — all authentication flows go through Keycloak and
+OAuth2-Proxy.
 
 Local development and CI use a containerized Keycloak instance with a
 pre-configured realm (realm export JSON shipped in the repository).
@@ -162,12 +155,10 @@ V1 custom code:
 
 - [Actor middleware](#what-dcm-builds-on-top) — resolves identity from
   OAuth2-Proxy headers, populates request context
-- [Tenant query middleware](#tenant-scoped-query-middleware) — injects
-  `WHERE tenant_id = ?` into every database query
-- [Database migrations](#3-actor-and-tenant-data-model) — auth tables (actors,
-  actor_identities, tenants) and `tenant_id` columns on all domain tables
-- [Seed migration](#v1-implementations) — bootstrap default tenant and admin
-  actor from `DCM_ADMIN_SUBJECT`
+- [Database migrations](#3-actor-data-model) — auth tables (actors,
+  actor_identities)
+- [Seed migration](#v1-implementations) — bootstrap admin actor from
+  `DCM_ADMIN_SUBJECT`
 - [OAuth2-Proxy configuration](#2-auth-proxy-layer) — container in compose,
   configured as reverse proxy in front of dcm-server
 
@@ -223,9 +214,9 @@ RBAC integration under
 The actor middleware replaces the current no-auth configuration in dcm-server's
 HTTP handler chain. It reads `X-Forwarded-User`, looks up the actor via
 `actor_identities.external_id`, caches the result (configurable TTL, default
-60s), checks actor/tenant status (rejects 403 if not active), and populates
-`ActorID`/`TenantID`/`ActorType` on the request context. Downstream handlers
-read from context — they never touch HTTP headers directly.
+60s), checks actor status (rejects 403 if not active), and populates
+`ActorID`/`ActorType` on the request context. Downstream handlers read from
+context — they never touch HTTP headers directly.
 
 dcm-server trusts `X-Forwarded-*` headers because OAuth2-Proxy strips and
 overwrites client-supplied `X-Forwarded-*` headers before proxying to the
@@ -249,15 +240,14 @@ continuity with rotation on each use.
 | `jti` deny list in actor middleware                     | Immediate          | Deferred — natural expiry is sufficient for V1 |
 | OIDC back-channel logout (browser sessions only)        | Immediate          | Supported by OAuth2-Proxy                      |
 
-Role/tenant changes propagate at the next token refresh (bounded by access token
-TTL).
+Role changes propagate at the next token refresh (bounded by access token TTL).
 
-### 3. Actor and Tenant Data Model
+### 3. Actor Data Model
 
 These entities are new tables in DCM's PostgreSQL database — they don't
 duplicate Keycloak's user store. Keycloak owns authentication (passwords, SSO
-sessions, MFA); these tables map Keycloak identities to DCM-internal actors and
-tenants so the control plane can enforce tenant isolation and track ownership.
+sessions, MFA); these tables map Keycloak identities to DCM-internal actors so
+the control plane can track identity and ownership.
 
 #### Actor Entity
 
@@ -268,7 +258,6 @@ tenants so the control plane can enforce tenant isolation and track ownership.
   "email": "jdoe@example.com",
   "displayName": "Jane Doe",
   "type": "human | service_account",
-  "tenantId": "uuid",
   "status": "active | suspended | deactivated",
   "createdAt": "timestamp",
   "updatedAt": "timestamp"
@@ -278,8 +267,7 @@ tenants so the control plane can enforce tenant isolation and track ownership.
 V1 defines two actor types: `human` for interactive users and `service_account`
 for programmatic API clients (CI pipelines, RHDH plugin).
 
-Usernames are unique within a tenant, not globally — enforced by a compound
-unique constraint `(username, tenant_id)`.
+Usernames are globally unique — enforced by a unique constraint on `username`.
 
 #### Actor Identity Entity
 
@@ -297,78 +285,25 @@ have multiple identity bindings (one per external identity provider).
 }
 ```
 
-#### Tenant Entity
+**Entity relationships:** An actor has one or more identity bindings (one per
+external identity provider).
 
-```json
-{
-  "id": "uuid",
-  "name": "acme-corp",
-  "displayName": "Acme Corporation",
-  "status": "active | suspended | deactivated",
-  "createdAt": "timestamp",
-  "updatedAt": "timestamp"
-}
-```
+#### Actor Status Enforcement
 
-Tenants are created via admin API only — no self-service registration in V1. The
-seed migration creates a default tenant at first startup.
+The actor middleware checks `actors.status` on every request (included in the
+cached actor lookup). Requests are rejected before reaching any handler:
 
-**Entity relationships:** A tenant has many actors; an actor has one or more
-identity bindings (one per external identity provider).
-
-#### Actor and Tenant Status Enforcement
-
-The actor middleware checks `actors.status` and `tenants.status` on every
-request (both values are included in the cached actor lookup). Requests are
-rejected before reaching any handler:
-
-| Status                           | Behavior                                                                                   | HTTP Response                           |
-| -------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------------------- |
-| Actor `active` + Tenant `active` | Request proceeds normally                                                                  | —                                       |
-| Actor `suspended`                | Request blocked; actor can be reactivated by an admin                                      | `403 Forbidden` — "account suspended"   |
-| Actor `deactivated`              | Request blocked; actor record retained for audit, login permanently disabled               | `403 Forbidden` — "account deactivated" |
-| Tenant `suspended`               | Request blocked for all actors in the tenant; reversible by admin                          | `403 Forbidden` — "tenant suspended"    |
-| Tenant `deactivated`             | Request blocked for all actors in the tenant; tenant retained for audit, not reactivatable | `403 Forbidden` — "tenant deactivated"  |
+| Status              | Behavior                                                                     | HTTP Response                           |
+| ------------------- | ---------------------------------------------------------------------------- | --------------------------------------- |
+| Actor `active`      | Request proceeds normally                                                    | —                                       |
+| Actor `suspended`   | Request blocked; actor can be reactivated by an admin                        | `403 Forbidden` — "account suspended"   |
+| Actor `deactivated` | Request blocked; actor record retained for audit, login permanently disabled | `403 Forbidden` — "account deactivated" |
 
 Suspension is reversible; deactivation is a soft delete (record preserved for
 audit, cannot be reactivated). Status changes take effect within the actor cache
 TTL (60s).
 
-### 4. Tenant Isolation
-
-Every resource in DCM is scoped to a tenant. Isolation is enforced at the
-application layer via middleware that injects a tenant filter into every
-database query. This is the standard approach used by multi-tenant platforms —
-it keeps filtering visible in the code, straightforward to debug, and extensible
-when cross-tenant access is introduced under
-[FLPATH-2799](https://redhat.atlassian.net/browse/FLPATH-2799).
-
-#### Tenant-Scoped Query Middleware
-
-Tenant query middleware injects `WHERE tenant_id = ?` into every database query,
-reading `TenantID` from the request context. It must be applied at every query
-site (list, get, create, update, delete). Cross-tenant admin access is deferred
-to [FLPATH-2799](https://redhat.atlassian.net/browse/FLPATH-2799); V1 enforces
-strict tenant scoping for all actors. All writes stamp `tenant_id` from context
-— a missing `tenant_id` is a bug rejected before reaching the database.
-
-Application-level filtering is chosen over PostgreSQL RLS (operational
-complexity outweighs benefit at DCM's scale; RLS can layer on later). A CI lint
-rule (merge-blocking from day one) and tenant-leak integration tests are the
-safeguards.
-
-#### Data Model Changes
-
-All existing entities in the merged schema gain a `tenant_id` column:
-
-| Domain          | Tables Affected                                            |
-| --------------- | ---------------------------------------------------------- |
-| catalog         | `catalog_items`, `catalog_item_instances`, `service_types` |
-| placement       | `resources`                                                |
-| policy          | `policies`                                                 |
-| serviceprovider | `service_type_instances`, `providers`                      |
-
-### 5. OpenAPI Security Scheme
+### 4. OpenAPI Security Scheme
 
 All OpenAPI specifications gain a `securitySchemes` definition and per-endpoint
 `security` requirements:
@@ -393,12 +328,12 @@ requirements against the request.
 
 #### Required API Changes to Existing Enhancements
 
-This enhancement introduces identity context (`userId`, `tenantId`) that the
-Policy and Placement enhancements must consume from the request context. The
-details of how each domain integrates these values are documented in their
-respective enhancements.
+This enhancement introduces identity context (`userId`) that the Policy and
+Placement enhancements must consume from the request context. The details of how
+each domain integrates this value are documented in their respective
+enhancements.
 
-### 6. Authentication Flow: End-to-End
+### 5. Authentication Flow: End-to-End
 
 Complete flow from user login through authenticated resource creation. With the
 control-plane monolith, the catalog, placement, policy, and service-provider
@@ -440,17 +375,17 @@ sequenceDiagram
 
     Note over DCM: Actor middleware (once at HTTP boundary)
     DCM->>DCM: sub → actor lookup (cached)
-    DCM->>DCM: ctx = {ActorID, TenantID, Type}
+    DCM->>DCM: ctx = {ActorID, Type}
 
     Note over DCM: Catalog domain
-    DCM->>DB: SELECT ... WHERE tenant_id = ctx.TenantID
+    DCM->>DB: SELECT ... FROM catalog_items
     DCM->>DCM: Validate input, merge CatalogItem defaults
 
     Note over DCM: Placement domain (in-process)
-    DCM->>DB: Store intent (tenant-scoped)
+    DCM->>DB: Store intent
     Note over DCM: Policy domain (in-process)
-    DCM->>DCM: Evaluate policies with userId + tenantId
-    DCM->>DB: Store validated request (tenant-scoped)
+    DCM->>DCM: Evaluate policies with userId
+    DCM->>DB: Store validated request
 
     Note over DCM: Service-provider domain (in-process)
     DCM->>DCM: Lookup SP, validate health
@@ -459,7 +394,7 @@ sequenceDiagram
     DCM-->>User: Instance created
 ```
 
-### 7. CLI Authentication
+### 6. CLI Authentication
 
 The DCM CLI (`dcm`) currently builds a plain HTTP client with no authentication
 headers. Adding auth is straightforward because all API calls already flow
@@ -492,8 +427,6 @@ and revert the actor middleware to a no-op.
 - **Operational complexity:** Adds Keycloak as an external dependency for all
   deployments. Mitigated by reusing existing Red Hat SSO infrastructure and
   providing a containerized Keycloak for local development.
-- **Migration burden:** Adding `tenant_id` to every domain table requires
-  coordinated schema migration across the merged schema.
 - **Development friction:** Local development requires a containerized Keycloak
   instance. Mitigated by a pre-configured realm export shipped in the repository
   and a compose profile that starts Keycloak alongside dcm-server.
@@ -561,8 +494,8 @@ PeerAuthentication and AuthorizationPolicy CRDs.
 
 - Significant operational complexity (Istio control plane, sidecar injection)
 - DCM targets minimal/dev deployment profiles where a service mesh is excessive
-- Application still needs tenant context and identity propagation — mesh handles
-  transport auth, not application-level identity
+- Application still needs identity propagation — mesh handles transport auth,
+  not application-level identity
 
 #### Status
 
@@ -571,9 +504,9 @@ Rejected
 #### Rationale
 
 A service mesh solves transport-level security but not application-level
-identity management (tenant scoping, identity propagation, policy engine
-integration). DCM would still need most of this enhancement even with Istio. A
-mesh approach may be adopted independently for external SP communication.
+identity management (identity propagation, policy engine integration). DCM would
+still need most of this enhancement even with Istio. A mesh approach may be
+adopted independently for external SP communication.
 
 ### Alternative 3: JWT Validation Inside the Monolith (No Auth Proxy)
 
@@ -617,6 +550,5 @@ application and avoids reimplementing solved problems.
   JSON is shipped in the repository for local dev and CI.
 - **OAuth2-Proxy:** Container in the compose stack, configured as a reverse
   proxy in front of dcm-server.
-- **Database migrations:** Auth tables (actors, actor_identities, tenants) and
-  `tenant_id` columns on all domain tables, applied in the existing migration
-  stream.
+- **Database migrations:** Auth tables (actors, actor_identities), applied in
+  the existing migration stream.

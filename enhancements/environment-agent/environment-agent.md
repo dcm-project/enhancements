@@ -8,7 +8,7 @@ reviewers:
   - "@machacekondra"
   - "@jenniferubah"
 approvers:
-  - ""
+  - TBD
 creation-date: 2026-06-03
 see-also:
   - "/enhancements/service-provider-health-check/service-provider-health-check.md"
@@ -353,9 +353,10 @@ Example:
 
 ##### `PUT /api/v1/agents/{agentId}/heartbeat` — Agent Heartbeat
 
-| Field     | Type              | Required | Description               |
-| --------- | ----------------- | -------- | ------------------------- |
-| timestamp | string (ISO 8601) | yes      | Agent's current timestamp |
+| Field       | Type              | Required | Description                                     |
+| ----------- | ----------------- | -------- | ----------------------------------------------- |
+| timestamp   | string (ISO 8601) | yes      | Agent's current timestamp                       |
+| consumerLag | integer           | yes      | Number of pending messages on the agent's topic |
 
 Response: `200 OK`
 
@@ -369,6 +370,12 @@ supported service types based on registered SPs.
 serve a given service type per agent. The first SP to register for a service
 type claims the slot. Subsequent registration attempts for the same service type
 are rejected.
+
+**Persistence:** The agent persists SP registrations to local storage so that
+slot ownership survives restarts. On startup, the agent loads persisted
+registrations before registering embedded SPs or accepting external ones. This
+ensures that an external SP registered during a prior session retains its
+service type slot across agent restarts.
 
 #### Embedded SP Registration
 
@@ -402,11 +409,9 @@ external), the agent rejects the registration with `409 Conflict` and a message
 identifying the conflicting provider, so the administrator can take action if
 necessary.
 
-External SPs periodically re-register with the agent to maintain their
-registration. This periodic re-registration serves as a lease renewal and
-ensures that after an agent restart (where the agent loses its in-memory state),
-SPs naturally re-register without requiring any additional coordination
-mechanism.
+External SPs periodically re-register with the agent to renew their lease. If an
+external SP fails to re-register before its lease expires, the agent removes its
+registration and frees the service type slot.
 
 #### DCM Notification on Service Type Change
 
@@ -494,10 +499,8 @@ sequenceDiagram
    registration instead satisfies the prerequisite for the agent's initial
    registration (see [Agent Registration Flow](#agent-registration-flow))
 5. The agent acknowledges the SP registration
-6. External SPs periodically re-register with the agent; the agent handles this
-   idempotently (create or update). This ensures that after an agent restart,
-   external SPs naturally rebuild the agent's state without additional
-   coordination
+6. External SPs periodically re-register with the agent to renew their lease;
+   the agent handles this idempotently (create or update)
 
 ### Agent Registration Flow
 
@@ -517,6 +520,9 @@ sequenceDiagram
     AG->>MS: Create retry topic (internal)
     MS-->>AG: Topic created<br/>{topicName}.retry
 
+    AG->>MS: Create cancel topic (internal)
+    MS-->>AG: Topic created<br/>{topicName}.cancel
+
     Note over AG: Prerequisite:<br/>At least 1 SP (embedded or<br/>external) must be registered<br/>and healthy<br/>(see SP Registration to Agent)
 
     AG->>DCM: POST /api/v1/agents<br/>{name, environment, serviceTypes,<br/>resourcesAvailable, cost, topicName}
@@ -534,13 +540,17 @@ sequenceDiagram
 #### Flow Description
 
 1. The agent starts and serves a specific environment
-2. The agent creates two topics in the messaging system:
+2. The agent creates three topics in the messaging system:
    - A **main topic** (using a deterministic name) to establish a dedicated
      communication channel with DCM. This topic name is advertised to DCM during
      registration.
    - A **retry topic** (`{topicName}.retry`) used internally by the agent to
      hold requests when the SP for a service type is Unhealthy (see
      [Retry Topic](#retry-topic)). This topic is not advertised to DCM.
+   - A **cancel topic** (`{topicName}.cancel`) used by DCM to signal that a
+     creation request has been re-routed to a different agent and should be
+     ignored (see [Cancel Topic](#cancel-topic)). This topic is not advertised
+     to DCM.
 3. The agent checks whether at least one SP (embedded or external) is registered
    and healthy:
    - If at least one SP is registered and healthy: the agent proceeds to
@@ -731,6 +741,55 @@ system's persistence layer).
   the retry topic, rejecting any held requests for that service type with error
   CloudEvents.
 
+#### Cancel Topic
+
+When DCM re-evaluates a creation request and routes it to a different agent,
+SPRM publishes a `dcm.request.cancel` CloudEvent to the original agent's cancel
+topic (`{agentTopicName}.cancel`). This prevents the original agent from
+processing stale creation requests that remain on its main topic (e.g.,
+re-published CloudEvents from the pending request timeout retry mechanism).
+
+The cancel topic is created by the agent at startup alongside the main topic and
+the retry topic (see [Agent Registration Flow](#agent-registration-flow)). It is
+internal to the agent and is not advertised to DCM. The topic name follows the
+convention `{agentTopicName}.cancel`.
+
+**Deny list.** The agent maintains an in-memory set of `resourceId` values from
+consumed cancel CloudEvents. When processing creation requests from the main
+topic, the agent checks each `resourceId` against the deny list. If a match is
+found, the agent drops the creation request without forwarding it to the SP.
+
+**Startup behavior.** On startup, the agent drains the cancel topic first to
+populate the deny list, then proceeds to consume the main topic and the retry
+topic. This ordering ensures that stale creation requests are filtered before
+they reach the SP.
+
+**Continuous consumption.** While running, the agent continuously consumes from
+the cancel topic to keep the deny list current. If a cancel CloudEvent arrives
+for a `resourceId` that is already queued in the retry topic, the agent removes
+the creation request from the retry topic and publishes a cancellation
+acknowledgment to `dcm.agents.responses`. If a cancel CloudEvent arrives for a
+`resourceId` that is already being provisioned by the SP (the agent has already
+forwarded the request and received a success response), the agent rejects the
+cancellation by publishing a `dcm.agent.cancel-rejected` CloudEvent to
+`dcm.agents.responses` with `{resourceId, agentName, reason}`. SPRM then sends a
+deletion request to this agent to remove the resource, since the re-evaluated
+agent is the authoritative owner of the `resourceId` (see
+[SP Resource Manager — Cancel on Re-evaluation](../sp-resource-manager/sp-resource-manager.md#cancel-on-re-evaluation)).
+
+**Deny list lifecycle.** Entries remain in memory for the lifetime of the agent
+process. The deny list is expected to be small — entries are only added when DCM
+re-evaluates a request to a different agent, which is an exceptional path. On
+agent restart, the deny list is rebuilt from the cancel topic.
+
+**Double-crash risk.** If the agent crashes after consuming a cancel message
+(acknowledged) but before dropping the matching creation from the main topic,
+the cancel message is no longer on the cancel topic and the deny list is lost.
+On the next restart, the agent may process the stale creation request. This is
+an accepted risk: the SP's idempotent creation behavior is the final safety net,
+and the re-evaluated agent's SP will reject the duplicate `resourceId` (see
+[SP Resource Manager — SP Idempotency Requirement](../sp-resource-manager/sp-resource-manager.md#sp-idempotency-requirement)).
+
 ### Resource Deletion Flow
 
 ```mermaid
@@ -830,8 +889,15 @@ the messaging system is used for resource operations (creation requests, status
 updates), the heartbeat uses the existing REST channel that the agent already
 uses for registration.
 
+The agent self-reports the number of pending messages on its topic as
+`consumerLag` in each heartbeat. DCM compares this value against a global
+`consumerLagThreshold`. When `consumerLag` exceeds the threshold, DCM marks the
+agent as **Congested** and stops routing new requests to it. When `consumerLag`
+drops below the threshold on a subsequent heartbeat, DCM clears the Congested
+state.
+
 DCM tracks the last heartbeat timestamp for each agent. If no heartbeat is
-received within a configurable threshold, DCM marks the agent as unavailable.
+received within a configurable threshold, DCM marks the agent as Unavailable.
 
 On startup, the agent registers to DCM (as described in
 [Agent Registration Flow](#agent-registration-flow)). If the agent restarts, it
@@ -846,9 +912,15 @@ sequenceDiagram
     participant DB as Database
 
     loop Every {heartbeatInterval} seconds
-        AG->>DCM: PUT /api/v1/agents/{agentId}/heartbeat<br/>{timestamp}
+        AG->>DCM: PUT /api/v1/agents/{agentId}/heartbeat<br/>{timestamp, consumerLag}
         activate DCM
-        DCM->>DB: Update last heartbeat timestamp
+        DCM->>DB: Update heartbeat timestamp and lag
+        DCM->>DCM: Check consumerLag against threshold
+        alt consumerLag >= consumerLagThreshold
+            DCM->>DB: Mark agent as Congested
+        else consumerLag < consumerLagThreshold
+            DCM->>DB: Clear Congested state (if set)
+        end
         DB-->>DCM: Updated
         DCM-->>AG: 200 OK
         deactivate DCM
@@ -864,11 +936,16 @@ sequenceDiagram
 
 ##### Flow Description
 
-1. The agent periodically sends a heartbeat to DCM via a REST `PUT` call
-2. DCM updates the agent's last heartbeat timestamp in the database
-3. If DCM does not receive a heartbeat within the configured threshold, it marks
+1. The agent periodically sends a heartbeat to DCM via a REST `PUT` call,
+   including its current `consumerLag`
+2. DCM updates the agent's last heartbeat timestamp and consumer lag in the
+   database
+3. If `consumerLag` exceeds `consumerLagThreshold`, DCM marks the agent as
+   **Congested** and stops routing new requests to it. When the lag drops below
+   the threshold, DCM clears the Congested state
+4. If DCM does not receive a heartbeat within the configured threshold, it marks
    the agent as **Unavailable**
-4. When the agent restarts, its initial registration to DCM resets the heartbeat
+5. When the agent restarts, its initial registration to DCM resets the heartbeat
    tracker and the agent status
 
 #### SP Health Monitoring
@@ -1091,16 +1168,18 @@ target service type (see
 [SP Resource Manager](../sp-resource-manager/sp-resource-manager.md),
 [Placement Manager](../placement-manager/placement-manager.md)).
 
-| Message               | `type`                                      | `source`               | `subject`              | `data`                                                                   |
-| --------------------- | ------------------------------------------- | ---------------------- | ---------------------- | ------------------------------------------------------------------------ |
-| Creation Request      | `dcm.request.create`                        | `dcm/control-plane`    | `{agentTopicName}`     | `{resourceId, serviceType, spec}`                                        |
-| Deletion Request      | `dcm.request.delete`                        | `dcm/control-plane`    | `{agentTopicName}`     | `{resourceId, serviceType}`                                              |
-| Creation Acknowledged | `dcm.agent.creation-acknowledged`           | `dcm/agents/{agentId}` | `dcm.agents.responses` | `{resourceId, agentName, topicName, status: "PROVISIONING"}`             |
-| Deletion Acknowledged | `dcm.agent.deletion-acknowledged`           | `dcm/agents/{agentId}` | `dcm.agents.responses` | `{resourceId, agentName, topicName, status: "DELETING"}`                 |
-| Request Queued        | `dcm.agent.request-queued`                  | `dcm/agents/{agentId}` | `dcm.agents.responses` | `{resourceId, agentName, topicName, serviceType, status: "QUEUED"}`      |
-| Error                 | `dcm.agent.error`                           | `dcm/agents/{agentId}` | `dcm.agents.responses` | `{resourceId, agentName, topicName, error, details}`                     |
-| Health Degraded       | `dcm.agent.health.service-type-degraded`    | `dcm/agents/{agentId}` | `dcm.agents.health`    | `{agentId, agentName, topicName, serviceType, reason, affectedProvider}` |
-| Health Unavailable    | `dcm.agent.health.service-type-unavailable` | `dcm/agents/{agentId}` | `dcm.agents.health`    | `{agentId, agentName, topicName, serviceType, reason, affectedProvider}` |
+| Message               | `type`                                      | `source`               | `subject`                 | `data`                                                                   |
+| --------------------- | ------------------------------------------- | ---------------------- | ------------------------- | ------------------------------------------------------------------------ |
+| Creation Request      | `dcm.request.create`                        | `dcm/control-plane`    | `{agentTopicName}`        | `{resourceId, serviceType, spec}`                                        |
+| Deletion Request      | `dcm.request.delete`                        | `dcm/control-plane`    | `{agentTopicName}`        | `{resourceId, serviceType}`                                              |
+| Cancel Request        | `dcm.request.cancel`                        | `dcm/control-plane`    | `{agentTopicName}.cancel` | `{resourceId, serviceType}`                                              |
+| Creation Acknowledged | `dcm.agent.creation-acknowledged`           | `dcm/agents/{agentId}` | `dcm.agents.responses`    | `{resourceId, agentName, topicName, status: "PROVISIONING"}`             |
+| Deletion Acknowledged | `dcm.agent.deletion-acknowledged`           | `dcm/agents/{agentId}` | `dcm.agents.responses`    | `{resourceId, agentName, topicName, status: "DELETING"}`                 |
+| Cancel Rejected       | `dcm.agent.cancel-rejected`                 | `dcm/agents/{agentId}` | `dcm.agents.responses`    | `{resourceId, agentName, topicName, reason}`                             |
+| Request Queued        | `dcm.agent.request-queued`                  | `dcm/agents/{agentId}` | `dcm.agents.responses`    | `{resourceId, agentName, topicName, serviceType, status: "QUEUED"}`      |
+| Error                 | `dcm.agent.error`                           | `dcm/agents/{agentId}` | `dcm.agents.responses`    | `{resourceId, agentName, topicName, error, details}`                     |
+| Health Degraded       | `dcm.agent.health.service-type-degraded`    | `dcm/agents/{agentId}` | `dcm.agents.health`       | `{agentId, agentName, topicName, serviceType, reason, affectedProvider}` |
+| Health Unavailable    | `dcm.agent.health.service-type-unavailable` | `dcm/agents/{agentId}` | `dcm.agents.health`       | `{agentId, agentName, topicName, serviceType, reason, affectedProvider}` |
 
 ### Assumptions
 
@@ -1110,19 +1189,23 @@ target service type (see
   registration and heartbeats)
 - External SPs have network connectivity to the agent's REST API (for
   registration and health checks)
+- The agent has access to local persistent storage for persisting SP
+  registrations across restarts
 - For Kubernetes/OpenShift deployments: the agent's service account has RBAC
   permissions for the `pods/status` subresource
 
 ### Risks and Mitigations
 
-| Risk                                                           | Mitigation                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent is a single point of failure per environment             | Deferred to HA iteration. Agent restart recovers state: embedded SPs register internally at startup; external SPs periodically re-register, naturally rebuilding the agent's state.                                                                                                                                                                        |
-| Messaging system failure blocks creation requests              | Dependent on chosen bus technology's delivery guarantees. Stated as an assumption.                                                                                                                                                                                                                                                                         |
-| Message loss with at-most-once semantics                       | Rely on bus capabilities (e.g., JetStream for NATS). Specific delivery guarantee is a deployment decision.                                                                                                                                                                                                                                                 |
-| Split-brain: agent loses DCM connectivity but keeps processing | On reconnection, the agent re-registers to DCM. During the split, DCM marks the agent as unavailable and stops routing new requests to its topic. In-flight messages are processed normally. Duplicate creation risk if DCM re-routes to another agent is mitigated by idempotent resource creation (resource ID provided by DCM in the creation request). |
-| Unauthenticated external SP registration                       | Deferred to AuthN/Z iteration. Network isolation is the interim mitigation.                                                                                                                                                                                                                                                                                |
-| Embedded SP crash takes down the agent                         | Embedded SPs run in-process; a panic/crash affects the entire agent. Mitigation: embedded SP code is well-tested and isolated in dedicated packages. Process-level restart recovers state via re-registration.                                                                                                                                             |
+| Risk                                                                                                  | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent is a single point of failure per environment                                                    | Deferred to HA iteration. Agent restart recovers state from local storage: persisted SP registrations are loaded at startup, embedded SPs register internally, and external SPs renew their leases via periodic re-registration.                                                                                                                                                                                                                                                 |
+| Messaging system failure blocks creation requests                                                     | Dependent on chosen bus technology's delivery guarantees. Stated as an assumption.                                                                                                                                                                                                                                                                                                                                                                                               |
+| Message loss with at-most-once semantics                                                              | Rely on bus capabilities (e.g., JetStream for NATS). Specific delivery guarantee is a deployment decision.                                                                                                                                                                                                                                                                                                                                                                       |
+| Agent crashes after consuming message but before responding                                           | SPRM detects stale `PENDING` records via periodic sweep and re-publishes the creation CloudEvent (configurable timeout and retry count). After retries are exhausted, Placement Manager re-evaluates to a different agent. A cancel CloudEvent is sent to the old agent's cancel topic to prevent stale processing. SP idempotent creation is the final safety net (see [SP Idempotency Requirement](../sp-resource-manager/sp-resource-manager.md#sp-idempotency-requirement)). |
+| Split-brain: agent loses DCM connectivity but keeps processing                                        | On reconnection, the agent re-registers to DCM. During the split, DCM marks the agent as unavailable and stops routing new requests to its topic. In-flight messages are processed normally. Duplicate creation risk if DCM re-routes to another agent is mitigated by SP idempotent creation and the cancel topic mechanism.                                                                                                                                                    |
+| Cancel topic double-crash: agent acknowledges cancel then crashes before filtering the stale creation | Accepted risk. On next restart the deny list is empty and the stale creation may be processed. SP idempotent creation prevents duplicate resources. The re-evaluated agent's SP rejects the duplicate `resourceId`.                                                                                                                                                                                                                                                              |
+| Unauthenticated external SP registration                                                              | Deferred to AuthN/Z iteration. Network isolation is the interim mitigation.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Embedded SP crash takes down the agent                                                                | Embedded SPs run in-process; a panic/crash affects the entire agent. Mitigation: embedded SP code is well-tested and isolated in dedicated packages. Process-level restart recovers state via re-registration.                                                                                                                                                                                                                                                                   |
 
 ## Drawbacks
 
@@ -1191,25 +1274,6 @@ agents, and behaviour under network partitions. This is deferred to a future
 iteration when the trade-offs are better understood and the maturity level of a
 DCM-native watch system can be assessed.
 
-## Cross-Cutting Impact
-
-The following enhancement documents will need to be updated to reflect the
-changes introduced by this enhancement. These updates will be done in subsequent
-PRs.
-
-| Document                                                                                           | Impact                                                                                                                                                                                                                                                                      |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md)                            | External SPs register to the agent instead of DCM. The existing registration API contract remains valid for the agent's REST API, but DCM's registration handler no longer receives SP registrations directly. Embedded SPs register internally and do not use this flow.   |
-| [Service Provider Health Check](../service-provider-health-check/service-provider-health-check.md) | Health polling responsibility shifts from DCM to the agent. DCM monitors agent health via heartbeats instead of polling individual SPs.                                                                                                                                     |
-| [SP Resource Manager](../sp-resource-manager/sp-resource-manager.md)                               | SPRM publishes creation requests to the agent's bus topic instead of calling SP REST endpoints directly. SPRM interacts with the agent (not individual SPs) for health status. From SPRM's perspective, the agent serves the same role as a SP: provisioning service types. |
-| [Placement Manager](../placement-manager/placement-manager.md)                                     | Policy evaluation may now include environment as a selection criterion. Placement Manager delegates to SPRM, which routes through the messaging system.                                                                                                                     |
-| [User Flows](../user-flows/user-flows.md)                                                          | End-to-end flows must include the agent layer between DCM and SPs.                                                                                                                                                                                                          |
-
-Additionally, DCM should monitor consumer lag on agent topics in a future
-iteration. If lag exceeds a configurable threshold, DCM could stop routing new
-requests to that agent to avoid further congestion. A new agent state (e.g.,
-"Congested") could be introduced for this purpose.
-
 ## Future Enhancements
 
 This section lists potential enhancements to the environment agent that are out
@@ -1239,16 +1303,32 @@ environment variable polling, or Kubernetes ConfigMap updates — and propagate
 them to DCM without downtime. Referenced in [Open Questions](#open-questions)
 (item 2).
 
-### DCM-Side Handling of Queued Requests (consolidation)
+### Agent-Declared Congestion Threshold
 
-When the agent holds a request because the SP for a given service type is
-unhealthy, it responds to DCM with a "queued" CloudEvent
-(`dcm.agent.request-queued`). The DCM Control Plane does not yet define how it
-surfaces this status to the end user, whether it applies a timeout, or whether
-it re-evaluates policies to re-route the request to a different
-agent/environment. A future iteration would formalize DCM's behavior for queued
-requests, including user visibility, timeout semantics, and potential re-routing
-strategies. Referenced in [Open Questions](#open-questions) (item 3).
+The current congestion mechanism relies on a single global
+`consumerLagThreshold` set by DCM and applied uniformly to all agents. This
+works as a baseline quality-of-service control but does not account for
+heterogeneous agent capacities — an edge agent with limited resources may become
+overloaded well before reaching a threshold that is comfortable for a
+well-provisioned datacenter agent. A future iteration would allow each agent to
+declare its own congestion threshold, reflecting its actual processing capacity.
+
+Two approaches are worth exploring:
+
+- **Agent-provided threshold:** The agent includes a `congestionThreshold` field
+  in the heartbeat (or at registration time). DCM uses this value instead of the
+  global threshold when evaluating that agent's `consumerLag`. DCM remains the
+  decision-maker.
+- **Agent self-declaration:** The agent directly reports a `congested` flag in
+  the heartbeat. DCM trusts the agent's own assessment of its capacity without
+  performing a comparison. This gives the agent full autonomy over congestion
+  signaling but reduces DCM's ability to enforce uniform QoS.
+
+Design considerations include: whether the global threshold acts as a
+floor/ceiling even when a per-agent value is present, how to prevent
+misconfigured agents from never declaring congestion, and whether the threshold
+should be static (set at registration) or dynamic (updated in each heartbeat as
+conditions change).
 
 ### Multiple SPs per Service Type (consolidation)
 
@@ -1338,3 +1418,28 @@ swapping to the new version, and the ability to run two versions of the same SP
 side by side during a canary deployment. For embedded SPs, this could leverage
 the plugin SDK (see [SP Hub/Store and Plugin SDK](#sp-hubstore-and-plugin-sdk))
 to load new versions without rebuilding the agent binary.
+
+### SP-Based Advertisement for Policy Selection
+
+Currently the agent advertises the service types it supports. An alternative
+approach would have the agent advertise the SPs registered to it instead. Each
+SP payload would contain the service type along with additional SP-related
+metadata that policies could use to select the agent — and, indirectly, the SP,
+since only one SP per service type is supported by the agent. This model would
+give policies richer context for placement decisions (e.g., SP capabilities,
+version, or provider-specific attributes) beyond the bare service type. This
+idea requires careful analysis before being considered for implementation:
+implications on the registration flow, policy contract, and the coupling between
+policy logic and SP internals need thorough evaluation.
+
+A corollary of this model is state reconciliation on agent restart. If the agent
+advertises its SPs to DCM during registration, DCM could respond with the latest
+known state it holds for that agent (active instances, pending requests, etc.).
+This would allow the agent to reconstruct its view of the world from DCM rather
+than maintaining its own persistent store. In effect, persistence responsibility
+would shift entirely to the DCM control plane, and the agent would become
+stateless across restarts — simplifying its operational footprint and
+eliminating the need for local storage or a dedicated database. This further
+reinforces the need for careful design: the registration handshake would become
+a synchronization protocol, and failure modes around stale or partial state
+responses must be addressed.

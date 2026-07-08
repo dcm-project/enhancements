@@ -242,15 +242,26 @@ Kubernetes Storage SP status mapping.
 
 For managed clusters (e.g., K8s clusters), the status reflects the health of the
 control plane and worker nodes as a single unit. **Target Statuses:**
-`CREATING`, `ACTIVE`, `UPDATING`, `DEGRADED`, `DELETED`.
+`PROGRESSING`, `ACTIVE`, `DEGRADED`, `UNAVAILABLE`, `FAILED`, `DELETING`,
+`DELETED`.
 
-| DCM Generic Status | Kubernetes                                                         |
-| :----------------- | :----------------------------------------------------------------- |
-| **CREATING**       | Control plane is provisioning; API is not yet reachable.           |
-| **ACTIVE**         | Control plane is healthy and minimum worker nodes are ready.       |
-| **UPDATING**       | Rolling upgrade in progress (API remains reachable).               |
-| **DEGRADED**       | Control plane is reachable, but critical components are unhealthy. |
-| **DELETED**        | Cluster resources have been de-provisioned.                        |
+| DCM Generic Status | Kubernetes                                                                                         |
+| :----------------- | :------------------------------------------------------------------------------------------------- |
+| **PROGRESSING**    | Cluster is being provisioned (API may not yet be reachable), or a rolling upgrade is in progress.  |
+| **ACTIVE**         | Control plane is healthy and minimum worker nodes are ready.                                       |
+| **DEGRADED**       | Control plane is reachable, but critical components are unhealthy.                                 |
+| **UNAVAILABLE**    | Control plane was previously available but is now unreachable and not progressing toward recovery. |
+| **FAILED**         | Provisioning or an update failed and requires intervention to recover.                             |
+| **DELETING**       | Deletion has been requested; cluster teardown is in progress.                                      |
+| **DELETED**        | Cluster resources have been de-provisioned.                                                        |
+
+_Note: `PROGRESSING` intentionally does not distinguish initial provisioning
+from a subsequent update — Service Providers are not required to track prior
+state to make that distinction (a backend may use a single "in progress" signal
+for both, e.g. a Kubernetes-based provider updating a CR's `spec` and waiting
+for reconciliation). Providers that can distinguish the two internally may still
+surface it via `status.message`, but the generic status itself is the same for
+both cases._
 
 ## Message systems
 
