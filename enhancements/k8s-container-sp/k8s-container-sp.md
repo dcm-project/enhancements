@@ -71,7 +71,7 @@ schema.
 - Uses `k8s.io/client-go` to interact with Kubernetes API.
 - Creates and manages `Deployment` and `Service` resources.
 - Each container request creates a `Deployment` with `replica count = 1` and
-  optionally a `Service` based on SP configuration.
+  optionally a `Service` based on per-port `visibility` settings.
 - Leverages Kubernetes `Deployment` lifecycle management.
 - Services provide stable endpoints for accessing containers, abstracting Pod IP
   changes during restarts.
