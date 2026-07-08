@@ -308,10 +308,10 @@ common fields: _serviceType, metadata, providerHints_
 
 #### Container port Object
 
-| Field         | Required | Type    | Description                                              |
-| :------------ | :------- | :------ | :------------------------------------------------------- |
-| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_)              |
-| visibility    | Yes      | string  | Port visibility: _none_, _internal_, or _external_       |
+| Field         | Required | Type    | Description                                        |
+| :------------ | :------- | :------ | :------------------------------------------------- |
+| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_)        |
+| visibility    | Yes      | string  | Port visibility: _none_, _internal_, or _external_ |
 
 The `visibility` field controls how the port is exposed by the Service Provider:
 
