@@ -324,7 +324,7 @@ Plus common fields: _serviceType, metadata, providerHints_
 | engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _mariadb_) |
 | version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                    |
 | resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                 |
-| replicas  | No       | integer                                 | Number of replicas to create (default: 1)                     |
+| replicas  | No       | integer                                 | Number of replicas to create (default 1)                      |
 | network   | No       | [Network](#database-network-object)     | Network configuration                                         |
 
 #### Database resources Object

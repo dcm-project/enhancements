@@ -17,17 +17,17 @@ creation-date: 2026-06-01
 The PostgreSQL Database Service Provider is a REST API that manages relational
 databases using PostgreSQL as a platform. It exposes endpoints for creating,
 reading, and deleting databases, and integrates the DCM Service Provider
-Registry. The PostgreSQL Database Service Provider Implements the `database`
+Registry. The PostgreSQL Database Service Provider implements the `database`
 service type schema.
 
 ## Motivation
 
 Databases are used in a major amount of modern applications. Under the existing
 service type definitions, there is no method to manage the storage of
-persistant, searchable data. This leaves a gap in DCM's ability to manage the
+persistent, searchable data. This leaves a gap in DCM's ability to manage the
 full lifecycle of an application, and leaves the users having to manually
 configure databases either in external deployments or inside virtual machines.
-Applications deployed often need persistant storage. PostgreSQL provides such
+Applications deployed often need persistent storage. PostgreSQL provides such
 solution mainly for structured, relational data, but also supports unstructured
 data using the `JSONB` data type, making it ideal for the first engine to be
 supported by DCM for the `database` type. Additionally, admins may want to
@@ -104,7 +104,7 @@ As an administrator, I want to be able to list and monitor existing databases.
 - The DCM Service Provider Registry is reachable for registration.
 - The PostgreSQL service provider has valid Kubernetes credentials (`kubeconfig`
   or in-cluster service account).
-- Network policies allow PostgreSQL service provider to comunicate with DCM.
+- Network policies allow PostgreSQL service provider to communicate with DCM.
 - DCM messaging system (NATS) is reachable for publishing status updates.
 
 ### Integration Points
@@ -122,8 +122,10 @@ As an administrator, I want to be able to list and monitor existing databases.
 
 #### DCM SP Registry
 
-- Auto-registration on startup with DCM SP Registrar. See documentation for
-  [DCM Registration Flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
+- Auto-registration on startup with via environment agent. The environment agent
+  handles registration with DCM SP Registrar on behalf of the Service Provider.
+  See documentation for
+  [Environment Agent](https://github.com/dcm-project/enhancements/blob/main/enhancements/environment-agent/environment-agent.md)
 
 #### DCM SP Health Check
 
@@ -176,7 +178,7 @@ valid for database workloads as by default, an `internal` service is created)
 | defaultStorageClass | string | N/A     | Default storage class for PVCs managed by Clusters |
 
 When specified, the `defaultStorageClass` field sets the default storage class
-where `PersistantVolumeClaims` managed by `Cluster` resources would be created,
+where `PersistentVolumeClaims` managed by `Cluster` resources would be created,
 otherwise, the default storage class of the cluster is used. Users can override
 this default per `Cluster` resource via `providerHints.postgres.storage` (see
 POST endpoint documentation).
@@ -197,10 +199,9 @@ if specified. Users can override these defaults per `Cluster` resource via the
 ### Registration Flow
 
 The PostgreSQL SP API must successfully complete a registration process to
-ensure DCM is aware of it and can use it. During startup, the service uses the
-DCM registration client to send a request to the SP API registration endpoint
-`POST /api/v1alpha1/providers`. See DCM
-[registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
+ensure DCM is aware of it and can use it. During startup, the environment agent
+handles the registration of the PostgreSQL Database SP with DCM. See
+[Environment Agent](https://github.com/dcm-project/enhancements/blob/main/enhancements/environment-agent/environment-agent.md)
 for more information.
 
 Example request payload:
@@ -210,8 +211,8 @@ Example request payload:
   "name": "psql-sp",
   "serviceType": "database",
   "displayName": "PostgreSQL Database Service Provider",
-  "Endpoint": "https://psql-database-sp.example.com/api/v1alpha1/databases",
-  "Operations": ["CREATE", "DELETE", "READ"],
+  "endpoint": "https://psql-database-sp.example.com/api/v1alpha1/databases",
+  "operations": ["CREATE", "DELETE", "READ"],
   "metadata": {
     "zone": "us-east-1b",
     "region": "us-east-1",
@@ -239,11 +240,9 @@ the
 
 #### Registration Process
 
-The PostgreSQL Database SP follows the standard self-registration process
-defined in the
-[SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
-The registration request includes the PostgreSQL Database SP endpoint URL in the
-format: `fmt.Sprintf("%s/api/v1alpha1/databases", apiHost)`.
+The environment agent handles the registration of the PostgreSQL Database SP.
+The registration request includes the PostgreSQL database SP endpoint URL in the
+format: `http://<apiHost>:<port>/api/v1alpha1/databases`
 
 ### API Endpoints
 
@@ -275,7 +274,7 @@ pre-defined by DCM core. See
 for the complete specification.
 
 During the creation of the resources, each `Cluster`, `Service`, `Secret`, and
-`PersistantVolumeClaim` must be labled with:
+`PersistentVolumeClaim` must be labled with:
 
 - `dcm.project/managed-by=dcm`
 - `dcm.project/dcm-instance-id=<UUID>`
@@ -286,8 +285,8 @@ a client-specified ID provided via the `?id=` query parameter (validated against
 AEP-122 pattern `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`). Kubernetes resource
 names are server-assigned using the `generateName` mechanism with
 `metadata.name` as the prefix (e.g., `"web-app-"`). If a database with the same
-`metadata.name` already exists, the PostgreSQL SP returns a `409 Conflict` error
-response without modifying the existing resource.
+`dcm-instance-id` already exists, the PostgreSQL SP returns a `409 Conflict`
+error response without modifying the existing resource.
 
 **Service Configuration: Networking**
 
@@ -308,7 +307,7 @@ basis using `network.visibility` to `external` (the external service's type is
 set in the SP configuration, see
 [Network Configuration](#network-configuration)).
 
-> **Note**: It is currently not possible to fully disalbe or reconfigure
+> **Note**: It is currently not possible to fully disable or re-configure
 > CloudNativePG's default `rw` service (which is of `ClusterIP` type, so
 > `visibility=external` would need to create both services
 
@@ -322,10 +321,10 @@ current implementation.
 
 > **Note**: It is not yet designed how `providerHints` can be leveraged within
 > the DCM control plane to influence provider behavior. As a result, Service
-> creation is currently driven by the per-port `visibility` field (see
-> Networking Configuration above), which is the canonical approach. Future
-> iterations may define how hints flow from catalog to provider and influence
-> resource creation.
+> creation is currently driven by the `network.visibility` field (see Networking
+> Configuration above), which is the canonical approach. Future iterations may
+> define how provider hints flow from catalog to provider and influence resource
+> creation.
 
 **Service Configuration via providerHints: Storage**
 
@@ -350,7 +349,7 @@ specifying the `providerHints.postgres.initdb` field:
 | user     | string | The name of the owner of the default database that is created in the cluster |
 | password | string | The password of the user specified                                           |
 
-The `database` specified would be automatically created owned by the `user`
+The `database` specified would be automatically created is owned by the `user`
 specified, that would be created with the `password` specified. To configure the
 `user`'s password, the PostgreSQL SP would create and manage a `secret`
 complying with the
@@ -490,10 +489,8 @@ set to `PENDING` after the resource is created.
 > **Note**: The `connectionDetails` field is an output only field following
 > [AEP-203](https://aep.dev/203/#output-only) The `connectionDetails` field is
 > empty at creation time and will be populated once the `Cluster` reaches
-> `READY` status. The `connectionDetails` field will contain a base64-encoded
-> version of the database application connection details, including user
-> credentials The user's password field would not be included in the response as
-> it is specified in the connectionDetails field
+> `RUNNING` status. The `connectionDetails` field will contain a base64-encoded
+> version of the database application connection details
 
 > **Note**: The `<database-name>-rw` service is always created and can not be
 > disabled. It is an `internal` visibility service (`ClusterIP`) that points to
@@ -503,8 +500,8 @@ set to `PENDING` after the resource is created.
 **Error Handling:**
 
 - **400 Bad Request:** Invalid request payload or missing required fields
-- **409 Conflict:** Cluster with the same `metadata.name` already exists in the
-  configured namespace
+- **409 Conflict:** Cluster with the same `dcm-instance-id` already exists in
+  the configured namespace
 - **422 Unprocessable Entity**: Requested StorageClass does not exist
 - **500 Internal Server Error:** Unexpected error during resource creation
 
@@ -550,17 +547,18 @@ set to `PENDING` after the resource is created.
 
 **Description:** Get specific database instance.
 
-1. Handler recieves `GET` request with `databaseId` query parameter.
+1. Handler recieves `GET` request with `databaseId` path parameter.
 2. Calls `GetDatabaseFromCluster(databaseId)`.
 3. Cluster lookup: Query Kubernetes API for `Cluster` with matching
-   `dcm-instance-id` label.
+   `dcm.project/dcm-instance-id` label.
 4. Database details: Query `Cluster` for runtime information. Extract IP address
    from Pod status. Extract current phase (`Running`, `Pending`, etc.).
-5. Service details: Query `Service` with matching `dcm-instance-id` label.
-   Extract clusterIP, type, and externalIP (if applicable).
+5. Service details: Query `Service` with matching `dcm.project/dcm-instance-id`
+   label. Extract clusterIP, type, and externalIP (if applicable).
 6. for each database user:
-   - Connection details: Query `Secrets` with matching `dcm-instance-id` label
-     and named `<databaseName>-pguser-<userName>`. Encode with base64.
+   - Connection details: Query `Secrets` with matching
+     `dcm.project/dcm-instance-id` label and named
+     `<databaseName>-pguser-<userName>`. Encode with base64.
 7. Response payload: Return complete database instance object
 
 **Example Response Payload:**
@@ -652,7 +650,7 @@ cluster and aggragating with user configuration. The details in the
 
 **Security Considerations:**
 
-The `connectionDetails` field contains sensetive credentails that grant access
+The `connectionDetails` field contains sensitive credentials that grant access
 to the provisioned Cluster. Implementations should:
 
 - Protect the API with proper authentication and authorization mechanisms.
@@ -675,20 +673,24 @@ AuthN/Z (Authentication/Authorization) and RBAC.
 **Description:** Delete a database instance
 
 Remove a database instance (`Cluster` with cascading delete for all child
-resources including `Pods`, `PersistantVolumeClaims`, `Services`, and `Secrets`
+resources including `Pods`, `PersistentVolumeClaims`, `Services`, and `Secrets`
 managed by the `Cluster`, and `secrets` managed by DCM that are not managed by
 CloudNativePG), and returns `204 No Content`.
 
 **Process Flow:**
 
 1. Handler receives `DELETE` request with `databaseId` path parameter.
-2. Lookup `Cluster` resource by `dcm-instance-id` label.
+2. Lookup `Cluster` resource by `dcm.project/dcm-instance-id` label.
 3. Delete the resource with cascading delition.
-4. Lookup `Secret` resources by `dcm-instance-id` label.
-5. foreach `Secret` matching the `dcm-instance-id`:
+4. Lookup `Secret` resources by `dcm.project/dcm-instance-id` label.
+5. foreach `Secret` matching the `dcm.project/dcm-instance-id`:
    - Delete the resource.
      <!-- This exists for user defined passwords for database users -->
 6. Return `204 No Content` on success.
+
+This will start an asynchronous deletion process of the cluster. The PostgreSQL
+SP will publish `DELETING` via CloudEvents, and when the deletion process is
+complete, the PostgreSQL SP will publish a `DELETED` event.
 
 > **Note**: Steps 4 and 5 exist to handle user defined passwords. The process
 > should NOT fail if no secret is found.
@@ -714,9 +716,9 @@ The health check verifies:
 The PostgreSQL Database SP uses a **layered monitoring approach** with three
 `SharedIndexInformer` instances to watch `Cluster`, `Pod`, and
 `PersistentVolumeClaim` resources labeled with `dcm.project/managed-by=dcm` and
-`dcm-service-type=database`. This provides comprehensive visibility into both
-the desired state (Cluster) and actual runtime (Pod and PVC), enabling accurate
-status reporting to DCM.
+`dcm.project/dcm-service-type=database`. This provides comprehensive visibility
+into both the desired state (Cluster) and actual runtime (Pod and PVC), enabling
+accurate status reporting to DCM.
 
 #### Layered Monitoring Architecture
 
@@ -724,14 +726,14 @@ The PostgreSQL Database SP monitors Kubernetes resources and two levels:
 
 1. **Cluster**: Tracks creation status, rollout status, replica failures, and
    desired state
-2. **Pod and PersistantVolumeClaim**:
+2. **Pod and PersistentVolumeClaim**:
    - **Pod**: Tracks actual runtime state, IP addresses, and container statuses
-   - **PersistantVolumeClaim**: Tracks actual storage state in runtime
+   - **PersistentVolumeClaim**: Tracks actual storage state in runtime
 
 All informers watch resurces labled with:
 
-- `dcm.projct/managed-by=dcm`
-- `dcm.projct/dcm-service-type=database`
+- `dcm.project/managed-by=dcm`
+- `dcm.project/dcm-service-type=database`
 
 **Rationale for Layered Monitoring**:
 
@@ -772,7 +774,8 @@ status from both resource types using the following precedence rules:
 - Status updates are debounced to avoid flooding the messaging system during
   rapid status oscillation (e.g., running→error→running within milliseconds)
 - Status updates are published to the messaging system using CloudEvents format
-- The `instanceId` of the DCM resource is stored in the label `dcm-instance-id`
+- The `instanceId` of the DCM resource is stored in the label
+  `dcm.project/dcm-instance-id`
 
 For detailed implementation of the `SharedIndexInformer` pattern (setup phase,
 event processing flow, pros and cons), see the
@@ -794,7 +797,7 @@ informers instead of one.
 | `datacontenttype` | `application/json`             |
 
 Instance identity is carried in the data payload `id` field (from the
-`dcm-instance-id` label), not in the NATS subject.
+`dcm.project/dcm-instance-id` label), not in the NATS subject.
 
 **Data Payload Structure:**
 
@@ -832,8 +835,7 @@ for the complete CloudEvents contract and messaging system details.
 
 The following tables map Kubernetes resource statuses to DCM generic statuses.
 The PostgreSQL SP uses the **Priority Order** defined in the reconciliation
-logic above (Pod and PVC first, then StatefulSet, then Cluster, then resource
-not found).
+logic above (Pod and PVC first, then Cluster, then resource not found).
 
 ##### Single Instance Database Status Mapping (Primary instance only)
 
@@ -841,7 +843,7 @@ not found).
 | ---------- | -------------- | ---------------------------------------------- | ---------- |
 | PENDING    | Pod            | Pod.Phase = `Pending`                          | 1          |
 | PENDING    | Cluster        | Cluster.readyInstances = 0 AND no Pod exists   | 2          |
-| RUNNING    | Pod            | Pod.Phase = `RUNNING`                          | 1          |
+| RUNNING    | Pod            | Pod.Phase = `Running`                          | 1          |
 | FAILED     | Pod            | Pod.Phase = `Failed`                           | 1          |
 | FAILED     | PVC            | Pod.Phase = `Pending` AND PVC.Phase = `FAILED` | 1          |
 | FAILED     | Cluster        | Cluster.instances = 0                          | 2          |
@@ -863,11 +865,11 @@ instance's state by the following table:
 | Replica Status | Primary Source | Kubernetes Condition                               | Precedence |
 | -------------- | -------------- | -------------------------------------------------- | ---------- |
 | PENDING        | Pod            | Pod.Phase = `Pending` AND NOT PVC.Phase = `FAILED` | 1          |
-| RUNNING        | Pod            | Pod.Phase = `RUNNING`                              | 1          |
+| RUNNING        | Pod            | Pod.Phase = `Running`                              | 1          |
 | FAILED         | Pod            | Pod.Phase = `Failed`                               | 1          |
 | FAILED         | PVC            | Pod.Phase = `Pending` AND PVC.Phase = `FAILED`     | 1          |
 | UNKNOWN        | Pod            | Pod.Phase = `Unknown` (node lost)                  | 1          |
-| DELETED        | Both           | Pod found in cluster                               | 2          |
+| DELETED        | Both           | Pod not found in cluster                           | 2          |
 
 > **Note**: In this context, instance is used to refer to both primary and
 > non-primary nodes and for v1, we do not destinguish the two for status
@@ -907,7 +909,7 @@ mapping:
 **Precedence Rules**:
 
 - **1 (Instance)**: Highest priority - report Replica state if replica exists
-  (any `PENDING`, `FAILURE` or `UNKNOWN`, or all `RUNNING`)
+  (any `PENDING`, `FAILED` or `UNKNOWN`, or all `RUNNING`)
 - **2 (Cluster)**: Fallback - report Cluster status
   (`Creating a new replica`/`Waiting for the instancaes to become active` ->
   `PENDING`)
@@ -1029,7 +1031,7 @@ it's other flaws.
 #### Cons
 
 - Lack of implemented Service Providers - would need to wait for stateful
-  application/persistant storage Service Providers to be implemented
+  application/persistent storage Service Providers to be implemented
 - Less optimal per engine - While generic deployments would reduce
   implementation time of each SP, they would also reduce the per-engine
   optimizations by avoiding specialized tools (such as patroni for PostgreSQL)
