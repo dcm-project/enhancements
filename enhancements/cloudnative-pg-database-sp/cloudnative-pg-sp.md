@@ -1,5 +1,5 @@
 ---
-title: postgresql-sp
+title: cloudnative-pg-database-sp
 authors:
   - "@NoamNakash"
 reviewers:
@@ -10,15 +10,15 @@ approvers:
 creation-date: 2026-06-01
 ---
 
-# PostgreSQL Database Service Provider
+# CloudNativePG Database Service Provider
 
 ## Summary
 
-The PostgreSQL Database Service Provider is a REST API that manages relational
-databases using PostgreSQL as a platform. It exposes endpoints for creating,
-reading, and deleting databases, and integrates the DCM Service Provider
-Registry. The PostgreSQL Database Service Provider implements the `database`
-service type schema.
+The CloudNativePG Database Service Provider is a REST API that manages
+relational databases using PostgreSQL as a platform. It exposes endpoints for
+creating, reading, and deleting databases, and integrates the DCM Service
+Provider Registry. The CloudNativePG Database Service Provider implements the
+`database` service type schema.
 
 ## Motivation
 
@@ -52,7 +52,7 @@ databases to be deployed on a 'lower tier' hardware (cheaper CPU cores).
 - Define endpoints for day 2 operations (`backup`, `DR`, `upgrade`, `scale`,
   `migrate`).
 - Database migration (migrating pre-existing databases to PostgreSQL and
-  migrating existing PostgreSQL databases to PostgreSQL SP).
+  migrating existing PostgreSQL databases to CloudNativePG Database SP).
 - Custom database management (with OS access).
 - Multi-tenant DB instances
 - Support of different database providers.
@@ -91,20 +91,20 @@ As an administrator, I want to be able to list and monitor existing databases.
 
 ### Assumptions
 
-- The PostgreSQL service provider is connected to a Kubernetes cluster with
+- The CloudNativePG Service Provider is connected to a Kubernetes cluster with
   [CloudNativePG](https://cloudnative-pg.io/) installed and available PVC
   storage configured.
 - If The Kubernetes cluster does not have access to the default CloudNativePG
   images, or if it is desired to use a custom set of images, the Kubernetes
   cluster has a configured `Namespace` which contains an `ImageCatalog` resource
   with the desired PostgreSQL images properly tagged for the correct versions.
-- The PostgreSQL service provider has the necessary RBAC permissions to manage
-  `clusters.postgresql.cnpg.io` resources in its configured namespace (Also
-  known as `Cluster` kind).
+- The CloudNativePG Service Provider has the necessary RBAC permissions to
+  manage `clusters.postgresql.cnpg.io` resources in its configured namespace
+  (Also known as `Cluster` kind).
 - The DCM Service Provider Registry is reachable for registration.
-- The PostgreSQL service provider has valid Kubernetes credentials (`kubeconfig`
-  or in-cluster service account).
-- Network policies allow PostgreSQL service provider to communicate with DCM.
+- The CloudNativePG Service Provider has valid Kubernetes credentials
+  (`kubeconfig` or in-cluster service account).
+- Network policies allow CloudNativePG Service Provider to communicate with DCM.
 - DCM messaging system (NATS) is reachable for publishing status updates.
 
 ### Integration Points
@@ -129,8 +129,9 @@ As an administrator, I want to be able to list and monitor existing databases.
 
 #### DCM SP Health Check
 
-PostgreSQL SP must expose a health endpoint `http://<provider-ip>:<port>/health`
-for DCM control plane to pole every 10 seconds. See documentation for
+CloudNativePG Database SP must expose a health endpoint
+`http://<provider-ip>:<port>/health` for DCM control plane to pole every 10
+seconds. See documentation for
 [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
 
 #### DCM SP Status Reporting
@@ -142,8 +143,8 @@ for DCM control plane to pole every 10 seconds. See documentation for
 
 ### SP Configuration
 
-The PostgreSQL SP supports configuration options that control default behavior
-for all postgres clusters managed by this provider instance.
+The CloudNativePG Database SP supports configuration options that control
+default behavior for all postgres clusters managed by this provider instance.
 
 #### Namespace Configuration
 
@@ -155,9 +156,10 @@ for all postgres clusters managed by this provider instance.
 All resources created by this Service Provider (`Cluster`) are deployed in the
 configured `namespace`. The `imageCatalog` field specifies the `ImageCatalog`
 resource within the named `namespace` that manages the container images for
-PostgreSQL, catalogged by version. If not specified, the PostgreSQL SP will use
-the default images defined in the operator installation. These settings applies
-to all resources managed by the SP and cannot be overridden per-resource.
+PostgreSQL, catalogged by version. If not specified, the CloudNativePG Database
+SP will use the default images defined in the operator installation. These
+settings applies to all resources managed by the SP and cannot be overridden
+per-resource.
 
 #### Network Configuration
 
@@ -198,9 +200,10 @@ if specified. Users can override these defaults per `Cluster` resource via the
 
 ### Registration Flow
 
-The PostgreSQL SP API must successfully complete a registration process to
-ensure DCM is aware of it and can use it. During startup, the environment agent
-handles the registration of the PostgreSQL Database SP with DCM. See
+The CloudNativePG Database SP API must successfully complete a registration
+process to ensure DCM is aware of it and can use it. During startup, the
+environment agent handles the registration of the CloudNativePG Database SP with
+DCM. See
 [Environment Agent](https://github.com/dcm-project/enhancements/blob/main/enhancements/environment-agent/environment-agent.md)
 for more information.
 
@@ -208,10 +211,10 @@ Example request payload:
 
 ```json
 {
-  "name": "psql-sp",
+  "name": "cnpg-sp",
   "serviceType": "database",
-  "displayName": "PostgreSQL Database Service Provider",
-  "endpoint": "https://psql-database-sp.example.com/api/v1alpha1/databases",
+  "displayName": "CloudNativePG Database Service Provider",
+  "endpoint": "https://cnpg-database-sp.example.com/api/v1alpha1/databases",
   "operations": ["CREATE", "DELETE", "READ"],
   "metadata": {
     "zone": "us-east-1b",
@@ -231,7 +234,7 @@ The registration payload must conform to the validation requirements defined in
 the
 [SP registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
 
-**PostgreSQL Database SP-specific requirements:**
+**CloudNativePG Database SP-specific requirements:**
 
 - `serviceType` field must be set to `database`
 - `operations` field must include: `CREATE`, `READ`, `DELETE`
@@ -240,9 +243,9 @@ the
 
 #### Registration Process
 
-The environment agent handles the registration of the PostgreSQL Database SP.
-The registration request includes the PostgreSQL database SP endpoint URL in the
-format: `http://<apiHost>:<port>/api/v1alpha1/databases`
+The environment agent handles the registration of the CloudNativePG Database SP.
+The registration request includes the CloudNativePG Database SP endpoint URL in
+the format: `http://<apiHost>:<port>/api/v1alpha1/databases`
 
 ### API Endpoints
 
@@ -251,13 +254,13 @@ resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                             | Description                         |
-| ------ | ------------------------------------ | ----------------------------------- |
-| POST   | /api/v1alpha1/databases              | Create a new database               |
-| GET    | /api/v1alpha1/databases              | List all databases                  |
-| GET    | /api/v1alpha1/databases/{databaseId} | Get a database instance             |
-| DELETE | /api/v1alpha1/databases/{databaseId} | Delete a database instance          |
-| GET    | /api/v1alpha1/health                 | PostgreSQL Database SP health check |
+| Method | Endpoint                             | Description                            |
+| ------ | ------------------------------------ | -------------------------------------- |
+| POST   | /api/v1alpha1/databases              | Create a new database                  |
+| GET    | /api/v1alpha1/databases              | List all databases                     |
+| GET    | /api/v1alpha1/databases/{databaseId} | Get a database instance                |
+| DELETE | /api/v1alpha1/databases/{databaseId} | Delete a database instance             |
+| GET    | /api/v1alpha1/health                 | CloudNativePG Database SP health check |
 
 ##### AEP Complience
 
@@ -285,8 +288,8 @@ a client-specified ID provided via the `?id=` query parameter (validated against
 AEP-122 pattern `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`). Kubernetes resource
 names are server-assigned using the `generateName` mechanism with
 `metadata.name` as the prefix (e.g., `"web-app-"`). If a database with the same
-`dcm-instance-id` already exists, the PostgreSQL SP returns a `409 Conflict`
-error response without modifying the existing resource.
+`dcm-instance-id` already exists, the CloudNativePG Database SP returns a
+`409 Conflict` error response without modifying the existing resource.
 
 **Service Configuration: Networking**
 
@@ -299,8 +302,8 @@ By default, CloudNativePG creates 3 services per cluster:
 
 All 3 of which are of the `ClusterIP` type.
 
-For simplicity of v1, the PostgreSQL SP disables the following services `ro`,
-`r` and creates only the `rw` service.
+For simplicity of v1, the CloudNativePG Database SP disables the following
+services `ro`, `r` and creates only the `rw` service.
 
 Users can enable an additional external service of `rw` type on a per-Cluster
 basis using `network.visibility` to `external` (the external service's type is
@@ -351,8 +354,8 @@ specifying the `providerHints.postgres.initdb` field:
 
 The `database` specified would be automatically created is owned by the `user`
 specified, that would be created with the `password` specified. To configure the
-`user`'s password, the PostgreSQL SP would create and manage a `secret`
-complying with the
+`user`'s password, the CloudNativePG Database SP would create and manage a
+`secret` complying with the
 [Kubernetes.io/basic-auth](https://kubernetes.io/docs/concepts/configuration/secret/#basic-authentication-secret)
 type.
 
@@ -690,7 +693,7 @@ CloudNativePG), and returns `204 No Content`.
 
 This will start an asynchronous deletion process of the cluster. The PostgreSQL
 SP will publish `DELETING` via CloudEvents, and when the deletion process is
-complete, the PostgreSQL SP will publish a `DELETED` event.
+complete, the CloudNativePG Database SP will publish a `DELETED` event.
 
 > **Note**: Steps 4 and 5 exist to handle user defined passwords. The process
 > should NOT fail if no secret is found.
@@ -702,8 +705,8 @@ complete, the PostgreSQL SP will publish a `DELETED` event.
 
 #### GET /api/v1alpha1/health
 
-**Description:** Retrieve the health status for the PostgreSQL Database Service
-Provider API.
+**Description:** Retrieve the health status for the CloudNativePG Database
+Service Provider API.
 
 The health check verifies:
 
@@ -713,7 +716,7 @@ The health check verifies:
 
 ### Status Reporting to DCM
 
-The PostgreSQL Database SP uses a **layered monitoring approach** with three
+The CloudNativePG Database SP uses a **layered monitoring approach** with three
 `SharedIndexInformer` instances to watch `Cluster`, `Pod`, and
 `PersistentVolumeClaim` resources labeled with `dcm.project/managed-by=dcm` and
 `dcm.project/dcm-service-type=database`. This provides comprehensive visibility
@@ -722,7 +725,7 @@ accurate status reporting to DCM.
 
 #### Layered Monitoring Architecture
 
-The PostgreSQL Database SP monitors Kubernetes resources and two levels:
+The CloudNativePG Database SP monitors Kubernetes resources and two levels:
 
 1. **Cluster**: Tracks creation status, rollout status, replica failures, and
    desired state
@@ -748,7 +751,7 @@ All informers watch resurces labled with:
 
 #### Status Reconciliation Logic
 
-When any informer receives an event, the PostgreSQL database SP reconciles
+When any informer receives an event, the CloudNativePG Database SP reconciles
 status from both resource types using the following precedence rules:
 
 1. **Pod status** (highest priority if Pod exists):
@@ -780,7 +783,7 @@ status from both resource types using the following precedence rules:
 For detailed implementation of the `SharedIndexInformer` pattern (setup phase,
 event processing flow, pros and cons), see the
 [KubeVirt SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/kubevirt-sp/kubevirt-sp.md#status-reporting-to-dcm)
-section. The PostgreSQL Database SP applies the same pattern with three
+section. The CloudNativePG Database SP applies the same pattern with three
 informers instead of one.
 
 #### CloudEvents Format
@@ -815,7 +818,7 @@ Instance identity is carried in the data payload `id` field (from the
 {
   "specVersion": "1.0",
   "id": "event-123-456",
-  "source": "dcm/providers/pgsql-database-sp-dev",
+  "source": "dcm/providers/cnpg-database-sp-dev",
   "type": "dcm.status.database",
   "subject": "dcm.database",
   "dataContentType": "application/json",
@@ -834,8 +837,9 @@ for the complete CloudEvents contract and messaging system details.
 #### Status Mapping from Kubernetes to DCM
 
 The following tables map Kubernetes resource statuses to DCM generic statuses.
-The PostgreSQL SP uses the **Priority Order** defined in the reconciliation
-logic above (Pod and PVC first, then Cluster, then resource not found).
+The CloudNativePG Database SP uses the **Priority Order** defined in the
+reconciliation logic above (Pod and PVC first, then Cluster, then resource not
+found).
 
 ##### Single Instance Database Status Mapping (Primary instance only)
 
@@ -901,10 +905,11 @@ mapping:
 
 > **Note**: The `SUCCEEDED` status defined in the
 > [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md)
-> specification is intentionally excluded from the PostgreSQL database SP. This
-> status only applies to Kubernetes resource types like Jobs that have a defined
-> completion state. The PostgreSQL database SP uses Clusters which are designed
-> for long-running services that continuously run and restart on failure.
+> specification is intentionally excluded from the CloudNativePG Database SP.
+> This status only applies to Kubernetes resource types like Jobs that have a
+> defined completion state. The CloudNativePG Database SP uses Clusters which
+> are designed for long-running services that continuously run and restart on
+> failure.
 
 **Precedence Rules**:
 
@@ -963,14 +968,15 @@ Rejected
 
 #### Rationale
 
-The PostgreSQL SP should have granular control of DCM's database instances, it
-shouldn't be limited by operator configurations, such as connection pooling by
-default that has to be disabled. additionally, DCM should not lock customers
-looking to use PostgreSQL into a specific distribution or configuration, thus
-the lack of support for Prometheus and Graphana in favor of a "private" (even if
-open-source) solution, and vendor-locking into a specific distribution does not
-align with DCM's goals. Additionally, Percona's PostgreSQL operator lacks in
-status information with a very basic binary state (`initializing` or `ready`)
+The CloudNativePG Database SP should have granular control of DCM's database
+instances, it shouldn't be limited by operator configurations, such as
+connection pooling by default that has to be disabled. additionally, DCM should
+not lock customers looking to use PostgreSQL into a specific distribution or
+configuration, thus the lack of support for Prometheus and Graphana in favor of
+a "private" (even if open-source) solution, and vendor-locking into a specific
+distribution does not align with DCM's goals. Additionally, Percona's PostgreSQL
+operator lacks in status information with a very basic binary state
+(`initializing` or `ready`)
 
 ### Alternative 2: Use CrunchyData/PostgresOperator
 
@@ -1050,7 +1056,7 @@ interface with the operator
 
 ## Infrastructure Needed
 
-- New repository: `psql-database-service-provider` (Go), modeled on
+- New repository: `cnpg-database-service-provider` (Go), modeled on
   `k8s-container-service-provider`.
 - OpenAPI spec: update `database/spec.yaml` in accordence with the relevant
   changes (resources field altered, replicas, and port fields added)
