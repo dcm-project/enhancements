@@ -407,112 +407,171 @@ Response Example
 
 ### Service Creation Flow
 
-The following sequence diagram illustrates admitting a multi-resource run via
-`POST /api/v1/resources`. Placement compiles the DAG, evaluates policy once per
-resource (all must pass before any create), then provisions level 0 via SPRM and
-the Agent messaging path. **Later DAG levels are not driven by the synchronous
-response to Catalog** — the SPRM status consumer updates instance rows in the
-control-plane database and notifies Placement in-process when a dependency is
-`Ready`, so Placement can enqueue the next level (aligned with
-[Declarative API](/enhancements/declarative-api/declarative-api.md)).
+To reduce complexity, there are two sequence diagrams to show the creation flow.
+
+#### End-to-end creation flow
+
+Catalog calls `CreateResources` in-process. Placement stores intent, fetches
+available agents, evaluates policy, persists the resource, and delegates
+resource creation to SPRM. SPRM publishes to the Agent via the messaging system.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant CM as Catalog Manager
-    participant PM as Placement Manager
+    participant CM as Catalog
+    participant PM as Placement
     participant DB as Placement DB
-    participant PE as Policy Manager
+    participant PE as Policy
     participant SPRM as SP Resource Manager
-    participant MS as Messaging System
-    participant AG as Agent
 
-    CM->>PM: POST /api/v1/resources<br/>{catalogItemInstanceId, resources[]}
+    CM->>PM: CreateResources {catalogItemInstanceId, resources[]}
     activate PM
 
-    PM->>PM: Build DAG (CEL edges + requiresResources)<br/>Detect cycles, assign levels
-    alt Compile or DAG error
-        PM-->>CM: 4xx compile error
-    else Compile ok
+    PM->>DB: Store intent<br/>{originalRequest}
+    DB-->>PM: Intent stored
 
-        PM->>DB: Store intent<br/>{originalRequest}
-        DB-->>PM: Intent stored
+    PM->>DB: Fetch available agents<br/>(healthy, non-Congested)
+    DB-->>PM: available_agents list
 
-        PM->>DB: Fetch available agents<br/>(healthy, non-Congested)
-        DB-->>PM: available_agents list
+    PM->>PE: POST policies:evaluateRequest<br/>{service_instance: {spec}, available_agents}
+    activate PE
 
-        loop each resource in graph
-            PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {spec}, available_agents}
-            PE-->>PM: APPROVED/MODIFIED or DENIED<br/>{validatedPayload, selectedAgent}
+    PE-->>PM: Validated/mutated payload<br/>& selectedAgent
+    deactivate PE
+
+    alt Policy validation fails
+        PM-->>CM: Error response (policy rejection)
+    else Policy validation succeeds
+
+        PM->>DB: Store validated request<br/>{validatedPayload, agentName}
+
+        PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
+        activate SPRM
+
+        alt SPRM returns error (404/503)
+            SPRM-->>PM: Error response
+            PM-->>CM: Error response
+
+        else SPRM returns 202 Accepted
+            SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: PENDING}
+            PM-->>CM: 201 Created {Resource}
         end
+        deactivate SPRM
+    end
 
-        alt Any resource denied
-            PM->>DB: Delete intent record
-            PM-->>CM: PolicyRejected (aggregated)
-        else All resources pass
+    Note over SPRM: Async: SPRM consumes response<br/>from dcm.agents.responses
 
-            PM->>DB: Persist per-resource rows<br/>(requires_resources, dagLevel,<br/> validated spec, agentName)
-            DB-->>PM: Validated request stored
+    opt SPRM notifies PM of QUEUED status
+        SPRM->>PM: Notify: instance QUEUED<br/>{instanceId, agentName}
+        Note over PM: Start queuedRequestTimeout timer
 
-            loop each resource at DAG level 0
-                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
-                SPRM->>MS: Publish creation CloudEvent<br/>to agent topic
-                MS->>AG: Deliver to Agent
-                SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: PENDING}
-            end
+        alt Timeout expires (or timeout = 0)
+            PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
+            Note over PM: Re-evaluate excluding current agent
 
-            PM-->>CM: 202 Accepted<br/>{resourceIds[]}
+            PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {spec}, available_agents, exclude_agents: [agentName]}
+            activate PE
+            PE-->>PM: New selectedAgent or no match
+            deactivate PE
 
-            Note over AG,SPRM: Status path (async, in-process to Placement)
-            AG-)SPRM: status event (Ready + outputs)
-            Note over SPRM: Status consumer updates<br/>control-plane instance row
-            SPRM->>DB: update resource row (Ready, outputs)
-            SPRM->>PM: OnResourceReady (in-process)
-
-            loop each resource at next DAG level when deps Ready
-                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
-                SPRM->>MS: Publish creation CloudEvent
-                MS->>AG: Deliver to Agent
+            alt Alternative agent found
+                PM->>SPRM: POST /api/v1/service-type-instances<br/>{newAgentName, serviceType, spec}
                 SPRM-->>PM: 202 Accepted
-            end
-
-            opt SPRM notifies PM of QUEUED status (creation)
-                SPRM->>PM: instance QUEUED<br/>{instanceId, agentName}
-                Note over PM: queuedRequestTimeout →<br/>cancel, re-evaluate with exclude_agents
+                PM-->>CM: 201 Created {Resource}
+            else No agent available
+                PM-->>CM: Error: no agent available
             end
         end
     end
     deactivate PM
 ```
 
-#### Status-driven DAG progression
+#### Multi-resource DAG orchestration
 
-After level 0, provisioning continues **asynchronously**. This path is separate
-from the synchronous `202 Accepted` returned to Catalog.
+When Catalog sends a resolved `resources[]` graph, Placement compiles the DAG
+before policy validation and provisioning. All resources must pass policy before
+SPRM creates any resource in the graph. Resource with DAG Level 0 begin
+provisioning while dagLevel 1+ continues asynchronously when the status consumer
+reports dependencies are in ready state.
 
-1. The Agent publishes status events (for example on `dcm.agents.responses`).
-2. The SPRM status consumer ingests those events and updates the corresponding
-   service-type instance row in the control-plane database (status, outputs, and
-   related fields).
-3. When a resource reaches `Ready`, the status consumer notifies Placement.
-4. Placement checks dependents via each row's `requires_resources` and
-   `dagLevel`. For resources at the next level whose dependencies are all
-   `Ready`, Placement binds dependency outputs, then calls SPRM to create those
-   instances.
-5. Repeat steps 3 to 4 while resources are still provisioning.
-6. When all resources reach terminal success, the process is complete.
-7. When any resource reports a terminal failure, Placement initiates rollback
-   and cleanup: provisioning halts, tear down already provisioned resources in
-   the graph (typically reverse DAG order via `DeleteResources`), and delete
-   resource in the DB.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CM as Catalog
+    participant PM as Placement
+    participant DB as Placement DB
+    participant PE as Policy
+    participant SPRM as SP Resource Manager
+    participant MS as Messaging System
+    participant AG as Agent
+
+    CM->>PM: CreateResources<br/>{catalogItemInstanceId, resources[]}
+    activate PM
+
+    PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect cycles, assign dagLevel
+    alt Compile or DAG error
+        PM-->>CM: 4xx compile error
+        deactivate PM
+    else Compile ok
+
+        PM->>DB: Store intent
+        DB-->>PM: Intent stored
+
+        PM->>DB: Fetch available agents
+        DB-->>PM: available_agents list
+
+        loop each resource in graph
+            PM->>PE: policies:evaluateRequest<br/>{spec, available_agents}
+            PE-->>PM: APPROVED/MODIFIED<br/> or DENIED
+        end
+
+        alt Any resource denied
+            PM-->>CM: PolicyRejected (aggregated)
+        else All resources pass
+
+            PM->>DB: Persist per-resource rows<br/>(requires_resources, dagLevel,<br/> validated spec, agentName)
+
+            loop each resource at dagLevel 0
+                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, spec}
+                SPRM->>MS: Publish creation CloudEvent
+                MS->>AG: Deliver to Agent
+                SPRM-->>PM: 202 Accepted
+            end
+
+            PM-->>CM: 202 Accepted<br/>{resourceIds[]}
+
+            Note over AG,SPRM: dagLevel 1+ (async, after deps Ready)
+
+            AG->>SPRM: status event (Ready + outputs)
+            SPRM->>DB: Update instance row<br/>(Ready, outputs)
+            SPRM->>PM: OnResourceReady (in-process)
+            activate PM
+
+            loop each resource at next dagLevel<br/>when all requires_resources Ready
+                PM->>PM: Bind dependency outputs into spec
+                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, spec}
+                SPRM->>MS: Publish creation CloudEvent
+                MS->>AG: Deliver to Agent
+                SPRM-->>PM: 202 Accepted
+            end
+
+            Note over PM: Repeat on each Ready event<br/>until graph complete or failure
+            deactivate PM
+        end
+    end
+```
 
 #### Flow Description
 
+The steps below describes to the end-to-end diagram unless noted as DAG-specific
+(see Multi-resource DAG orchestration diagram and
+[Status-driven DAG progression](#status-driven-dag-progression)).
+
 1. **Request Reception**
 
-- Catalog Manager sends a POST request to Placement Manager with
-  `catalogItemInstanceId` and `spec` (resource specification)
-- Placement Manager receives and processes the request
+- Catalog calls `CreateResources` with `catalogItemInstanceId` and a resolved
+  `resources[]` graph, either single or multi-resource
+- Placement receives and processes the request
 
 2. **Record Intent**
 
@@ -522,56 +581,46 @@ from the synchronous `202 Accepted` returned to Catalog.
 
 3. **Fetch Available Agents**
 
-- After DAG compile, Placement Manager queries the Agent Registry **once per run
-  admission** for healthy, non-Congested agents
+- After DAG compilation, Placement queries the Agent Registry for healthy,
+  non-Congested agents
 - The resulting `available_agents` list is reused for every policy evaluation in
-  this iteration (same list passed into each `evaluateRequest`)
+  this iteration i.e. the same list is passed into each `evaluateRequest`
 
 4. **Policy Validation**
 
 - Placement loops over each resource in the graph and calls Policy with that
-  resource's spec and the shared `available_agents` list (optional
-  `exclude_agents` on re-evaluation paths such as queued-request timeout)
+  resource's spec and the shared `available_agents`
 - Policy Manager evaluates requests against policies
 - Policy Manager returns:
-  - Approved or rejected
+  - Approved, Modified or rejected
   - Validated and potentially mutated payload
   - Selected Agent name (`selectedAgent`)
   - Policy constraints and patches applied
 - If policy validation fails (request rejected or constraint violation):
-  - Delete intent record from Placement DB
+  - Intent record is not deleted from Placement DB (see
+    [Future Improvements](#future-improvements))
   - Placement Manager returns error response to Catalog Manager
   - Request processing stops
 - If policy validation succeeds:
   - Placement Manager persists a resource row per graph node with validated
     spec, `agentName`, compiled `requires_resources`, and `dagLevel`
 
-5. **Store Validated Request**
+5. **Instance Creation**
 
-- After all resources pass policy, Placement persists one row per graph node
-  with compiled `requires_resources` (CEL + explicit deps), `dagLevel`,
-  validated spec, and selected `agentName`. Orchestration and retries use these
-  fields.
+- Placement delegates create to SPRM for each resource at dagLevel. Single
+  resource requests are considered level 0 only
+- SPRM publishes to the Agent messaging topic; responds with 202 or error
+- On success, Placement returns `202 Accepted` with `resourceIds[]` to Catalog
+- If SPRM returns an error (for example 404/503) before any resource is
+  accepted, the intent record is retained (see
+  [Future Improvements](#future-improvements)). Placement returns an error to
+  Catalog
 
-6. **Instance Creation**
-
-- Placement Manager delegates instance creation to SP Resource Manager
-- Forwards `agentName`, `serviceType`, and `spec`
-- SP Resource Manager publishes the request to the agent's messaging topic
-- SPRM always responds synchronously with one of:
-  - **SPRM returns error (404/503)**: Error response returned to Placement
-    Manager. The record is deleted from Placement DB. Placement Manager forwards
-    the error to Catalog Manager. Request processing stops.
-  - **SPRM returns 202 Accepted**: Level 0 resources are in progress. Placement
-    returns `202 Accepted` with `resourceIds[]` to Catalog with a full
-    `Resource` object. The resource row is `PENDING` until the status consumer
-    reports progress.
-
-7. **Status-driven DAG progression (asynchronous)**
+6. **Status-driven DAG progression (asynchronous, DAG-specific)**
 
 See [Status-driven DAG progression](#status-driven-dag-progression).
 
-8. **Queued-Request Handling (Asynchronous)**
+7. **Queued-Request Handling (Asynchronous)**
 
 - After SPRM returns 202, it continues to consume responses from
   `dcm.agents.responses`. If the Agent reports a `dcm.agent.request-queued`
@@ -588,7 +637,7 @@ See [Status-driven DAG progression](#status-driven-dag-progression).
   - If no alternative agent is available: PM deletes records from Placement DB
     and returns an error to Catalog Manager
 
-9. **Pending-Request Timeout (Asynchronous)**
+8. **Pending-Request Timeout (Asynchronous)**
 
 - SPRM runs a periodic sweep of instance records in `PENDING` status. If a
   record has been `PENDING` longer than `pendingRequestTimeout` and the agent is
@@ -613,6 +662,26 @@ See [Status-driven DAG progression](#status-driven-dag-progression).
     re-evaluated agent is the authoritative owner of the `resourceId`
 - If no alternative agent is available: PM deletes records from Placement DB and
   returns an error to Catalog Manager
+
+#### Status-driven DAG progression
+
+After level 0, provisioning continues asynchronously.
+
+1. The Agent publishes status events (for example on `dcm.agents.responses`).
+2. The SPRM status consumer ingests those events and updates the corresponding
+   service-type instance row in the control-plane database (status, outputs, and
+   related fields).
+3. When a resource reaches `Ready`, the status consumer notifies Placement.
+4. Placement checks dependents via each row's `requires_resources` and
+   `dagLevel`. For resources at the next level whose dependencies are all
+   `Ready`, Placement binds dependency outputs, then calls SPRM to create those
+   instances.
+5. Repeat steps 3 to 4 while resources are still provisioning.
+6. When all resources reach terminal success, the process is complete.
+7. When any resource reports a terminal failure, Placement initiates rollback
+   and cleanup: provisioning halts, tear down already provisioned resources in
+   the graph (typically reverse DAG order via `DeleteResources`), and delete
+   resource in the DB.
 
 ### Service Deletion Flow
 
@@ -770,6 +839,11 @@ sequenceDiagram
   excluding agents)
 - PM-level request priority/ordering (prioritize certain requests over others
   when re-evaluating)
-- Graph-level policy evaluation: a single Policy request over the full DAG
+- Graph-level policy evaluation where a single Policy request over the full DAG
   snapshot (for example `evaluateGraph`), so cross-resource rules run without
   per-resource round-trips
+- On instance creation failure, Placement retains the intent record instead of
+  deleting it. This preserves the original `resources[]` graph for a future
+  retry or scheduled re-admission path (for example when agents become available
+  again or a transient SPRM error clears) without requiring Catalog to resubmit
+  the full request.
