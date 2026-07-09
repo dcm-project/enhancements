@@ -9,6 +9,7 @@ words:
   - flocati
   - pkliczewski
   - gabriel-farache
+  - jordigilh
   - Authorino
   - codegen
   - cutover
@@ -21,6 +22,7 @@ words:
   - kubeconfig
   - oapi
   - OSAC
+  - osac
   - rego
   - RHDH
   - opa
@@ -39,8 +41,17 @@ words:
   - unhold
   - Virt
   - virtualmachines
-  - SPRM
+  - baremetal
+  - hypershift
+  - grpcurl
   - vcpu
+  - finalizer
+  - finalizers
+  - computeinstance
+  - pgerrcode
+  - grpcstatus
+  - grpccodes
+  - Errorf
   - AAAAC
   - AAAAI
   - autonumber
@@ -51,15 +62,10 @@ words:
   - myapp
   - editability
   - cloudevents
-  - kubeconfig
-  - hypershift
-  - baremetal
   - infraenv
   - eksctl
   - Preboot
   - deployables
-  - serviceprovider
-  - cutover
   - Containerfile
   - befores
   - idempotently
