@@ -156,8 +156,10 @@ not exposed as a public Placement OpenAPI surface.
 | DELETE | `DeleteResources` | Delete one or more resources by id (single- or batch)                 |
 
 _Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
-`resourceIds[]` and stored on the catalog item instance). An optional internal
-batch id may group resource rows within Placement; it is not exposed to Catalog.
+`resourceIds[]` and stored on the catalog item instance). Placement assigns a
+`runId` per admission batch that groups resource rows from a single
+`CreateResources` call. `runId` appears in responses but is not sent on create
+or delete requests.
 
 _CreateResources_: Admit a run (single or multi-resource graph).
 
@@ -215,7 +217,7 @@ requestBody:
                     Optional explicit dependency names.
 ```
 
-Example: multi-resource catalog instance (dev app with database + container)
+Example multi-resource request payload (dev app with database + container):
 
 ```json
 {
@@ -223,8 +225,6 @@ Example: multi-resource catalog instance (dev app with database + container)
   "resources": [
     {
       "name": "ordersDb",
-      "dagLevel": 0,
-      "agentName": "postgres-sp",
       "spec": {
         "serviceType": "database",
         "engine": "postgresql",
@@ -235,8 +235,6 @@ Example: multi-resource catalog instance (dev app with database + container)
     {
       "name": "app",
       "requiresResources": ["ordersDb"],
-      "agentName": "container-sp",
-      "dagLevel": 1,
       "spec": {
         "serviceType": "container",
         "image": { "reference": "registry.example.com/orders-api:1.0" },
@@ -255,21 +253,58 @@ Example: multi-resource catalog instance (dev app with database + container)
 }
 ```
 
-Example of response (`202 Accepted`):
+Example of response payload (`202 Accepted`):
 
 ```json
 {
-  "resourceIds": [
-    "696511df-1fcb-4f66-8ad5-aeb828f383a0",
-    "c66be104-eea3-4246-975c-e6cc9b32d74d"
+  "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
+  "runId": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b",
+  "resources": [
+    {
+      "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "name": "ordersDb",
+      "path": "resources/696511df-1fcb-4f66-8ad5-aeb828f383a0",
+      "agentName": "postgres-sp",
+      "approvalStatus": "approved",
+      "status": "Pending",
+      "dagLevel": 0,
+      "spec": {
+        "serviceType": "database",
+        "engine": "postgresql",
+        "version": "16",
+        "metadata": { "name": "orders-db" }
+      },
+      "createTime": "2026-05-03T12:00:00Z",
+      "updateTime": "2026-05-03T12:00:00Z"
+    },
+    {
+      "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
+      "name": "app",
+      "path": "resources/c66be104-eea3-4246-975c-e6cc9b32d74d",
+      "agentName": "container-sp",
+      "approvalStatus": "approved",
+      "status": "Pending",
+      "requiresResources": ["ordersDb"],
+      "dagLevel": 1,
+      "spec": {
+        "serviceType": "container",
+        "image": { "reference": "registry.example.com/orders-api:1.0" },
+        "process": {
+          "env": [
+            {
+              "name": "DATABASE_URL",
+              "value": "${ordersDb.connectionString}"
+            }
+          ]
+        },
+        "metadata": { "name": "orders-api" }
+      },
+      "createTime": "2026-05-03T12:00:00Z",
+      "updateTime": "2026-05-03T12:00:00Z"
+    }
   ]
 }
 ```
-
-Catalog persists `resourceIds` on the catalog item instance. Placement keeps
-orchestration state on each resource row; level-0 creates are initiated before
-the response returns (level 1+ continue asynchronously when dependencies are
-`Ready`).
 
 **ListResources**: List admitted applications.
 
@@ -277,13 +312,14 @@ Each `applications[]` entry is one catalog item instance
 (`catalogItemInstanceId`). Nested `resources[]` holds provisioned nodes for that
 instance (`id` per node).
 
-Example response:
+Example of response payload:
 
 ```json
 {
   "applications": [
     {
       "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
+      "runId": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b",
       "resources": [
         {
           "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
@@ -319,6 +355,7 @@ Example response:
     },
     {
       "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
+      "runId": "2d8a1c9e-4f6b-4a7d-8e3c-1b2a3c4d5e6f",
       "resources": [
         {
           "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
@@ -349,11 +386,12 @@ Returns one provisioned resource by its `id`. The response includes
 `catalogItemInstanceId` and a nested `resources` object with the resource row
 (`id`, `dagLevel`, `spec`, and related fields).
 
-Example of Response Payload
+Example of response payload
 
 ```json
 {
   "catalogItemInstanceId": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
+  "runId": "2d8a1c9e-4f6b-4a7d-8e3c-1b2a3c4d5e6f",
   "resources": {
     "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
     "name": "webserver",
@@ -392,13 +430,13 @@ Request Example:
 }
 ```
 
-Response Example
+Example of response payload
 
 ```json
 {
-  "results": [
-    { "resourceId": "696511df-1fcb-4f66-8ad5-aeb828f383a0" },
-    { "resourceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781" }
+  "resourceIds": [
+    "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+    "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
   ]
 }
 ```
