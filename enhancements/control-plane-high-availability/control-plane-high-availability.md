@@ -172,10 +172,9 @@ Service provider health polling runs on the agent (see
 agent liveness through periodic heartbeats and persists agent registration in
 the Agent Registry.
 
-Background work that remains on the control plane includes JetStream consumption
-(resource status events, agent health warnings on `dcm.agents.health`, and agent
-response traffic), deferred deletion scheduling, and agent heartbeat handling.
-Before production multi-instance deploy:
+Background work that remains on the control plane includes JetStream
+consumption, deferred deletion scheduling, and agent heartbeat handling. Before
+production multi-instance deploy:
 
 - Only one instance should run schedulers that are not safe to duplicate, unless
   workers claim work in the database first.
