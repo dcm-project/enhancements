@@ -18,19 +18,25 @@ words:
   - ITSM
   - jdoe
   - Kessel
+  - KMSID
   - Kuadrant
   - kubeconfig
+  - kubelet
   - oapi
   - OSAC
   - osac
   - rego
   - RHDH
+  - RWOP
   - opa
   - dcm
   - dcm-api
   - dcm-platform
   - dcm-server
+  - dcmv
+  - datacontenttype
   - frontmatter
+  - Gitea
   - kubevirt
   - monolith
   - monorepo
@@ -70,6 +76,7 @@ words:
   - befores
   - idempotently
   - subresource
+  - subfolders
   - behaviour
   - jubah
   - vmspec
@@ -77,3 +84,4 @@ words:
   - databasespec
   - clusterspec
   - CAPI
+  - igavra

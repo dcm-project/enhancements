@@ -50,7 +50,7 @@ portable `storage` service type on Kubernetes clusters.
 - Define `CREATE`, `READ`, `UPDATE`, and `DELETE` endpoints for managing PVC
   instances on a Kubernetes cluster. `UPDATE` supports capacity expansion when
   the underlying StorageClass and CSI driver allow it (see
-  [PATCH /api/v1alpha1/volumes/{volumeId}](#patch-apiv1alpha1volumesvolumeid)).
+  [PATCH /api/v1alpha1/volumes/{volume_id}](#patch-apiv1alpha1volumesvolume_id)).
 - Define status reporting to DCM via CloudEvents on the messaging system.
 - Manage `PersistentVolumeClaim` resources through a single Kubernetes cluster
   API per SP instance. Multiple SP instances may target the same cluster when
@@ -73,7 +73,7 @@ portable `storage` service type on Kubernetes clusters.
 - Deployment strategy for the K8s Storage SP API (covered by platform deployment
   documentation).
 - `ReadWriteOncePod` (RWOP) support — requires Kubernetes 1.22+ and driver
-  support. If needed, it may be requested via `providerHints.kubernetes` in v2.
+  support. If needed, it may be requested via `provider_hints.kubernetes` in v2.
 
 ## Proposal
 
@@ -140,8 +140,8 @@ portable `storage` service type on Kubernetes clusters.
 
 - Uses `k8s.io/client-go` to interact with the Kubernetes API.
 - Creates and watches `PersistentVolumeClaim` resources. Each storage request
-  becomes one PVC with `capacity` from the request and optional `storageClass`,
-  `volumeMode`, and `accessMode` from `providerHints.kubernetes`.
+  becomes one PVC with `capacity` from the request and optional `storage_class`,
+  `volume_mode`, and `access_mode` from `provider_hints.kubernetes`.
 - Does not create Pods, Deployments, or workload attachments — consumers attach
   PVCs through their own service types or day-2 operations.
 
@@ -152,9 +152,10 @@ portable `storage` service type on Kubernetes clusters.
 
 #### DCM SP Health Check
 
-K8s Storage SP must expose a health endpoint
-`http://<provider-ip>:<port>/health` for DCM control plane to poll every 10
-seconds. See
+K8s Storage SP must expose a health endpoint at
+`GET /api/v1alpha1/volumes/health` (resource-relative: DCM polls
+`{registered_endpoint}/health` where the registered endpoint is
+`{base}/api/v1alpha1/volumes`). See
 [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
 
 #### DCM SP Status Reporting
@@ -180,14 +181,14 @@ overridden per-volume in v1.
 
 #### Storage Defaults
 
-| Field               | Type   | Default           | Description                                     |
-| ------------------- | ------ | ----------------- | ----------------------------------------------- |
-| defaultStorageClass | string | (cluster default) | StorageClass used when not specified in request |
-| defaultAccessMode   | string | ReadWriteOnce     | PVC accessMode when not specified in request    |
+| Field               | Type   | Default       | Description                                     |
+| ------------------- | ------ | ------------- | ----------------------------------------------- |
+| defaultStorageClass | string | (cluster)     | StorageClass used when not specified in request |
+| defaultAccessMode   | string | ReadWriteOnce | PVC access mode when not specified in request   |
 
-All PVC-specific settings (`storageClass`, `volumeMode`, `accessMode`) may be
-set per volume under `providerHints.kubernetes` (see POST endpoint
-documentation).
+Per-volume `storage_class`, `volume_mode`, and `access_mode` may be set under
+`provider_hints.kubernetes` (see POST endpoint documentation). When
+`access_mode` is omitted, the SP applies `defaultAccessMode`.
 
 ### Registration Flow
 
@@ -198,21 +199,24 @@ client to send a request to the SP API registration endpoint
 [registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
 for more information.
 
-Example request payload:
+Example registration payload (via `service-provider-manager` client):
 
 ```golang
-dcm "github.com/dcm-project/service-provider-api/pkg/registration/client"
-...
-request := &dcm.RegistrationRequest{
-    Name: "k8s-storage-sp",
-    ServiceType: "storage",
-    DisplayName: "Kubernetes Storage Service Provider",
-    Endpoint:  fmt.Sprintf("%s/api/v1alpha1/volumes", apiHost),
-    Metadata: dcm.Metadata{
-      Zone:   "us-east-1b",
-      Region: "us-east-1",
+import (
+    dcmv1alpha1 "github.com/dcm-project/service-provider-manager/api/v1alpha1/provider"
+)
+
+payload := dcmv1alpha1.Provider{
+    Name:          "k8s-storage-sp",
+    ServiceType:   "storage",
+    DisplayName:   ptr("Kubernetes Storage Service Provider"),
+    Endpoint:      fmt.Sprintf("%s/api/v1alpha1/volumes", apiHost),
+    SchemaVersion: "v1alpha1",
+    Operations:    &[]string{"CREATE", "READ", "UPDATE", "DELETE"},
+    Metadata: &dcmv1alpha1.ProviderMetadata{
+        RegionCode: ptr("us-east-1"),
+        Zone:       ptr("us-east-1b"),
     },
-    Operations: []string{"CREATE", "READ", "UPDATE", "DELETE"},
 }
 ```
 
@@ -242,14 +246,14 @@ resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                         | Description                     |
-| ------ | -------------------------------- | ------------------------------- |
-| POST   | /api/v1alpha1/volumes            | Create a new volume (PVC)       |
-| GET    | /api/v1alpha1/volumes            | List all volumes                |
-| GET    | /api/v1alpha1/volumes/{volumeId} | Get a volume instance           |
-| PATCH  | /api/v1alpha1/volumes/{volumeId} | Update volume (expand capacity) |
-| DELETE | /api/v1alpha1/volumes/{volumeId} | Delete a volume instance        |
-| GET    | /api/v1alpha1/health             | K8s Storage SP health check     |
+| Method | Endpoint                          | Description                     |
+| ------ | --------------------------------- | ------------------------------- |
+| POST   | /api/v1alpha1/volumes             | Create a new volume (PVC)       |
+| GET    | /api/v1alpha1/volumes             | List all volumes                |
+| GET    | /api/v1alpha1/volumes/{volume_id} | Get a volume instance           |
+| PATCH  | /api/v1alpha1/volumes/{volume_id} | Update volume (expand capacity) |
+| DELETE | /api/v1alpha1/volumes/{volume_id} | Delete a volume instance        |
+| GET    | /api/v1alpha1/volumes/health      | K8s Storage SP health check     |
 
 ##### AEP Compliance
 
@@ -262,8 +266,8 @@ to check for compliance with AEP.
 
 The POST endpoint follows the portable `storage` service type contract (see
 [Service Type Definitions - Storage](../service-type-definitions/service-type-definitions.md#storage)).
-Required fields: `capacity`, `metadata.name`. Optional:
-`providerHints.kubernetes`.
+Required fields: `service_type`, `capacity`, `metadata.name`. Optional:
+`provider_hints.kubernetes` (`storage_class`, `volume_mode`, `access_mode`).
 
 During creation, each PVC must be labeled with:
 
@@ -275,52 +279,60 @@ The `dcm-instance-id` is a UUID generated by DCM. If a PVC with the same
 `metadata.name` already exists in the configured namespace, the K8s Storage SP
 returns a `409 Conflict` error response without modifying the existing resource.
 
-**PVC Settings via providerHints:**
+**PVC settings via provider_hints:**
 
-Users can specify platform-specific PVC settings using
-`providerHints.kubernetes`:
+| Field         | Type   | Description                                                                 |
+| ------------- | ------ | --------------------------------------------------------------------------- |
+| storage_class | string | StorageClass name (overrides SP default)                                    |
+| volume_mode   | string | `Filesystem` (default) or `Block`                                           |
+| access_mode   | string | PVC access mode: `ReadWriteOnce` (default), `ReadOnlyMany`, `ReadWriteMany` |
 
-| Field        | Type   | Description                                                   |
-| ------------ | ------ | ------------------------------------------------------------- |
-| storageClass | string | StorageClass name (overrides SP default)                      |
-| volumeMode   | string | `Filesystem` (default) or `Block`                             |
-| accessMode   | string | `ReadWriteOnce` (default), `ReadOnlyMany`, or `ReadWriteMany` |
+`access_mode` maps directly to Kubernetes PVC `spec.accessModes`.
 
-**Example Request Payload:**
+**Example request payload:**
 
 ```json
 {
+  "service_type": "storage",
   "capacity": "100Gi",
   "metadata": {
     "name": "app-data"
   },
-  "providerHints": {
+  "provider_hints": {
     "kubernetes": {
-      "storageClass": "gp3-csi",
-      "volumeMode": "Filesystem",
-      "accessMode": "ReadWriteOnce"
+      "storage_class": "gp3-csi",
+      "volume_mode": "Filesystem",
+      "access_mode": "ReadWriteOnce"
     }
-  },
-  "serviceType": "storage"
+  }
 }
 ```
 
 **Response:** Returns `201 Created` with status `PROVISIONING` while the PVC is
 pending binding.
 
-**Example Response Payload:**
+**Example response payload:**
 
 ```json
 {
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "app-data",
-  "status": "PROVISIONING",
-  "capacity": "100Gi",
-  "metadata": {
-    "namespace": "production",
-    "storageClass": "gp3-csi",
-    "accessMode": "ReadWriteOnce"
-  }
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "path": "volumes/123e4567-e89b-12d3-a456-426614174000",
+  "spec": {
+    "service_type": "storage",
+    "capacity": "100Gi",
+    "metadata": {
+      "name": "app-data",
+      "namespace": "production",
+      "storage_class": "gp3-csi"
+    },
+    "provider_hints": {
+      "kubernetes": {
+        "storage_class": "gp3-csi",
+        "access_mode": "ReadWriteOnce"
+      }
+    }
+  },
+  "status": "PROVISIONING"
 }
 ```
 
@@ -344,25 +356,34 @@ pending binding.
 
 ```json
 {
-  "results": [
+  "volumes": [
     {
-      "requestId": "123e4567-e89b-12d3-a456-426614174000",
-      "name": "app-data",
-      "status": "RUNNING",
-      "capacity": "100Gi",
-      "metadata": {
-        "namespace": "production",
-        "storageClass": "gp3-csi",
-        "accessMode": "ReadWriteOnce",
-        "volumeName": "pvc-abc123"
-      }
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "path": "volumes/123e4567-e89b-12d3-a456-426614174000",
+      "spec": {
+        "service_type": "storage",
+        "capacity": "100Gi",
+        "metadata": {
+          "name": "app-data",
+          "namespace": "production",
+          "storage_class": "gp3-csi",
+          "volume_name": "pvc-abc123"
+        },
+        "provider_hints": {
+          "kubernetes": {
+            "storage_class": "gp3-csi",
+            "access_mode": "ReadWriteOnce"
+          }
+        }
+      },
+      "status": "RUNNING"
     }
   ],
   "next_page_token": ""
 }
 ```
 
-#### GET /api/v1alpha1/volumes/{volumeId}
+#### GET /api/v1alpha1/volumes/{volume_id}
 
 **Description:** Get a specific storage volume instance by DCM instance ID
 (`dcm-instance-id` label).
@@ -371,25 +392,34 @@ pending binding.
 
 ```json
 {
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "app-data",
-  "status": "RUNNING",
-  "capacity": "100Gi",
-  "metadata": {
-    "namespace": "production",
-    "storageClass": "gp3-csi",
-    "accessMode": "ReadWriteOnce",
-    "volumeName": "pvc-abc123"
-  }
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "path": "volumes/123e4567-e89b-12d3-a456-426614174000",
+  "spec": {
+    "service_type": "storage",
+    "capacity": "100Gi",
+    "metadata": {
+      "name": "app-data",
+      "namespace": "production",
+      "storage_class": "gp3-csi",
+      "volume_name": "pvc-abc123"
+    },
+    "provider_hints": {
+      "kubernetes": {
+        "storage_class": "gp3-csi",
+        "access_mode": "ReadWriteOnce"
+      }
+    }
+  },
+  "status": "RUNNING"
 }
 ```
 
 **Error Handling:**
 
-- **404 Not Found**: Volume with the specified `volumeId` does not exist
+- **404 Not Found**: Volume with the specified `volume_id` does not exist
 - **500 Internal Server Error**: Unexpected error querying Kubernetes API
 
-#### PATCH /api/v1alpha1/volumes/{volumeId}
+#### PATCH /api/v1alpha1/volumes/{volume_id}
 
 **Description:** Update a storage volume. v1 supports **capacity expansion**
 only.
@@ -426,7 +456,7 @@ updates are published via CloudEvents as the expansion progresses.
 
 **Error Handling:**
 
-- **404 Not Found**: Volume with the specified `volumeId` does not exist
+- **404 Not Found**: Volume with the specified `volume_id` does not exist
 - **422 Unprocessable Entity**: StorageClass does not allow volume expansion
   (`allowVolumeExpansion: false` or not set)
 - **400 Bad Request**: New capacity is smaller than or equal to current capacity
@@ -466,7 +496,7 @@ See
 [Volume Expansion](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#expanding-persistent-volumes-claims)
 in Kubernetes documentation for driver-specific behavior.
 
-#### DELETE /api/v1alpha1/volumes/{volumeId}
+#### DELETE /api/v1alpha1/volumes/{volume_id}
 
 **Description:** Delete a storage volume instance (PVC). The SP issues a
 Kubernetes DELETE on the PVC and returns `204 No Content` when the API accepts
@@ -476,10 +506,10 @@ CloudEvents until removal completes.
 
 **Error Handling:**
 
-- **404 Not Found**: Volume with the specified `volumeId` does not exist
+- **404 Not Found**: Volume with the specified `volume_id` does not exist
 - **500 Internal Server Error**: Unexpected error during deletion
 
-#### GET /api/v1alpha1/health
+#### GET /api/v1alpha1/volumes/health
 
 **Description:** Retrieve the health status for the K8s Storage SP API.
 
@@ -561,8 +591,8 @@ For official definitions, see
 
 - The `instanceId` is read from the `dcm.project/dcm-instance-id` label on the
   PVC.
-- When bound, the status message may include `volumeName` from
-  `pvc.spec.volumeName`.
+- When bound, the status message may include `volume_name` from
+  `spec.metadata.volume_name` (mapped from `pvc.spec.volumeName`).
 
 ### Upgrade / Downgrade Strategy
 
@@ -615,4 +645,4 @@ patterns mature (FLPATH-4115).
 
 - New repository: `k8s-storage-service-provider` (Go), modeled on
   `k8s-container-service-provider`.
-- OpenAPI spec: `storagespec.yaml` in `service-provider-api`.
+- OpenAPI spec: `api/v1alpha1/openapi.yaml` in `k8s-storage-service-provider`.
