@@ -266,7 +266,7 @@ the same step.
 
 ##### Dependency Edges
 
-1. CEL expressions: References such as `${db.outputField}` imply an edge from
+1. CEL expressions: References such as `${db.output_field}` imply an edge from
    `db` to the resource that uses the expression (the consumer depends on the
    producer’s output).
 2. Explicit `requirements`: These are edges declared directly on a resource.

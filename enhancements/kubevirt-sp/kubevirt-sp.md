@@ -77,7 +77,7 @@ for DCM control plane to poll every 10 seconds. See documentation for
 #### DCM SP Status Reporting
 
 - Send status for virtual machine instance to DCM endpoint
-  `/instances/{instanceId}/status`. See documentation for
+  `/instances/{instance_id}/status`. See documentation for
   [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
 - Use a shared informer to watch/monitor VMI events.
 
@@ -136,13 +136,13 @@ machine resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint          | Description                       |
-| ------ | ----------------- | --------------------------------- |
-| POST   | /api/v1/vm        | Create a new virtual machine      |
-| GET    | /api/v1/vm        | List all virtual machines         |
-| GET    | /api/v1/vm/{vmId} | Get a virtual machine instance    |
-| DELETE | /api/v1/vm/{vmId} | Delete a virtual machine instance |
-| GET    | /api/v1/health    | KubeVirt API service health check |
+| Method | Endpoint           | Description                       |
+| ------ | ------------------ | --------------------------------- |
+| POST   | /api/v1/vm         | Create a new virtual machine      |
+| GET    | /api/v1/vm         | List all virtual machines         |
+| GET    | /api/v1/vm/{vm_id} | Get a virtual machine instance    |
+| DELETE | /api/v1/vm/{vm_id} | Delete a virtual machine instance |
+| GET    | /api/v1/health     | KubeVirt API service health check |
 
 ###### AEP Compliance
 
@@ -153,7 +153,7 @@ check for compliance with AEP.
 
 The POST endpoint follows the contract defined in the VM schema spec pre-defined
 by DCM core. During creation of the resources, each virtual machine must be
-labeled with _managed-by=dcm,dcm-instance-id=vmId_.
+labeled with _managed-by=dcm,dcm-instance-id=vm_id_.
 
 Example payload
 
@@ -161,12 +161,12 @@ Example payload
 {
   "memory": { "size": "2GB" },
   "vcpu": { "count": 2 },
-  "guestOS": { "type": "fedora-39" },
+  "guest_os": { "type": "fedora-39" },
   "access": {
-    "sshPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
+    "ssh_public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample..."
   },
   "metadata": { "name": "fedora-vm" },
-  "serviceType": "vm"
+  "service_type": "vm"
 }
 ```
 
@@ -196,28 +196,28 @@ Example payload
   {
     "name": "web-frontend",
     "namespace": "web-frontend-001",
-    "requestId": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
+    "request_id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
     "status": "PROVISIONING"
   },
   {
     "name": "fedora-webserver",
     "namespace": "fedora-webserver-001",
-    "requestId": "c66be104-eea3-4246-975c-e6cc9b32d74d",
+    "request_id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
     "status": "FAILED"
   },
   {
     "name": "ubuntu-vm",
     "namespace": "ubuntu-vm-001",
-    "requestId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+    "request_id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
     "status": "PROVISIONING"
   }
 ]
 ```
 
-**GET /api/v1/vm/{vmId}- Get Specific VM**
+**GET /api/v1/vm/{vm_id}- Get Specific VM**
 
-- Handler receives GET request with _vmId_ path parameter  
-  Calls GetVMFromCluster(_vmId_)
+- Handler receives GET request with _vm_id_ path parameter  
+  Calls GetVMFromCluster(_vm_id_)
 - Cluster lookup:  
   Query KubeVirt API for VirtualMachine with matching `dcm-instance-id` label
 - VMI details:  
@@ -243,10 +243,10 @@ Example payload
   "ssh": {
     "enabled": true,
     "username": "fedora",
-    "secretName": "my-fedora-vm-ssh",
-    "connectMethods": {
-      "clusterSSH": "ssh fedora@10.244.0.12",
-      "nodePort": { "node": "192.168.0.10", "port": 32222 }
+    "secret_name": "my-fedora-vm-ssh",
+    "connect_methods": {
+      "cluster_ssh": "ssh fedora@10.244.0.12",
+      "node_port": { "node": "192.168.0.10", "port": 32222 }
     }
   }
 }
@@ -255,7 +255,7 @@ Example payload
 **Note**: Payload above is **only** an example. This will be updated when the
 schema contract is defined by DCM.
 
-**DELETE /api/v1/vm/{vmId}**
+**DELETE /api/v1/vm/{vm_id}**
 
 Remove a single virtual machine instance and returns 204 (No Content)
 
@@ -270,7 +270,7 @@ Following the design and recommendation in the
 , the VMStatusSyncService within KubeVirt SP implements a watcher loop that uses
 Kubernetes watch APIs to stream VMI events per VM instance and update DCM in
 real time. These resources must be labeled with
-`managed-by=dcm,dcm-instance-id=vmId` during creation to enable filtering.
+`managed-by=dcm,dcm-instance-id=vm_id` during creation to enable filtering.
 
 #### VM Status Update Flow - Using Informer
 
@@ -290,7 +290,8 @@ real time. These resources must be labeled with
 - Informer updates the local cache (thread-safe)
 - Handler extracts `dcm-instance-id` from VMI labels
 - Map VMI phase to DCM status (Scheduled → Provisioning, etc.)
-- Send status update to DCM status endpoint `PUT /instances/{instanceId}/status`
+- Send status update to DCM status endpoint
+  `PUT /instances/{instance_id}/status`
 - Failed events are automatically retried (with exponential backoff)
 
 ##### Pros

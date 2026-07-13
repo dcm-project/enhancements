@@ -41,7 +41,7 @@ DCM currently has no authentication or authorization enforcement. This means:
 
 - Any client with network access can call any API endpoint without
   authentication
-- The Policy Engine assumes `userId` is available during evaluation, but no
+- The Policy Engine assumes `user_id` is available during evaluation, but no
   component provides it
 - The ACM Cluster SP exposes kubeconfig credentials in unauthenticated GET
   responses
@@ -84,8 +84,8 @@ a non-goal. This enhancement is the foundation those deferrals depend on.
 1. **Platform Admin** configures an identity provider so all API access requires
    authentication
 2. **Consumer Developer** authenticates via SSO and browses the service catalog
-3. **Policy Engine** receives verified `userId` to evaluate policies against the
-   authenticated caller
+3. **Policy Engine** receives verified `user_id` to evaluate policies against
+   the authenticated caller
 
 ### Implementation Details/Notes/Constraints
 
@@ -256,11 +256,11 @@ the control plane can track identity and ownership.
   "id": "uuid",
   "username": "jdoe",
   "email": "jdoe@example.com",
-  "displayName": "Jane Doe",
+  "display_name": "Jane Doe",
   "type": "human | service_account",
   "status": "active | suspended | deactivated",
-  "createdAt": "timestamp",
-  "updatedAt": "timestamp"
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
 }
 ```
 
@@ -277,11 +277,11 @@ have multiple identity bindings (one per external identity provider).
 ```json
 {
   "id": "uuid",
-  "actorId": "uuid",
-  "authProvider": "keycloak",
-  "externalId": "keycloak-sub-claim",
-  "createdAt": "timestamp",
-  "updatedAt": "timestamp"
+  "actor_id": "uuid",
+  "auth_provider": "keycloak",
+  "external_id": "keycloak-sub-claim",
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
 }
 ```
 
@@ -328,7 +328,7 @@ requirements against the request.
 
 #### Required API Changes to Existing Enhancements
 
-This enhancement introduces identity context (`userId`) that the Policy and
+This enhancement introduces identity context (`user_id`) that the Policy and
 Placement enhancements must consume from the request context. The details of how
 each domain integrates this value are documented in their respective
 enhancements.
@@ -384,13 +384,13 @@ sequenceDiagram
     Note over DCM: Placement domain (in-process)
     DCM->>DB: Store intent
     Note over DCM: Policy domain (in-process)
-    DCM->>DCM: Evaluate policies with userId
+    DCM->>DCM: Evaluate policies with user_id
     DCM->>DB: Store validated request
 
     Note over DCM: Service-provider domain (in-process)
     DCM->>DCM: Lookup SP, validate health
     DCM->>SP: Create instance via SP
-    SP-->>DCM: 202 Accepted {instanceId}
+    SP-->>DCM: 202 Accepted {instance_id}
     DCM-->>User: Instance created
 ```
 

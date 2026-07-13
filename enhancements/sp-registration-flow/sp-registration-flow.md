@@ -167,7 +167,7 @@ flowchart BT
 - A registration call must be made to the Agent's SP Registration endpoint for
   each service type the SP supports. The payload includes:
   1. Unique provider name
-  2. Unique providerID (optional, server-generated if not provided)
+  2. Unique provider_id (optional, server-generated if not provided)
   3. Endpoint URL (e.g.,
      [https://provider-1.local/api](https://provider-1.local/api))
   4. Service type this provider can fulfill (e.g., _"vm"_, _"container"_)
@@ -190,7 +190,7 @@ The Service Provider's _name_ is the natural key used to match existing
 registrations.
 
 Per [AEP-133](https://aep.dev/133/), when a client wants to specify the
-_providerID_, it must be passed as a query parameter (`?id=...`), not in the
+_provider_id_, it must be passed as a query parameter (`?id=...`), not in the
 request body. This allows the `id` field in the schema to be `readOnly`,
 preventing conflicts between query param and body values. The server sets `id`
 from the query parameter or auto-generates it if not provided.
@@ -199,23 +199,23 @@ The registration endpoint is idempotent. These idempotency semantics apply at
 the Agent level for SP registration. During the registration phase:
 
 - If the _name_ does not exist in the Agent's registry, a new SP entry is
-  created. If no _providerID_ is specified, the Agent will automatically
+  created. If no _provider_id_ is specified, the Agent will automatically
   generate one.
-- If the _name_ already exists and no _providerID_ is provided (or the same
-  _providerID_ is provided), the existing entry is updated and the same
-  _providerID_ is returned.
-- If the _name_ already exists but a **different** _providerID_ is provided,
+- If the _name_ already exists and no _provider_id_ is provided (or the same
+  _provider_id_ is provided), the existing entry is updated and the same
+  _provider_id_ is returned.
+- If the _name_ already exists but a **different** _provider_id_ is provided,
   registration fails (conflict: another SP is attempting to register with a
   taken name).
-- If a new _name_ is provided but the _providerID_ already exists in the Agent's
-  registry, registration fails (conflict: _providerID_ is already assigned to
-  another SP).
+- If a new _name_ is provided but the _provider_id_ already exists in the
+  Agent's registry, registration fails (conflict: _provider_id_ is already
+  assigned to another SP).
 
 Identical idempotency semantics (same `name` natural key pattern) apply at DCM
 level for Agent registration, as defined in the
 [Environment Agent enhancement](../environment-agent/environment-agent.md#re-registration-on-restart).
 
-The response to a registration request will always include the _providerID_,
+The response to a registration request will always include the _provider_id_,
 regardless of whether it was generated or provided. Consistent with AEP, the
 response payload mirrors the request payload with possibly updated values.
 
@@ -229,25 +229,26 @@ entry rather than creating a duplicate.
 When an SP re-registers with updated capabilities, the Agent recomputes its
 service type list and, if changed, updates DCM via `POST /api/v1/agents`.
 
-- SP serviceType changes
+- SP service_type changes
 - SP restarts and re-registers using the same Agent SP Registration API endpoint
 - The Agent updates the existing SP entry in its internal registry with the new
-  serviceType
+  service_type
 - The Agent detects that the SP already exists by matching the Service Provider
   _name_
-- The Agent updates the existing SP entry with the new serviceType and returns
-  the same providerID.
+- The Agent updates the existing SP entry with the new service_type and returns
+  the same provider_id.
 - There are 3 potential scenarios for updating a Service Provider:
 
-1. SP's _name_ update: If only the SP's name changes (but the providerID remains
-   the same), the Agent updates the SP's name. An attempt to update with a
-   pre-existing SP's name will result in failure.
-2. _providerID_ update: If only the _providerID_ changes (but the SP's _name_
-   remains the same), the Agent updates the providerID. An attempt to update
-   with a pre-existing _providerID_ will result in failure.
-3. Both the SP's name and providerID change: The Agent cannot reliably determine
-   if this is an update to the existing SP or a new registration of a distinct
-   SP. In this scenario the required action is to delete and re-create the SP.
+1. SP's _name_ update: If only the SP's name changes (but the provider_id
+   remains the same), the Agent updates the SP's name. An attempt to update with
+   a pre-existing SP's name will result in failure.
+2. _provider_id_ update: If only the _provider_id_ changes (but the SP's _name_
+   remains the same), the Agent updates the provider_id. An attempt to update
+   with a pre-existing _provider_id_ will result in failure.
+3. Both the SP's name and provider_id change: The Agent cannot reliably
+   determine if this is an update to the existing SP or a new registration of a
+   distinct SP. In this scenario the required action is to delete and re-create
+   the SP.
 
 ###### Example
 
@@ -259,16 +260,16 @@ service type list and, if changed, updates DCM via `POST /api/v1/agents`.
 {
   "endpoint": "https://sp1.example.com/api/v1/vm",
   "name": "kubevirt-123",
-  "displayName": "KubeVirt Service Provider",
-  "serviceType": "vm",
+  "display_name": "KubeVirt Service Provider",
+  "service_type": "vm",
   "metadata": {
     "region": "us-east-1",
     "status": "healthy",
     "resources": {
-      "totalCpu": 200,
-      "totalMemory": "1TB",
-      "totalStorage": "2TB",
-      "totalNode": 100
+      "total_cpu": 200,
+      "total_memory": "1TB",
+      "total_storage": "2TB",
+      "total_node": 100
       }
   }
 }
@@ -277,9 +278,9 @@ Response:
 {
   "id": "uuid-1234",
   "name": "kubevirt-123",
-  "displayName": "KubeVirt Service Provider",
+  "display_name": "KubeVirt Service Provider",
   "endpoint": "https://sp1.example.com/api/v1/vm",
-  "serviceType": "vm",
+  "service_type": "vm",
   "status": "registered",
   "metadata": { ... }
 }
@@ -293,8 +294,8 @@ Response:
 {
   "endpoint": "https://sp1.example.com/api/v1/vm",
   "name": "kubevirt-123",
-  "displayName": "KubeVirt Service Provider",
-  "serviceType": "vm",
+  "display_name": "KubeVirt Service Provider",
+  "service_type": "vm",
   "metadata": { ... }
 }
 
@@ -315,8 +316,8 @@ Response:
 {
   "endpoint": "https://sp1.example.com/api/v1/vm",
   "name": "kubevirt-123",
-  "displayName": "KubeVirt Service Provider",
-  "serviceType": "vm",
+  "display_name": "KubeVirt Service Provider",
+  "service_type": "vm",
   "metadata": {
     "region": "us-east-1",
     "zone": "datacenter-b"
@@ -402,7 +403,7 @@ flowchart TD
   `/providers/{id}/services` API
 - Each registered SP returns:
   1. real-time capabilities, capacity, and availability
-  2. which serviceType it can currently fulfill
+  2. which service_type it can currently fulfill
 - When a user requests a catalog offering, Control Plane selects the best SP and
   calls its endpoint.
 

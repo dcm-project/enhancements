@@ -122,9 +122,9 @@ sequenceDiagram
 
 Providers must publish messages to a subject based on the service type:
 
-`dcm.{serviceType}`
+`dcm.{service_type}`
 
-- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`,
+- `service_type`: The type of resource (e.g., `vm`, `container`, `cluster`,
   `storage`).
 
 The service type determines the message schema and is the only routing-relevant
@@ -172,9 +172,9 @@ type VmStatus struct {
 
 event := cloudevents.NewEvent()
 event.SetID("event-123-456")
-event.SetSource("dcm/providers/{providerName}")
+event.SetSource("dcm/providers/{provider_name}")
 event.SetType("dcm.status.vm")
-event.SetSubject("dcm.{serviceType}")
+event.SetSubject("dcm.{service_type}")
 event.SetData(cloudevents.ApplicationJSON, VmStatus{Id, "123-123", Status: "Running", Message: "VM is running."})
 ```
 
@@ -225,15 +225,15 @@ For standalone storage volumes (e.g., Kubernetes PVCs), status reflects
 provisioning and binding lifecycle. **Target Statuses:** `PROVISIONING`,
 `RUNNING`, `FAILED`, `DELETING`, `DELETED`.
 
-| DCM Generic Status | Kubernetes PVC Equivalent                      |
-| :----------------- | :--------------------------------------------- |
-| **PROVISIONING**   | `Pending` (waiting for binding/provisioning)   |
-| **PROVISIONING**   | `Bound` with active resize conditions          |
-|                    | (`Resizing`, `FileSystemResizePending`)        |
-| **RUNNING**        | `Bound` (no active resize conditions)          |
-| **FAILED**         | `Lost` or unrecoverable binding failure        |
-| **DELETING**       | Deletion in progress (`deletionTimestamp` set) |
-| **DELETED**        | PVC not found                                  |
+| DCM Generic Status | Kubernetes PVC Equivalent                       |
+| :----------------- | :---------------------------------------------- |
+| **PROVISIONING**   | `Pending` (waiting for binding/provisioning)    |
+| **PROVISIONING**   | `Bound` with active resize conditions           |
+|                    | (`Resizing`, `FileSystemResizePending`)         |
+| **RUNNING**        | `Bound` (no active resize conditions)           |
+| **FAILED**         | `Lost` or unrecoverable binding failure         |
+| **DELETING**       | Deletion in progress (`deletion_timestamp` set) |
+| **DELETED**        | PVC not found                                   |
 
 See [k8s-storage-sp](../k8s-storage-sp/k8s-storage-sp.md) for the reference
 Kubernetes Storage SP status mapping.

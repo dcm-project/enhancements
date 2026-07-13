@@ -111,7 +111,7 @@ The input payload includes:
 - `agent_constraints` - The current agent constraints (accumulated from prior
   policies)
 - `available_agents` - List of eligible agents with metadata
-  `[{name, environment, serviceTypes, cost}]`, provided by Placement Manager
+  `[{name, environment, service_types, cost}]`, provided by Placement Manager
 - `exclude_agents` - List of agent names to exclude from selection (used during
   re-evaluation after queued timeout)
 
@@ -243,15 +243,15 @@ sequenceDiagram
 
 Return the list of policies. Allow for filtering
 
-##### GET /api/v1/policies/{policyId}
+##### GET /api/v1/policies/{policy_id}
 
 Return the specific policy
 
-##### DELETE /api/v1/policies/{policyId}
+##### DELETE /api/v1/policies/{policy_id}
 
 Delete the specific policy
 
-##### PUT /api/v1/policies/{policyId}
+##### PUT /api/v1/policies/{policy_id}
 
 Update the specific policy. Policy name and type are immutable
 
@@ -275,7 +275,7 @@ sequenceDiagram
 
     User->>PlacementManager: Create Service request
     PlacementManager->>PolicyEngine: Validate Payload
-    PolicyEngine->>Database: Get matching policies by serviceType and labelSelector
+    PolicyEngine->>Database: Get matching policies by service_type and label_selector
     Database-->>PolicyEngine: List of policies
 
     loop For each policy
@@ -288,7 +288,7 @@ sequenceDiagram
         end
     end
 
-    PolicyEngine-->>PlacementManager: Success with {evaluatedServiceInstance, selectedAgent, approvalStatus}
+    PolicyEngine-->>PlacementManager: Success with {evaluated_service_instance, selected_agent, approval_status}
     PlacementManager-->>User: Service created
 ```
 
@@ -301,7 +301,7 @@ sequenceDiagram
 - Service Instance
   - spec - the service specification (flexible schema)
 - available_agents - list of agents with metadata (provided by PM)
-  `[{name, environment, serviceTypes, cost}]`
+  `[{name, environment, service_types, cost}]`
 - exclude_agents - list of agent names to exclude (optional, used for
   re-evaluation)
 
@@ -357,7 +357,7 @@ parallel with policy management operations.
 
 - Finalize: Return the final payload, selected agent, and status to Placement
   Manager.
-  - Response: `{evaluatedServiceInstance, selectedAgent, status}`
+  - Response: `{evaluated_service_instance, selected_agent, status}`
   - Status is `APPROVED` if the payload was not modified, `MODIFIED` if any
     patches were applied.
 
@@ -390,5 +390,5 @@ parallel with policy management operations.
 ## Future Improvements
 
 - Cost-based agent selection within agent_constraints
-- Resource capacity constraints (totalCpu, totalMemory)
+- Resource capacity constraints (total_cpu, total_memory)
 - SP-level constraints passed through to agents
