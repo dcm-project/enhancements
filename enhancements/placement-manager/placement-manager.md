@@ -18,6 +18,27 @@ see-also:
 
 # Placement Manager
 
+## Terminology
+
+- **DAG (Drected Acyclic graph)**: The dependency graph Placement compiles from
+  a resolved `resources[]` payload. Placement combines CEL `${resource.field}`
+  references in each spec with explicit `requiresResources` to form edges,
+  rejects cycles, and assigns each node a `dagLevel` via topological sort. The
+  graph orders provisioning and deletion.
+
+- **Run**: One Catalog `CreateResources` call from admission through
+  orchestration of all resources in that graph to terminal success or failure. A
+  run may contain a single resource or many related resources.
+
+- **Run admission**: The synchronous phase of a run when Placement accepts a
+  Catalog request: store intent, compile the DAG, evaluate policy for every
+  resource (all must pass before any create), persist validated resource, return
+  `202 Accepted`, and initiate provisioning for `dagLevel 0`. Later levels
+  continue asynchronously when dependencies are `Ready`.
+
+- **Run id (`runId`)**: Unique identifier Placement assigns to one run
+  admission.
+
 ## Summary
 
 The Placement Manager orchestrates resource requests within DCM core. It
