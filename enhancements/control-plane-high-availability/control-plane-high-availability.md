@@ -28,9 +28,10 @@ This enhancement describes how the DCM control plane should run in production
 when individual components fail. PostgreSQL remains the system of record, while
 the control plane itself runs as multiple instances behind a load balancer.
 Postgres and NATS JetStream must also be highly available, either from
-infrastructure the customer already operates or from reference packaging when a
-complete install is needed; when authentication is enabled, the identity layer
-is expected to follow the same pattern.
+infrastructure the customer already operates or from reference packaging in
+DCM's Helm charts and Compose files when a complete installation is needed. When
+authentication is enabled, the identity layer is expected to follow the same
+pattern.
 
 DCM connects to stable database and messaging endpoints and does not manage
 failover for those dependencies. Although the HTTP layer is already largely
