@@ -71,8 +71,8 @@ endpoints through configuration.
 
 Customers who already have HA Postgres and NATS do not need additional database
 or messaging products, while reference packaging can still supply both for
-installs that do not yet have Postgres or NATS in place. The messaging layer
-must remain NATS with JetStream, as Kafka, RabbitMQ, or another bus would
+installations that do not yet have Postgres or NATS in place. The messaging
+layer must remain NATS with JetStream, as Kafka, RabbitMQ, or another bus would
 require a major redesign.
 
 The control plane is a single process today. Reference packaging (Compose, Helm)
@@ -126,7 +126,7 @@ target architecture and decisions from the HA exploration.
   application. Dependency HA is a platform concern. DCM connects to stable
   endpoints.
 - Requiring every production deployment to supply external Postgres. Bundled
-  Postgres remains available for customers who want a complete install.
+  Postgres remains available for customers who want a complete installation.
 
 ## Proposal
 
@@ -145,11 +145,11 @@ operator. The database must be PostgreSQL and expose one stable read-write
 endpoint (DNS name, virtual IP (VIP), [PgBouncer](https://www.pgbouncer.org/),
 or managed URL). Customers choose one of two paths:
 
-- **Bundled** — Postgres shipped with DCM reference packaging (Helm or Compose)
-  for a complete install.
-- **Bring your own** — Postgres the customer already runs (for example RDS,
-  Azure Database, Cloud SQL, or a Kubernetes operator such as Percona,
-  CloudNativePG, or Crunchy).
+- **Bundled:** Postgres shipped with DCM reference packaging (Helm or Compose)
+  for a complete installation.
+- **Bring your own:** Postgres the customer already runs (for example RDS, Azure
+  Database, Cloud SQL, or a Kubernetes operator such as Percona, CloudNativePG,
+  or Crunchy).
 
 In both cases DCM connects through configuration (`DB_HOST`, TLS, pool
 settings). DCM does not run failover or replication. That stays with the
@@ -352,8 +352,8 @@ Postgres configure external connection settings instead.
 
 #### Pros
 
-- Single install experience for smaller environments and new deployments without
-  existing database or messaging infrastructure.
+- Single installation experience for smaller environments and new deployments
+  without existing database or messaging infrastructure.
 - DCM team can test and document one known database topology.
 
 #### Cons
