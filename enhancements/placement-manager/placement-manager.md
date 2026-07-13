@@ -130,7 +130,9 @@ flowchart TD
   `POST /api/v1/engine/evaluate` once per resource in the graph with that shared
   list
 - Receives `APPROVED/MODIFIED` or `DENIED` per resource. All resources must pass
-  before any provisioning starts
+  before any provisioning starts. If any resource fails validation (i.e
+  `DENIED`), policy evaluation halts, no further resource in the graph is
+  validated and the request is rejected.
 - `available_agents` is included in each evaluation request payload
 - Optionally includes `exclude_agents` to exclude agents from consideration
   (e.g., after a queued-request timeout)
@@ -178,9 +180,9 @@ not exposed as a public Placement OpenAPI surface.
 
 _Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
 `resourceIds[]` and stored on the catalog item instance). Placement assigns a
-`runId` per admission batch that groups resource rows from a single
-`CreateResources` call. `runId` appears in responses but is not sent on create
-or delete requests.
+`runId` per run admission that groups resource rows within the resource table.
+`runId` appears in responses but is not sent on create or delete requests for
+now.
 
 _CreateResources_: Admit a run (single or multi-resource graph).
 
@@ -466,7 +468,21 @@ Example of response payload
 
 ### Service Creation Flow
 
-To reduce complexity, there are two sequence diagrams to show the creation flow.
+Creation is documented in two sequence diagrams for readability. One combined
+diagram repeated the same Catalog → Policy → SPRM steps alongside DAG-specific
+logic and was difficult to follow, so the flow is split instead:
+
+1. **End-to-end creation flow** shows full baseline path from Catalog through
+   SPRM, Agent messaging, and async queued/pending handling. This applies to
+   each resource that is provisioned.
+2. **Multi-resource DAG orchestration** shows Placement specific detail for a
+   multi-resource graph. When Catalog sends a resolved `resources[]` graph,
+   Placement compiles the DAG before policy validation and provisioning. All
+   resources must pass policy before SPRM creates any resource in the graph.
+   Resource with DAG Level 0 begin provisioning while dagLevel 1+ continues
+   asynchronously when the status consumer reports dependencies are in ready
+   state. Where a step matches the first diagram, the second diagram uses a
+   **note** rather than redrawing it.
 
 #### End-to-end creation flow
 
@@ -547,11 +563,9 @@ sequenceDiagram
 
 #### Multi-resource DAG orchestration
 
-When Catalog sends a resolved `resources[]` graph, Placement compiles the DAG
-before policy validation and provisioning. All resources must pass policy before
-SPRM creates any resource in the graph. Resource with DAG Level 0 begin
-provisioning while dagLevel 1+ continues asynchronously when the status consumer
-reports dependencies are in ready state.
+When Catalog sends a resolved `resources[]` graph, this diagram shows what
+Placement adds on top of the end-to-end flow. Shared steps are not redrawn. See
+notes in the diagram.
 
 ```mermaid
 sequenceDiagram
@@ -573,11 +587,7 @@ sequenceDiagram
         deactivate PM
     else Compile ok
 
-        PM->>DB: Store intent
-        DB-->>PM: Intent stored
-
-        PM->>DB: Fetch available agents
-        DB-->>PM: available_agents list
+        Note over PM,PE: Store intent and fetch available_agents<br/>follow End-to-end creation flow
 
         loop each resource in graph
             PM->>PE: policies:evaluateRequest<br/>{spec, available_agents}
@@ -590,12 +600,7 @@ sequenceDiagram
 
             PM->>DB: Persist per-resource rows<br/>(requires_resources, dagLevel,<br/> validated spec, agentName)
 
-            loop each resource at dagLevel 0
-                PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, spec}
-                SPRM->>MS: Publish creation CloudEvent
-                MS->>AG: Deliver to Agent
-                SPRM-->>PM: 202 Accepted
-            end
+            Note over PM,AG: For each dagLevel 0 resource,<br/>SPRM create follows End-to-end creation flow<br/>(SPRM → messaging → Agent)
 
             PM-->>CM: 202 Accepted<br/>{resourceIds[]}
 
@@ -648,10 +653,11 @@ The steps below describes to the end-to-end diagram unless noted as DAG-specific
 4. **Policy Validation**
 
 - Placement loops over each resource in the graph and calls Policy with that
-  resource's spec and the shared `available_agents`
+  resource's spec and the shared `available_agents`(with optional
+  `exclude_agents`)
 - Policy Manager evaluates requests against policies
 - Policy Manager returns:
-  - Approved, Modified or rejected
+  - Approved, Modified or Rejected
   - Validated and potentially mutated payload
   - Selected Agent name (`selectedAgent`)
   - Policy constraints and patches applied
