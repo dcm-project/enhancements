@@ -85,17 +85,11 @@ environment the customer uses (bare metal, VMs, Kubernetes, OpenShift, or
 Compose for dev). High availability is defined at the application and dependency
 level, not tied to one orchestrator.
 
-Platform teams often already operate HA Postgres (managed cloud databases,
-[Patroni](https://github.com/patroni/patroni), or Kubernetes Postgres operators
-such as
-[Percona Operator for PostgreSQL](https://docs.percona.com/percona-operator-for-postgresql/),
-[CloudNativePG](https://cloudnative-pg.io/),
-[Crunchy Postgres Operator](https://access.crunchydata.com/documentation/postgres-operator/latest/),
-and [Zalando Postgres Operator](https://github.com/zalando/postgres-operator)).
-DCM must support that path. Other customers have no Postgres and want a complete
-deployment from reference packaging. This enhancement documents both options,
-production prerequisites, the gaps in the current control plane, and the changes
-required for safe horizontal scaling.
+Platform teams often already operate HA Postgres through managed cloud databases
+or Kubernetes Postgres operators. DCM must support that path. Other customers
+have no Postgres and want a complete deployment from reference packaging. This
+enhancement documents both options, production prerequisites, the gaps in the
+current control plane, and the changes required for safe horizontal scaling.
 
 ### Current gaps
 
