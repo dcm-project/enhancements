@@ -750,10 +750,10 @@ After level 0, provisioning continues asynchronously.
 
 ### Service Deletion Flow
 
-The following sequence diagram illustrates batch deletion via
-`DELETE /api/v1/resources`. Placement orders deletes by reverse DAG levels when
-dependencies require it, then delegates each delete to SPRM and the Agent
-messaging path.
+The following sequence diagram illustrates deleting one or more resources via
+`DeleteResources`. The request accepts `resourceIds[]`. When multiple ids are
+provided, Placement orders deletes by reverse DAG levels (dependents before
+dependencies) before delegating each delete to SPRM.
 
 ```mermaid
 sequenceDiagram
@@ -762,45 +762,41 @@ sequenceDiagram
     participant PM as Placement Manager
     participant DB as Placement DB
     participant SPRM as SP Resource Manager
-    participant MS as Messaging System
-    participant AG as Agent
 
-    CM->>PM: DELETE /api/v1/resources<br/>{resourceIds[]}
+    CM->>PM: DeleteResources<br/>{resourceIds[]}
     activate PM
 
-    PM->>PM: Order deletes<br/>(reverse DAG levels when required)
+    PM->>DB: Lookup resources for resourceIds[]
+    PM->>PM: Order deletes<br/>(reverse DAG levels / dependency order)
 
-    loop each resourceId (dependency order)
-        PM->>DB: Lookup resource<br/>{agentName, serviceType, instanceId}
-        DB-->>PM: Resource record
-
+    loop each resourceId in order
+        PM->>DB: Get agentName, serviceType, instanceId
         PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
         activate SPRM
 
         alt SPRM returns error
             SPRM-->>PM: Error response
+            PM-->>CM: Error response
         else SPRM returns 202 Accepted
-            SPRM->>MS: Publish deletion CloudEvent<br/>to agent topic
-            MS->>AG: Deliver to Agent
             SPRM-->>PM: 202 Accepted<br/>{instanceId, agentName, status: DELETING}
             PM->>DB: Update resource status to DELETING
         end
         deactivate SPRM
     end
 
-    PM-->>CM: 202 Accepted<br/>{results[]}
+    PM-->>CM: 202 Accepted<br/>{resourceIds[]}
 
-    Note over AG,SPRM: Async responses via dcm.agents.responses
+    Note over SPRM: Async: SPRM consumes response<br/>from dcm.agents.responses
 
-    opt SPRM notifies PM of QUEUED status (deletion)
-        SPRM->>PM: deletion QUEUED<br/>{instanceId, agentName}
-        Note over PM: Resource stays DELETING.<br/>Agent retry topic resolves<br/>when SP recovers.
+    opt SPRM notifies PM of QUEUED status
+        SPRM->>PM: Notify: deletion QUEUED<br/>{instanceId, agentName}
+        Note over PM: Resource stays DELETING.<br/>Deletion cannot be re-routed<br/>to a different agent.<br/>The Agent holds the request in<br/>its retry topic and will process<br/>it when the SP recovers.
     end
 
-    alt Agent acknowledges deletion
-        SPRM->>PM: deletion acknowledged
-    else Agent rejects (SP Unavailable)
-        Note over SPRM: Enqueue in cleanup queue<br/>for deferred retry
+    alt Agent reports SP recovered — deletion processed
+        SPRM->>PM: Notify: deletion acknowledged<br/>{instanceId, status: DELETING}
+    else Agent reports SP Unavailable — deletion rejected
+        Note over SPRM: SPRM enqueues the deletion<br/>in the cleanup queue for<br/>deferred retry.<br/>Resource stays DELETING.
     end
     deactivate PM
 ```
@@ -809,23 +805,28 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- Catalog Manager sends a DELETE request to Placement Manager with the
-  `resourceId`
+- Catalog Manager sends a DELETE request to Placement Manager with one or more
+  ids in `resourceIds[]`
 
-2. **Resource Lookup**
+2. **Resource lookup and ordering**
 
-- Placement Manager queries Placement DB to retrieve the resource record,
-  including the `agentName`, `serviceType`, and `instanceId` needed for deletion
+- Placement Manager looks up the resource records for the requested
+  `resourceIds[]`, including `agentName`, `serviceType`, and `instanceId` for
+  each
+- When multiple ids are provided, Placement orders deletes by reverse DAG levels
+  (dependents before dependencies)
 
 3. **Delegation to SP Resource Manager**
 
-- Placement Manager sends a DELETE request to SPRM with the `instanceId`
+- For each resource in order, Placement Manager sends a DELETE request to SPRM
+  with the `instanceId`
 - SPRM publishes a deletion CloudEvent to the agent's messaging topic
 - SPRM always responds synchronously with one of:
   - **SPRM returns error**: Error response returned to Placement Manager, which
     forwards it to Catalog Manager
   - **SPRM returns 202 Accepted**: Deletion is in progress. PM updates the
-    resource status to `DELETING` in Placement DB and returns 200 OK to Catalog
+    resource status to `DELETING` in Placement DB. After all requested deletes
+    are accepted, PM returns `202 Accepted` with `resourceIds[]` to Catalog
     Manager
 - **SPRM notifies QUEUED (asynchronous)**: After returning 202, SPRM may
   asynchronously notify PM of a `QUEUED` status if the Agent reports the SP for
