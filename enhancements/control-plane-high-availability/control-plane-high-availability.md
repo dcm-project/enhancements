@@ -109,7 +109,8 @@ target architecture and decisions from the HA exploration.
 
 ### Goals
 
-- Keep PostgreSQL as the system of record for control-plane state.
+- Keep PostgreSQL as the system of record and NATS JetStream as the messaging
+  layer for control-plane state and events.
 - Define separate dev and production deployment profiles.
 - Support bundled Postgres in reference packaging and external Postgres via
   configuration.
