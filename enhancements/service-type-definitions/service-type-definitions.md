@@ -95,7 +95,7 @@ for array validation.
 ## Generic Service
 
 All service schemas share common fields defined once in
-[common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
+[common.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/common.yaml)
 
 ## Schema Structure
 
@@ -134,7 +134,7 @@ remains portable across platforms.
 ## Specific services
 
 Any _serviceType_ can be defined by inheriting from
-[common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
+[common.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/common.yaml)
 and adding type-specific fields. For the first milestone, DCM will support the
 following serviceTypes:
 
@@ -189,7 +189,7 @@ native resource format" }
 #### Schema
 
 For easier review, the schema is accessible here
-[vmspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/vmspec.yaml).  
+[vmspec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/vm/spec.yaml).  
 Plus
 common fields: _serviceType, metadata, providerHints_
 
@@ -247,7 +247,7 @@ The following sections detail the Container schema architecture.
 #### Schema
 
 For easier review, the schema is accessible here
-[containerspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/containerspec.yaml).  
+[containerspec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/container/spec.yaml).  
 Plus
 common fields: _serviceType, metadata, providerHints_
 
@@ -308,9 +308,19 @@ common fields: _serviceType, metadata, providerHints_
 
 #### Container port Object
 
-| Field         | Required | Type    | Description                                 |
-| :------------ | :------- | :------ | :------------------------------------------ |
-| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_) |
+| Field         | Required | Type    | Description                                        |
+| :------------ | :------- | :------ | :------------------------------------------------- |
+| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_)        |
+| visibility    | Yes      | string  | Port visibility: _none_, _internal_, or _external_ |
+
+The `visibility` field controls how the port is exposed by the Service Provider:
+
+- `none` — the port is not exposed via any networking abstraction (no Service
+  created for this port)
+- `internal` — the port is exposed within the cluster (e.g., ClusterIP Service
+  in Kubernetes)
+- `external` — the port is exposed externally (e.g., LoadBalancer or NodePort
+  Service in Kubernetes)
 
 ### Database
 
@@ -319,7 +329,7 @@ The following sections detail the Database schema architecture.
 #### Schema
 
 For easier review, the schema is accessible here
-[databasespec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/databasespec.yaml).  
+[databasespec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/database/spec.yaml).  
 Plus
 common fields: _serviceType, metadata, providerHints_
 
@@ -345,7 +355,7 @@ GKE, AKS, etc.
 #### Schema
 
 For easier review, the schema is available here:
-[clusterspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/clusterspec.yaml).  
+[clusterspec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/cluster/spec.yaml).  
 Plus
 common fields: _serviceType, metadata, providerHints_
 
