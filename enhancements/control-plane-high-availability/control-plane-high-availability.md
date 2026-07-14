@@ -327,11 +327,6 @@ multi-instance behavior. HA alone does not require a data model change.
 values where applicable. External HA services may remain. DCM does not require
 them for a single instance.
 
-## Implementation History
-
-N/A. This enhancement documents target architecture and gaps. Implementation
-work in the control-plane repository has not started.
-
 ## Drawbacks
 
 - Production may use bundled or customer-operated Postgres and messaging. The
