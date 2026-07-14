@@ -74,5 +74,6 @@ words:
   - dagLevel
   - evaluateGraph
   - graphwide
-  - OnResourceReady
+  - OnResourceRunning
+  - OnResourceDeleted
   - rehydration

@@ -766,9 +766,14 @@ After level 0, provisioning continues asynchronously.
 ### Service Deletion Flow
 
 The following sequence diagram illustrates deleting one or more resources via
-`DeleteResources`. The request accepts `resourceIds[]`. When multiple ids are
-provided, Placement orders deletes by reverse DAG levels (dependents before
-dependencies) before delegating each delete to SPRM.
+`DeleteResources`. The request accepts `resourceIds[]`. For a multi-resource
+graph, Placement deletes in reverse DAG order by level. First, it calls SPRM
+delete for the highest dagLevel. If the deletion requested is accepted (i.e.
+SPRM returns `202`), Placement marks lower levels resources as
+`PENDING_DELETION` and returns `202 Accepted` to Catalog. Lower levels proceed
+asynchronously when the status consumer reports that the current batch is in
+`DELETED` state (see [Status-driven DAG deletion](#status-driven-dag-deletion)).
+Catalog receives an error only if the first batch fails.
 
 ```mermaid
 sequenceDiagram
@@ -782,9 +787,9 @@ sequenceDiagram
     activate PM
 
     PM->>DB: Lookup resources for resourceIds[]
-    PM->>PM: Order deletes<br/>(reverse DAG levels / dependency order)
+    PM->>PM: Determine max dagLevel<br/>(highest level first)
 
-    loop each resourceId in order
+    loop each resource at max dagLevel
         PM->>DB: Get agentName, serviceType, instanceId
         PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
         activate SPRM
@@ -799,7 +804,28 @@ sequenceDiagram
         deactivate SPRM
     end
 
+    Note over PM,CM: First wave succeeded — all SPRM calls returned 202
+
+    PM->>DB: Mark lower levels PENDING_DELETION
+
     PM-->>CM: 202 Accepted<br/>{resourceIds[]}
+    deactivate PM
+
+    Note over SPRM,PM: Lower dagLevels (async, after current wave DELETED)
+
+    SPRM->>DB: Update resource row (DELETED)
+    SPRM->>PM: OnResourceDeleted (in-process)
+    activate PM
+
+    PM->>PM: All resources at this dagLevel DELETED?
+    loop each resource at next lower dagLevel
+        PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
+        SPRM-->>PM: 202 Accepted
+        PM->>DB: PENDING_DELETION → DELETING
+    end
+
+    Note over PM: Repeat until dagLevel 0 complete
+    deactivate PM
 
     Note over SPRM: Async: SPRM consumes response<br/>from dcm.agents.responses
 
@@ -813,8 +839,30 @@ sequenceDiagram
     else Agent reports SP Unavailable — deletion rejected
         Note over SPRM: SPRM enqueues the deletion<br/>in the cleanup queue for<br/>deferred retry.<br/>Resource stays DELETING.
     end
-    deactivate PM
 ```
+
+#### Status-driven DAG deletion
+
+After the highest **dagLevel** wave is initiated, deletion continues
+**asynchronously** — separate from the synchronous `202 Accepted` returned to
+Catalog.
+
+1. During admission, Placement calls SPRM delete for the highest `dagLevel`
+   first. When every SPRM call in that batch returns `202`, Placement marks
+   resources at lower `dagLevel` values as `PENDING_DELETION` (queued for
+   delete) and returns `202 Accepted` to Catalog.
+2. For the active batch, SPRM publishes deletion CloudEvents; accepted resources
+   are `DELETING`.
+3. The SPRM status consumer ingests Agent deletion events and updates resource
+   rows to `DELETED` when teardown completes.
+4. When every resource at the current `dagLevel` is in `DELETED` state, the
+   status consumer notifies Placement in-process.
+5. Placement initiates SPRM delete for the next lower `dagLevel` (for example
+   level `n-2` after level `n-1` completes), moving those rows from
+   `PENDING_DELETION` to **`DELETING`**.
+6. Repeat steps 3 to 5 until `dagLevel` 0 is in `DELETED` state.
+7. When all requested resources reach `DELETED` state, the delete run is
+   complete.
 
 #### Flow Description
 
@@ -823,26 +871,29 @@ sequenceDiagram
 - Catalog Manager sends a DELETE request to Placement Manager with one or more
   ids in `resourceIds[]`
 
-2. **Resource lookup and ordering**
+2. **Resource lookup and level ordering**
 
 - Placement Manager looks up the resource records for the requested
-  `resourceIds[]`, including `agentName`, `serviceType`, and `instanceId` for
-  each
-- When multiple ids are provided, Placement orders deletes by reverse DAG levels
+  `resourceIds[]`, including `agentName`, `serviceType`, `instanceId`, and
+  `dagLevel` for each
+- Placement determines the highest dagLevel among the requested resources
   (dependents before dependencies)
 
 3. **Delegation to SP Resource Manager**
 
-- For each resource in order, Placement Manager sends a DELETE request to SPRM
-  with the `instanceId`
+- Placement sends DELETE to SPRM for each resource at the highest `dagLevel`
+  (the first active batch)
 - SPRM publishes a deletion CloudEvent to the agent's messaging topic
 - SPRM always responds synchronously with one of:
-  - **SPRM returns error**: Error response returned to Placement Manager, which
-    forwards it to Catalog Manager
-  - **SPRM returns 202 Accepted**: Deletion is in progress. PM updates the
-    resource status to `DELETING` in Placement DB. After all requested deletes
-    are accepted, PM returns `202 Accepted` with `resourceIds[]` to Catalog
-    Manager
+  - **SPRM returns error**: Placement stops and returns an error to Catalog
+    Manager. Lower `dagLevel` resources are not marked `PENDING_DELETION` (their
+    prior status is unchanged)
+  - **SPRM returns 202 Accepted** for every resource in the first batch:
+    Placement marks those rows as`DELETING`, then marks all lower `dagLevel`
+    resources as `PENDING_DELETION`, and returns `202 Accepted` with
+    `resourceIds[]` to Catalog Manager. Lower levels are not sent to SPRM until
+    the status-driven path advances the next batch (see
+    [Status-driven DAG deletion](#status-driven-dag-deletion))
 - **SPRM notifies QUEUED (asynchronous)**: After returning 202, SPRM may
   asynchronously notify PM of a `QUEUED` status if the Agent reports the SP for
   the service type is unhealthy. Unlike creation, deletion cannot be re-routed
