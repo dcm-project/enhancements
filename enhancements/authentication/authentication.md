@@ -188,8 +188,8 @@ authentication middleware supports two paths:
    accompanied by a valid `X-Auth-Proxy-Secret` header (constant-time
    comparison).
 
-All V1 callers (Backstage plugin, dcm-cli, CI pipelines) use the JWT path. The
-proxy-header path exists for deployment flexibility.
+When auth is enabled, all V1 callers (Backstage plugin, dcm-cli, CI pipelines)
+use the JWT path. The proxy-header path exists for deployment flexibility.
 
 **Configuration:**
 
