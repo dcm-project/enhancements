@@ -672,14 +672,26 @@ The steps below describes to the end-to-end diagram unless noted as DAG-specific
 
 5. **Instance Creation**
 
-- Placement delegates create to SPRM for each resource at dagLevel. Single
-  resource requests are considered level 0 only
-- SPRM publishes to the Agent messaging topic; responds with 202 or error
-- On success, Placement returns `202 Accepted` with `resourceIds[]` to Catalog
-- If SPRM returns an error (for example 404/503) before any resource is
-  accepted, the intent record is retained (see
-  [Future Improvements](#future-improvements)). Placement returns an error to
-  Catalog
+- Placement delegates create to SPRM for each resource at dagLevel 0.
+  Single-resource requests are level 0 only. Multiple nodes at the same dagLevel
+  may be created in parallel (no dependency between them).
+- SPRM always responds synchronously with one of:
+  - **SPRM returns error (404/503)**: Error response returned to Placement
+    Manager. The intent record is retained (see
+    [Future Improvements](#future-improvements)). Placement Manager forwards the
+    error to Catalog Manager. Request processing stops.
+  - **SPRM returns 202 Accepted**: Instance creation is in progress. The
+    resource status is `PENDING` until the status consumer reports progress.
+    When all level 0 resource creation succeed (i.e. are accepted), Placement
+    Manager returns `202 Accepted` with payload to Catalog Manager.
+- When several level 0 resources are created in parallel and at least one SPRM
+  call returns **202** while another returns **503** (or another error):
+  - Placement stops initiating any further creates for that run (including
+    remaining level-0 nodes that are not yet sent to SPRM).
+  - Resources that already received **202** are torn down via `DeleteResources`.
+  - Dependents at higher dagLevel values are not started.
+  - Placement returns an error to Catalog Manager. The intent record is retained
+    (see [Future Improvements](#future-improvements)).
 
 6. **Status-driven DAG progression (asynchronous, DAG-specific)**
 
@@ -699,8 +711,9 @@ See [Status-driven DAG progression](#status-driven-dag-progression).
     including `exclude_agents: [agentName]` to exclude the timed-out agent
   - If an alternative agent is found: PM sends a new creation request to SPRM
     with the new agent
-  - If no alternative agent is available: PM deletes records from Placement DB
-    and returns an error to Catalog Manager
+  - If no alternative agent is available: PM retains the records in Placement DB
+    (See [Future Improvements](#future-improvements)) and returns an error to
+    Catalog
 
 8. **Pending-Request Timeout (Asynchronous)**
 
@@ -725,8 +738,9 @@ See [Status-driven DAG progression](#status-driven-dag-progression).
   - If the old agent later rejects the cancellation (resource already
     provisioning on its SP), SPRM sends a deletion request to the old agent. The
     re-evaluated agent is the authoritative owner of the `resourceId`
-- If no alternative agent is available: PM deletes records from Placement DB and
-  returns an error to Catalog Manager
+- If no alternative agent is available: PM retains the records in Placement DB
+  (See [Future Improvements](#future-improvements)) and returns an error to
+  Catalog
 
 #### Status-driven DAG progression
 
@@ -744,9 +758,9 @@ After level 0, provisioning continues asynchronously.
 5. Repeat steps 3 to 4 while resources are still provisioning.
 6. When all resources reach terminal success, the process is complete.
 7. When any resource reports a terminal failure, Placement initiates rollback
-   and cleanup: provisioning halts, tear down already provisioned resources in
-   the graph (typically reverse DAG order via `DeleteResources`), and delete
-   resource in the DB.
+   and cleanup: provisioning halts, tears down already provisioned resources in
+   the graph (typically reverse DAG order via `DeleteResources`). PM retains the
+   records in Placement DB (See [Future Improvements](#future-improvements)).
 
 ### Service Deletion Flow
 
