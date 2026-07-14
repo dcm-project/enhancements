@@ -338,39 +338,7 @@ them for a single instance.
 
 ## Alternatives
 
-### Alternative 1 — Bundled Postgres in DCM reference packaging
-
-#### Description
-
-Ship Postgres as part of DCM Helm or Compose packaging so customers without an
-existing database get a complete deployment. Customers who already operate
-Postgres configure external connection settings instead.
-
-#### Pros
-
-- Single installation experience for smaller environments and new deployments
-  without existing database or messaging infrastructure.
-- DCM team can test and document one known database topology.
-
-#### Cons
-
-- Database backup, upgrade, and monitoring remain operational work even when
-  bundled.
-- Customers with an existing Postgres standard may prefer their own service.
-- HA topology for bundled Postgres must be defined and documented separately
-  from the control-plane scaling work in this enhancement.
-
-#### Status
-
-Accepted
-
-#### Rationale
-
-Some customers have no Postgres and want a complete deployment. Others already
-run HA Postgres and should connect DCM to their endpoint. Reference packaging
-supports both through configuration.
-
-### Alternative 2 — [CockroachDB](https://www.cockroachlabs.com/) or another distributed SQL engine
+### Alternative 1 — [CockroachDB](https://www.cockroachlabs.com/) or another distributed SQL engine
 
 #### Description
 
@@ -397,7 +365,7 @@ Rejected
 DCM does not need geo-distributed SQL at current scale. Customer HA Postgres
 meets the requirement with less change.
 
-### Alternative 3 — [etcd](https://etcd.io/) or Kubernetes CRDs as the control-plane store
+### Alternative 2 — [etcd](https://etcd.io/) or Kubernetes CRDs as the control-plane store
 
 #### Description
 
@@ -429,7 +397,7 @@ Evaluated in the
 deferred there. DCM does not expose watch APIs today. Revisit only if messaging
 operational cost outweighs building native notification semantics.
 
-### Alternative 4 — In-memory state with [RAFT](https://raft.github.io/) consensus
+### Alternative 3 — In-memory state with [RAFT](https://raft.github.io/) consensus
 
 #### Description
 
@@ -456,7 +424,7 @@ The data model is relational and already implemented on Postgres.
 [RAFT](https://raft.github.io/) solves a problem DCM does not have if Postgres
 HA is outsourced to the platform.
 
-### Alternative 5 — [Patroni](https://github.com/patroni/patroni)-managed Postgres operated by DCM
+### Alternative 4 — [Patroni](https://github.com/patroni/patroni)-managed Postgres operated by DCM
 
 #### Description
 
