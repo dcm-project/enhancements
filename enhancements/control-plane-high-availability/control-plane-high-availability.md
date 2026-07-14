@@ -17,11 +17,6 @@ see-also:
 
 # Control Plane High Availability
 
-## Open Questions
-
-1. Should database schema updates run once at deploy time instead of on every
-   instance startup when running multiple instances?
-
 ## Summary
 
 This enhancement describes how the DCM control plane should run in production
@@ -97,7 +92,8 @@ The control plane is not ready for multi-instance production today:
 
 - Reference Helm chart defaults to one control-plane replica.
 - `/api/v1alpha1/health` does not check Postgres or NATS connectivity.
-- Schema migration (`AutoMigrate`) runs on every instance startup.
+- Schema migration (`AutoMigrate`) runs on every instance startup today. For
+  multi-instance production, schema updates must run once per DCM update.
 - Background workers start in every instance without leader election or
   database-backed job claiming. This includes JetStream consumers, deferred
   deletion scheduling, and agent heartbeat handling.
@@ -182,7 +178,7 @@ production multi-instance deploy:
   do not process the same message twice.
 - Health checks must verify Postgres connectivity and NATS when enabled. An
   instance that cannot reach Postgres must not receive traffic.
-- Database schema updates must run once per release, not from every instance at
+- Database schema updates must run once per DCM update, not from every instance at
   startup. When several instances boot together they share one Postgres. If each
   instance applies migrations at the same time, schema changes can conflict or
   fail.
