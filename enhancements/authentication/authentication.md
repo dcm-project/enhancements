@@ -134,8 +134,8 @@ audience) — no per-request call to the identity provider.
 
 **Keycloak (OIDC):** The primary provider. Two Keycloak clients are configured:
 
-- **`dcm-proxy`** (confidential) — used for service-to-service authentication
-  (RHDH Backstage plugin, service providers). Supports direct access grants and
+- **`dcm-proxy`** (confidential) — used for programmatic client authentication
+  (RHDH Backstage plugin, CI pipelines). Supports direct access grants and
   service account roles.
 - **`dcm-cli`** (public) — used for CLI authentication via Device Authorization
   Grant. No client secret required.
