@@ -313,8 +313,10 @@ external identity provider).
 
 #### Actor Status Enforcement
 
-The actor middleware checks `actors.status` on every request (included in the
-cached actor lookup). Requests are rejected before reaching any handler:
+The actor middleware checks `actors.status` when resolving an actor from the
+database (cache miss). Cached actors are not re-checked until the cache entry
+expires. Requests with a non-active actor are rejected before reaching any
+handler:
 
 | Status              | Behavior                                                                     | HTTP Response                           |
 | ------------------- | ---------------------------------------------------------------------------- | --------------------------------------- |
