@@ -20,7 +20,7 @@ see-also:
 
 ## Terminology
 
-- **DAG (Drected Acyclic graph)**: The dependency graph Placement compiles from
+- **DAG (Directed Acyclic graph)**: The dependency graph Placement compiles from
   a resolved `resources[]` payload. Placement combines CEL `${resource.field}`
   references in each spec with explicit `requiresResources` to form edges,
   rejects cycles, and assigns each node a `dagLevel` via topological sort. The
@@ -34,7 +34,7 @@ see-also:
   Catalog request: store intent, compile the DAG, evaluate policy for every
   resource (all must pass before any create), persist validated resource, return
   `202 Accepted`, and initiate provisioning for `dagLevel 0`. Later levels
-  continue asynchronously when dependencies are `Ready`.
+  continue asynchronously when dependencies are `Running`.
 
 - **Run id (`runId`)**: Unique identifier Placement assigns to one run
   admission.
@@ -137,8 +137,8 @@ flowchart TD
 - Optionally includes `exclude_agents` to exclude agents from consideration
   (e.g., after a queued-request timeout)
 - Receives validated/mutated payload and selected Agent (`agentName`)
-- Receives policy rejections and constraint violations responses and forwards to
-  the users
+- Receives policy rejection (`DENIED` status) with constraint violations and
+  forwards to it to Catalog
 
 #### SP Resource Manager
 
@@ -146,15 +146,15 @@ flowchart TD
   Manager
 - Forwards `agentName`, `serviceType`, and `spec` in requests
 - SPRM publishes to the agent's messaging topic
-- Receives responses and forwards to the users
+- Receives responses and forwards it to catalog
 - Reports back: success (202), error, or queued status
 - When SPRM reports "queued" status, PM handles timeout logic (see
   [Queued-Request Handling](#queued-request-handling))
 - **Status consumer (SPRM):** consumes Agent status events (for example from
   `dcm.agents.responses`), updates service-type instance rows in the
   control-plane database, and notifies Placement **in-process** when a resource
-  reaches `Ready`. Placement uses that signal to bind apply-time CEL and trigger
-  creates for the next DAG level (see
+  reaches `Running`. Placement uses that signal to bind apply-time CEL and
+  trigger creates for the next DAG level (see
   [Status-driven DAG progression](#status-driven-dag-progression))
 
 #### Database
@@ -481,8 +481,8 @@ logic and was difficult to follow, so the flow is split instead:
    resources must pass policy before SPRM creates any resource in the graph.
    Resource with DAG Level 0 begin provisioning while dagLevel 1+ continues
    asynchronously when the status consumer reports dependencies are in ready
-   state. Where a step matches the first diagram, the second diagram uses a
-   **note** rather than redrawing it.
+   state (status set to `Running`). Where a step matches the first diagram, the
+   second diagram uses a **note** rather than redrawing it.
 
 #### End-to-end creation flow
 
@@ -604,14 +604,14 @@ sequenceDiagram
 
             PM-->>CM: 202 Accepted<br/>{resourceIds[]}
 
-            Note over AG,SPRM: dagLevel 1+ (async, after deps Ready)
+            Note over AG,SPRM: dagLevel 1+ (async, after deps Running)
 
-            AG->>SPRM: status event (Ready + outputs)
-            SPRM->>DB: Update instance row<br/>(Ready, outputs)
-            SPRM->>PM: OnResourceReady (in-process)
+            AG->>SPRM: status event (Running + outputs)
+            SPRM->>DB: Update instance row<br/>(Running, outputs)
+            SPRM->>PM: OnResourceRunning (in-process)
             activate PM
 
-            loop each resource at next dagLevel<br/>when all requires_resources Ready
+            loop each resource at next dagLevel<br/>when all requires_resources Running
                 PM->>PM: Bind dependency outputs into spec
                 PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, spec}
                 SPRM->>MS: Publish creation CloudEvent
@@ -619,7 +619,7 @@ sequenceDiagram
                 SPRM-->>PM: 202 Accepted
             end
 
-            Note over PM: Repeat on each Ready event<br/>until graph complete or failure
+            Note over PM: Repeat on each Running event<br/>until graph complete or failure
             deactivate PM
         end
     end
@@ -736,11 +736,11 @@ After level 0, provisioning continues asynchronously.
 2. The SPRM status consumer ingests those events and updates the corresponding
    service-type instance row in the control-plane database (status, outputs, and
    related fields).
-3. When a resource reaches `Ready`, the status consumer notifies Placement.
+3. When a resource reaches `Running`, the status consumer notifies Placement.
 4. Placement checks dependents via each row's `requires_resources` and
    `dagLevel`. For resources at the next level whose dependencies are all
-   `Ready`, Placement binds dependency outputs, then calls SPRM to create those
-   instances.
+   `Running`, Placement binds dependency outputs, then calls SPRM to create
+   those instances.
 5. Repeat steps 3 to 4 while resources are still provisioning.
 6. When all resources reach terminal success, the process is complete.
 7. When any resource reports a terminal failure, Placement initiates rollback
@@ -858,12 +858,12 @@ sequenceDiagram
 
 #### DAG and CEL
 
-| Step       | Action                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------- |
-| Input      | Resolved `resources[]` from Catalog (names, spec, requiresResources)                            |
-| Compile    | Merge CEL + `requiresResources` into dependencies; cycle detection; assign `dagLevel` per row   |
-| Persist    | `requires_resources` and `dagLevel` on each resource row                                        |
-| CEL phases | Plan-time (params, literals) before create; apply-time (dependency outputs) when deps are Ready |
+| Step       | Action                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------- |
+| Input      | Resolved `resources[]` from Catalog (names, spec, requiresResources)                              |
+| Compile    | Merge CEL + `requiresResources` into dependencies; cycle detection; assign `dagLevel` per row     |
+| Persist    | `requires_resources` and `dagLevel` on each resource row                                          |
+| CEL phases | Plan-time (params, literals) before create; apply-time (dependency outputs) when deps are Running |
 
 ### Key Characteristics/Notes
 
@@ -894,7 +894,7 @@ sequenceDiagram
   `dagLevel`) are stored for lifecycle tracking, orchestration, and rehydration
 - **Status-driven waves**: After level 0, the SPRM status consumer updates
   service type instance rows and notifies Placement in-process when a resource
-  is `Ready`. Placement then enqueues the next DAG level (see
+  is `Running`. Placement then enqueues the next DAG level (see
   [Status-driven DAG progression](#status-driven-dag-progression)).
 
 ### Future Improvements
