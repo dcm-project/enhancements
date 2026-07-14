@@ -80,3 +80,9 @@ words:
   - databasespec
   - clusterspec
   - CAPI
+  - dagLevel
+  - evaluateGraph
+  - graphwide
+  - OnResourceRunning
+  - OnResourceDeleted
+  - rehydration
