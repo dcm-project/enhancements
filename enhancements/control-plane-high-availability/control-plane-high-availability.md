@@ -183,10 +183,10 @@ production multi-instance deploy:
   do not process the same message twice.
 - Health checks must verify Postgres connectivity and NATS when enabled. An
   instance that cannot reach Postgres must not receive traffic.
-- Database schema updates must run once per DCM update, not from every instance at
-  startup. When several instances boot together they share one Postgres. If each
-  instance applies migrations at the same time, schema changes can conflict or
-  fail.
+- Database schema updates must run once per DCM update, not from every instance
+  at startup. When several instances boot together they share one Postgres. If
+  each instance applies migrations at the same time, schema changes can conflict
+  or fail.
 
 ### Assumptions
 
