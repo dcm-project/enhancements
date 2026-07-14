@@ -88,17 +88,22 @@ current control plane, and the changes required for safe horizontal scaling.
 
 ### Current gaps
 
-The control plane is not ready for multi-instance production today:
+Reference packaging targets development, not production HA. It defaults to one
+control-plane replica with bundled single-instance Postgres and NATS. Production
+deployments configure external HA Postgres and NATS through `DB_HOST`,
+`NATS_URL`, or Helm `nats.url`.
 
-- Reference Helm chart defaults to one control-plane replica.
-- `/api/v1alpha1/health` does not check Postgres or NATS connectivity.
-- Schema migration (`AutoMigrate`) runs on every instance startup today. For
-  multi-instance production, schema updates must run once per DCM update.
+The control plane application blocker for multi-instance production:
+
 - Background workers start in every instance without leader election or
   database-backed job claiming. This includes JetStream consumers, deferred
   deletion scheduling, and agent heartbeat handling.
-- Reference packaging ships single-instance Postgres and NATS, which is fine for
-  development but not for production HA.
+
+Follow-up implementation work:
+
+- `/api/v1alpha1/health` does not check Postgres or NATS connectivity.
+- Schema migration (`AutoMigrate`) runs on every instance startup today.
+  Production requires migrations once per DCM update (a separate enhancement).
 
 Closing these gaps is follow-up implementation work. This document captures the
 target architecture and decisions from the HA exploration.
