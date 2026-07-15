@@ -122,9 +122,10 @@ sequenceDiagram
 
 Providers must publish messages to a subject based on the service type:
 
-`dcm.{serviceType}`
+`dcm.{service_type}`
 
-- `serviceType`: The type of resource (e.g., `vm`, `container`, `cluster`).
+- `service_type`: The type of resource (e.g., `vm`, `container`, `cluster`,
+  `storage`).
 
 The service type determines the message schema and is the only routing-relevant
 token. All other context — provider identity, instance identifier, timestamps —
@@ -133,7 +134,7 @@ is carried in the CloudEvent envelope attributes (see section 3).
 ### 3. CloudEvents Format
 
 All messages must be valid JSON CloudEvents (v1.0). We currently define only
-very simple format for `VmStatus` and `ContainerStatus`.
+very simple format for `VmStatus`, `ContainerStatus`, and `StorageStatus`.
 
 ```golang
 type VmStatus struct {
@@ -144,6 +145,14 @@ type VmStatus struct {
 
 ```golang
 type ContainerStatus struct {
+  Id string  `json:"id"`
+  Status string `json:"status"`
+  Message string `json:"message"`
+}
+```
+
+```golang
+type StorageStatus struct {
   Id string  `json:"id"`
   Status string `json:"status"`
   Message string `json:"message"`
@@ -163,9 +172,9 @@ type VmStatus struct {
 
 event := cloudevents.NewEvent()
 event.SetID("event-123-456")
-event.SetSource("dcm/providers/{providerName}")
+event.SetSource("dcm/providers/{provider_name}")
 event.SetType("dcm.status.vm")
-event.SetSubject("dcm.{serviceType}")
+event.SetSubject("dcm.{service_type}")
 event.SetData(cloudevents.ApplicationJSON, VmStatus{Id, "123-123", Status: "Running", Message: "VM is running."})
 ```
 
@@ -179,7 +188,7 @@ these generic states before publishing the CloudEvent.
 ##### VM Status
 
 Providers must map their hypervisor-specific states to the following DCM
-Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `ERROR`, `DELETED`,
+Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `FAILED`, `DELETED`,
 `DELETING`, `PAUSED`, `STOPPING`.
 
 | DCM Generic Status | AWS EC2 Equivalent                              | Azure VM Equivalent      | VMWare Equivalent       |
@@ -194,7 +203,7 @@ Lifecycle Phases: `PROVISIONING`, `RUNNING`, `STOPPED`, `ERROR`, `DELETED`,
 | **STOPPING**       | `stopping`                                      | `stopping`               | `GuestOS Shutting Down` |
 
 _Note: If a provider has a state that is ambiguous, they should default to the
-closest "active" state or `ERROR` if functionality is impaired._
+closest "active" state or `FAILED` if functionality is impaired._
 
 ##### Container status
 
@@ -210,19 +219,49 @@ but simplified for general consumption. **Target Statuses:** `PENDING`,
 | **FAILED**         | `Failed`, `CrashLoopBackOff`, `Exited (non-zero)`  |
 | **UNKNOWN**        | `Unknown` (Node lost)                              |
 
+##### Storage status
+
+For standalone storage volumes (e.g., Kubernetes PVCs), status reflects
+provisioning and binding lifecycle. **Target Statuses:** `PROVISIONING`,
+`RUNNING`, `FAILED`, `DELETING`, `DELETED`.
+
+| DCM Generic Status | Kubernetes PVC Equivalent                       |
+| :----------------- | :---------------------------------------------- |
+| **PROVISIONING**   | `Pending` (waiting for binding/provisioning)    |
+| **PROVISIONING**   | `Bound` with active resize conditions           |
+|                    | (`Resizing`, `FileSystemResizePending`)         |
+| **RUNNING**        | `Bound` (no active resize conditions)           |
+| **FAILED**         | `Lost` or unrecoverable binding failure         |
+| **DELETING**       | Deletion in progress (`deletion_timestamp` set) |
+| **DELETED**        | PVC not found                                   |
+
+See [k8s-storage-sp](../k8s-storage-sp/k8s-storage-sp.md) for the reference
+Kubernetes Storage SP status mapping.
+
 ##### Cluster status
 
 For managed clusters (e.g., K8s clusters), the status reflects the health of the
 control plane and worker nodes as a single unit. **Target Statuses:**
-`CREATING`, `ACTIVE`, `UPDATING`, `DEGRADED`, `DELETED`.
+`PROGRESSING`, `ACTIVE`, `DEGRADED`, `UNAVAILABLE`, `FAILED`, `DELETING`,
+`DELETED`.
 
-| DCM Generic Status | Kubernetes                                                         |
-| :----------------- | :----------------------------------------------------------------- |
-| **CREATING**       | Control plane is provisioning; API is not yet reachable.           |
-| **ACTIVE**         | Control plane is healthy and minimum worker nodes are ready.       |
-| **UPDATING**       | Rolling upgrade in progress (API remains reachable).               |
-| **DEGRADED**       | Control plane is reachable, but critical components are unhealthy. |
-| **DELETED**        | Cluster resources have been de-provisioned.                        |
+| DCM Generic Status | Kubernetes                                                                                         |
+| :----------------- | :------------------------------------------------------------------------------------------------- |
+| **PROGRESSING**    | Cluster is being provisioned (API may not yet be reachable), or a rolling upgrade is in progress.  |
+| **ACTIVE**         | Control plane is healthy and minimum worker nodes are ready.                                       |
+| **DEGRADED**       | Control plane is reachable, but critical components are unhealthy.                                 |
+| **UNAVAILABLE**    | Control plane was previously available but is now unreachable and not progressing toward recovery. |
+| **FAILED**         | Provisioning or an update failed and requires intervention to recover.                             |
+| **DELETING**       | Deletion has been requested; cluster teardown is in progress.                                      |
+| **DELETED**        | Cluster resources have been de-provisioned.                                                        |
+
+_Note: `PROGRESSING` intentionally does not distinguish initial provisioning
+from a subsequent update — Service Providers are not required to track prior
+state to make that distinction (a backend may use a single "in progress" signal
+for both, e.g. a Kubernetes-based provider updating a CR's `spec` and waiting
+for reconciliation). Providers that can distinguish the two internally may still
+surface it via `status.message`, but the generic status itself is the same for
+both cases._
 
 ## Message systems
 

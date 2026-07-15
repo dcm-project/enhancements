@@ -121,12 +121,12 @@ This matches the subject hierarchy defined in the
 enhancement:
 
 ```
-dcm.{serviceType}
+dcm.{service_type}
 ```
 
-For example: `dcm.vm`, `dcm.container`, `dcm.cluster`.
+For example: `dcm.vm`, `dcm.container`, `dcm.cluster`, `dcm.storage`.
 
-The `serviceType` token in the subject determines the message schema. All other
+The `service_type` token in the subject determines the message schema. All other
 context — provider identity (`source`), instance identifier (`subject`), and
 timestamps — is carried in the CloudEvent envelope attributes. This keeps the
 subject hierarchy simple and avoids encoding routing-irrelevant metadata in the
@@ -138,7 +138,7 @@ The StatusConsumer processes each incoming message through the following steps:
 
 1. **Parse CloudEvent Envelope** — Deserialize the message into a CloudEvent
    v1.0 structure. Discard and log if the envelope is malformed.
-2. **Extract Metadata** — Extract `serviceType` from the NATS subject, and
+2. **Extract Metadata** — Extract `service_type` from the NATS subject, and
    provider identity from the CloudEvent `source` attribute.
 3. **Deserialize Payload** — Decode the CloudEvent data field into the
    appropriate struct.
@@ -155,7 +155,7 @@ SET status = $1, status_message = $2, updated_at = NOW()
 WHERE instance_id = $3
 ```
 
-If the `instanceId` does not match any existing record, the update is a no-op
+If the `instance_id` does not match any existing record, the update is a no-op
 and a warning is logged. This can occur when an instance has been deleted before
 the status event was processed or when events arrive out of order.
 
@@ -171,16 +171,16 @@ sequenceDiagram
 
     Note over SP: Instance state changes<br/>(e.g. PROVISIONING → RUNNING)
 
-    SP->>MS: PUBLISH CloudEvent<br/>subject: dcm.vm<br/>source: dcm/providers/kubevirt-sp<br/>ce-subject: {instanceId}<br/>data: {status: "RUNNING", message: "VM is running"}
+    SP->>MS: PUBLISH CloudEvent<br/>subject: dcm.vm<br/>source: dcm/providers/kubevirt-sp<br/>ce-subject: {instance_id}<br/>data: {status: "RUNNING", message: "VM is running"}
 
     MS->>SC: PUSH message
 
     SC->>SC: Parse CloudEvent envelope
-    SC->>SC: Extract serviceType from subject,<br/>instanceId from CE subject attr
+    SC->>SC: Extract service_type from subject,<br/>instance_id from CE subject attr
     SC->>SC: Deserialize status payload
 
     alt Valid event
-        SC->>DB: UPDATE service_type_instances<br/>SET status='RUNNING',<br/>status_message='VM is running'<br/>WHERE instance_id={instanceId}
+        SC->>DB: UPDATE service_type_instances<br/>SET status='RUNNING',<br/>status_message='VM is running'<br/>WHERE instance_id={instance_id}
         DB-->>SC: OK
     else Invalid event (malformed, unknown status, etc.)
         SC->>SC: Log warning, discard message

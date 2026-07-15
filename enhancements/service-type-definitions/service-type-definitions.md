@@ -35,12 +35,12 @@ Example:
 ## Summary
 
 This ADR defines provider-agnostic schemas for DCM service types. These schemas
-enable Service Providers to provision four core service types — virtual
-machines, containers, databases, and Kubernetes clusters — across different
-infrastructure platforms without vendor lock-in. The key principle is
-_portability first_: schemas contain only minimal fields common across all
-implementations, with platform-specific configuration delegated to
-_providerHints_.
+enable Service Providers to provision five core service types — virtual
+machines, containers, databases, Kubernetes clusters, and standalone storage —
+across different infrastructure platforms without vendor lock-in. The key
+principle is _portability first_: schemas contain only minimal fields common
+across all implementations, with platform-specific configuration delegated to
+_provider_hints_.
 
 ## Motivation
 
@@ -50,9 +50,9 @@ without breaking compatibility.
 
 ### Goals
 
-- Define a generic schema that works for any serviceType, ensure portability,
+- Define a generic schema that works for any service_type, ensure portability,
   and allows extensibility without schema changes.
-- Define an initial set of four primary service types applying this pattern:
+- Define an initial set of five primary service types applying this pattern:
   - _VM_  
     Virtual machines with compute, storage, and OS specifications
   - _Container_  
@@ -62,6 +62,8 @@ without breaking compatibility.
     EKS, AWS, GKE, etc.)
   - _Database_  
     Database services with various engines (PostgreSQL, MySQL, etc.)
+  - _Storage_  
+    Standalone persistent volumes decoupled from compute service types
 
 ### Non-Goals
 
@@ -73,14 +75,13 @@ without breaking compatibility.
 - Migration strategies for breaking schema changes
 - Provider-specific implementation details (each provider handles translation
   independently)
-- Additional service types beyond VMs, containers, databases, and Kubernetes
-  clusters (deferred to future phases)
-- Standalone storage volumes or separately provisioned networks are _not_
-  included. All storage (disk size, ephemeral allocation) and networking
-  (interfaces, IPs, subnets, security groups) must be defined and bundled
-  directly with the compute specification. Future iterations may decouple these
-  services, but the current principle is monolithic definition for simplified
-  deployment.
+- Additional service types beyond VMs, containers, databases, Kubernetes
+  clusters, and standalone storage (deferred to future phases)
+- Separately provisioned networks are _not_ included as a standalone service
+  type. Network interfaces bundled with compute (VM, container) remain in those
+  schemas. Standalone storage volumes are supported via the _storage_ service
+  type; disk size on VMs and ephemeral allocation on containers remain bundled
+  with compute where applicable.
 - Multiple service type schema versions. Initial release supports only the
   current schema version; service type versioning deferred to future phases.
 
@@ -94,21 +95,21 @@ for array validation.
 ## Generic Service
 
 All service schemas share common fields defined once in
-[common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
+[common.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/common.yaml)
 
 ## Schema Structure
 
-| Field         | Required | Type                                   | Description                                                        | ReadOnly |
-| :------------ | :------- | :------------------------------------- | :----------------------------------------------------------------- | :------- |
-| serviceType   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_) | No       |
-| metadata      | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                  | No       |
-| providerHints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                    | No       |
-| id            | No       | string                                 | Unique identifier for the resource                                 | Yes      |
-| status        | No       | string                                 | Current state of the resource                                      | Yes      |
-| path          | No       | string                                 | Resource path or location                                          | Yes      |
-| statusMessage | No       | string                                 | Message providing details about the current status                 | Yes      |
-| createTime    | No       | date-time                              | Timestamp when the resource was created                            | Yes      |
-| updateTime    | No       | date-time                              | Timestamp when the resource was last updated                       | Yes      |
+| Field          | Required | Type                                   | Description                                                                   | ReadOnly |
+| :------------- | :------- | :------------------------------------- | :---------------------------------------------------------------------------- | :------- |
+| service_type   | Yes      | string                                 | Service type identifier (_vm_, _container_, _database_, _cluster_, _storage_) | No       |
+| metadata       | Yes      | [Metadata](#metadata-object)           | Service identification and labels                                             | No       |
+| provider_hints | No       | [ProviderHints](#providerhints-object) | Platform-specific configuration                                               | No       |
+| id             | No       | string                                 | Unique identifier for the resource                                            | Yes      |
+| status         | No       | string                                 | Current state of the resource                                                 | Yes      |
+| path           | No       | string                                 | Resource path or location                                                     | Yes      |
+| status_message | No       | string                                 | Message providing details about the current status                            | Yes      |
+| create_time    | No       | date-time                              | Timestamp when the resource was created                                       | Yes      |
+| update_time    | No       | date-time                              | Timestamp when the resource was last updated                                  | Yes      |
 
 ### Metadata Object
 
@@ -123,19 +124,19 @@ All service schemas share common fields defined once in
 | :---------------- | :------- | :------------- | :----------------------------------------------------------------------------------------------------- |
 | \<provider-name\> | No       | map[string]any | Provider-specific configuration keyed by provider identifier (e.g., _kubevirt_, _vmware_, _openstack_) |
 
-_providerHints_ is key to portability: providers use hints they recognize and
+_provider_hints_ is key to portability: providers use hints they recognize and
 ignore the rest. This means catalog offering using only common fields (`vcpu`,
-`memory`, `guestOS`) can be provisioned by any compatible provider. The
-_providerHints_ section allows adding platform-specific optimizations: providers
-use hints they recognize and silently ignore the rest, so the same catalog item
-remains portable across platforms.
+`memory`, `guest_os`) can be provisioned by any compatible provider. The
+_provider_hints_ section allows adding platform-specific optimizations:
+providers use hints they recognize and silently ignore the rest, so the same
+catalog item remains portable across platforms.
 
 ## Specific services
 
-Any _serviceType_ can be defined by inheriting from
-[common.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/common.yaml)
+Any _service_type_ can be defined by inheriting from
+[common.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/common.yaml)
 and adding type-specific fields. For the first milestone, DCM will support the
-following serviceTypes:
+following service_types:
 
 - Virtual Machine  
   Virtual machines with CPU, memory, storage, and OS specifications
@@ -146,6 +147,8 @@ following serviceTypes:
 - Database  
   Fields common across all database types (SQL, NoSQL, search, time-series,
   etc.)
+- Storage  
+  Standalone persistent volumes (capacity, access mode) independent of compute
 
 ### Virtual Machine
 
@@ -186,17 +189,17 @@ native resource format" }
 #### Schema
 
 For easier review, the schema is accessible here
-[vmspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/vmspec.yaml).  
+[vmspec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/vm/spec.yaml).  
 Plus
-common fields: _serviceType, metadata, providerHints_
+common fields: _service_type, metadata, provider_hints_
 
-| Field   | Required | Type                          | Description                    |
-| :------ | :------- | :---------------------------- | :----------------------------- |
-| vcpu    | Yes      | [Vcpu](#vm-vcpu-object)       | Virtual CPU configuration      |
-| memory  | Yes      | [Memory](#vm-memory-object)   | Memory configuration           |
-| storage | Yes      | [Storage](#vm-storage-object) | Storage configuration          |
-| guestOS | Yes      | [GuestOS](#vm-guestos-object) | Operating system specification |
-| access  | No       | [Access](#vm-access-object)   | VM access configuration        |
+| Field    | Required | Type                           | Description                    |
+| :------- | :------- | :----------------------------- | :----------------------------- |
+| vcpu     | Yes      | [Vcpu](#vm-vcpu-object)        | Virtual CPU configuration      |
+| memory   | Yes      | [Memory](#vm-memory-object)    | Memory configuration           |
+| storage  | Yes      | [Storage](#vm-storage-object)  | Storage configuration          |
+| guest_os | Yes      | [GuestOS](#vm-guest_os-object) | Operating system specification |
+| access   | No       | [Access](#vm-access-object)    | VM access configuration        |
 
 #### VM vcpu Object
 
@@ -225,7 +228,7 @@ Disk names must be unique within the VM.
 | name     | Yes      | string | Disk identifier; root volume must be named _boot_ |
 | capacity | Yes      | string | Disk capacity with unit (e.g., _100GB_, _2TB_)    |
 
-#### VM guestOS Object
+#### VM guest_os Object
 
 | Field | Required | Type   | Description                                                           |
 | :---- | :------- | :----- | :-------------------------------------------------------------------- |
@@ -233,9 +236,9 @@ Disk names must be unique within the VM.
 
 #### VM access Object
 
-| Field        | Required | Type   | Description                  |
-| :----------- | :------- | :----- | :--------------------------- |
-| sshPublicKey | No       | string | SSH public key for VM access |
+| Field          | Required | Type   | Description                  |
+| :------------- | :------- | :----- | :--------------------------- |
+| ssh_public_key | No       | string | SSH public key for VM access |
 
 ### Containers
 
@@ -244,9 +247,9 @@ The following sections detail the Container schema architecture.
 #### Schema
 
 For easier review, the schema is accessible here
-[containerspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/containerspec.yaml).  
+[containerspec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/container/spec.yaml).  
 Plus
-common fields: _serviceType, metadata, providerHints_
+common fields: _service_type, metadata, provider_hints_
 
 | Field     | Required | Type                                     | Description                   |
 | :-------- | :------- | :--------------------------------------- | :---------------------------- |
@@ -305,9 +308,19 @@ common fields: _serviceType, metadata, providerHints_
 
 #### Container port Object
 
-| Field         | Required | Type    | Description                                 |
-| :------------ | :------- | :------ | :------------------------------------------ |
-| containerPort | Yes      | integer | Port number to expose (e.g., _8080_, _443_) |
+| Field          | Required | Type    | Description                                        |
+| :------------- | :------- | :------ | :------------------------------------------------- |
+| container_port | Yes      | integer | Port number to expose (e.g., _8080_, _443_)        |
+| visibility     | Yes      | string  | Port visibility: _none_, _internal_, or _external_ |
+
+The `visibility` field controls how the port is exposed by the Service Provider:
+
+- `none` — the port is not exposed via any networking abstraction (no Service
+  created for this port)
+- `internal` — the port is exposed within the cluster (e.g., ClusterIP Service
+  in Kubernetes)
+- `external` — the port is exposed externally (e.g., LoadBalancer or NodePort
+  Service in Kubernetes)
 
 ### Database
 
@@ -316,8 +329,9 @@ The following sections detail the Database schema architecture.
 #### Schema
 
 For easier review, the schema is accessible here
-[database/spec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/database/spec.yaml).
-Plus common fields: _serviceType, metadata, providerHints_
+[databasespec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/database/spec.yaml).  
+Plus
+common fields: _service_type, metadata, provider_hints_
 
 | Field     | Required | Type                                    | Description                                                   |
 | :-------- | :------- | :-------------------------------------- | :------------------------------------------------------------ |
@@ -374,9 +388,9 @@ GKE, AKS, etc.
 #### Schema
 
 For easier review, the schema is available here:
-[clusterspec.yaml](https://github.com/gciavarrini/service-provider-api-archived/blob/add-catalog-item/api/v1alpha1/clusterspec.yaml).  
+[clusterspec.yaml](https://github.com/dcm-project/control-plane/blob/main/api/catalog/v1alpha1/servicetypes/cluster/spec.yaml).  
 Plus
-common fields: _serviceType, metadata, providerHints_
+common fields: _service_type, metadata, provider_hints_
 
 | Field   | Required | Type                           | Description                               |
 | :------ | :------- | :----------------------------- | :---------------------------------------- |
@@ -385,12 +399,12 @@ common fields: _serviceType, metadata, providerHints_
 
 #### Cluster nodes Object
 
-| Field        | Required | Type                                         | Description                      |
-| :----------- | :------- | :------------------------------------------- | :------------------------------- |
-| controlPlane | Yes      | [ControlPlane](#cluster-controlplane-object) | Control plane node configuration |
-| worker       | Yes      | [Worker](#cluster-worker-object)             | Worker node configuration        |
+| Field         | Required | Type                                          | Description                      |
+| :------------ | :------- | :-------------------------------------------- | :------------------------------- |
+| control_plane | Yes      | [ControlPlane](#cluster-control_plane-object) | Control plane node configuration |
+| worker        | Yes      | [Worker](#cluster-worker-object)              | Worker node configuration        |
 
-#### Cluster controlPlane Object
+#### Cluster control_plane Object
 
 | Field   | Required | Type    | Description                                         |
 | :------ | :------- | :------ | :-------------------------------------------------- |
@@ -407,6 +421,43 @@ common fields: _serviceType, metadata, providerHints_
 | cpu     | Yes      | integer | Number of CPUs per node                             |
 | memory  | Yes      | string  | Memory per node with unit (e.g., _8GB_, _16GB_)     |
 | storage | Yes      | string  | Storage per node with unit (e.g., _120GB_, _500GB_) |
+
+### Storage
+
+The following sections detail the Storage schema architecture for standalone
+persistent volumes. See
+[k8s-storage-sp](https://github.com/dcm-project/enhancements/blob/main/enhancements/k8s-storage-sp/k8s-storage-sp.md)
+for the Kubernetes reference Service Provider implementation.
+
+#### Schema
+
+Plus common fields: _service_type, metadata, provider_hints_
+
+| Field    | Required | Type   | Description                                  |
+| :------- | :------- | :----- | :------------------------------------------- |
+| capacity | Yes      | string | Volume size with unit (e.g., _100Gi_, _1TB_) |
+
+#### Storage provider_hints (kubernetes)
+
+Platform-specific PVC settings may be supplied under
+`provider_hints.kubernetes`:
+
+| Field         | Required | Type   | Description                                                                 |
+| :------------ | :------- | :----- | :-------------------------------------------------------------------------- |
+| storage_class | No       | string | Kubernetes StorageClass name                                                |
+| volume_mode   | No       | string | _Filesystem_ (default) or _Block_                                           |
+| access_mode   | No       | string | PVC access mode: _ReadWriteOnce_ (default), _ReadOnlyMany_, _ReadWriteMany_ |
+
+When `access_mode` is omitted, the Service Provider applies a platform default
+(typically _ReadWriteOnce_ for block storage).
+
+**Note:** `access_mode` is Kubernetes-specific because it controls both
+attachment scope (single node vs. multiple nodes vs. single pod) and permissions
+(read-write vs. read-only) at PVC creation time. Other storage platforms handle
+attachment and permissions differently (e.g., AWS EBS sets multi-attach
+capability via volume type; GCP Persistent Disk sets mode at attach time). The
+CatalogItem admin configures this field based on the backend capabilities (e.g.,
+Ceph RBD only supports ReadWriteOnce; CephFS only supports ReadWriteMany).
 
 ### Schema Compatibility
 
