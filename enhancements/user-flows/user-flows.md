@@ -67,7 +67,7 @@ The DCM system is composed of the following core components:
 | **Placement Manager**              | Orchestrates instance creation; coordinates policy evaluation and agent selection                                       |
 | **Policy Manager (Policy Engine)** | Validates, mutates, and selects Agents via REGO policies and OPA                                                        |
 | **SP Resource Manager**            | Intermediary between Placement Manager and Agents; publishes CloudEvents to agent topics; consumes responses            |
-| **Agent Registry**                 | Stores Agent registration data (name, environment, serviceTypes, topicName, cost, healthStatus)                         |
+| **Agent Registry**                 | Stores Agent registration data (name, environment, service_types, topic_name, cost, health_status)                      |
 | **Service Providers**              | Execute infrastructure provisioning (KubeVirt SP, K8s Container SP, K8s Storage SP, ACM Cluster SP)                     |
 | **Environment Agent**              | Runs in target environment; routes creation/deletion requests to SPs; monitors SP health; reports to DCM via heartbeats |
 | **Messaging System**               | Handles CloudEvents for asynchronous request delivery and status reporting (NATS)                                       |
@@ -139,13 +139,13 @@ sequenceDiagram
     participant DB as Policy DB
     participant OPA as OPA Engine
 
-    Admin->>PM: POST /api/v1/policies<br/>{name, type, priority, labelSelector, regoCode}
+    Admin->>PM: POST /api/v1/policies<br/>{name, type, priority, label_selector, rego_code}
     PM->>PM: Validate name & priority uniqueness (at policy type level)
     alt Validation fails
         PM-->>Admin: 400 Bad Request (duplicate name or priority)
     end
     PM->>PM: Generate UUID, parse PackageName from REGO
-    PM->>DB: Store policy metadata<br/>(UUID, name, packageName, labelSelector, type, priority)
+    PM->>DB: Store policy metadata<br/>(UUID, name, package_name, label_selector, type, priority)
     PM->>OPA: Push REGO code (keyed by UUID)
     alt Compilation fails
         OPA-->>PM: Compilation error
@@ -153,7 +153,7 @@ sequenceDiagram
         PM-->>Admin: 400 Bad Request (REGO compilation error)
     end
     OPA-->>PM: Compilation success
-    PM-->>Admin: 201 Created {policyId: UUID}
+    PM-->>Admin: 201 Created {policy_id: UUID}
 ```
 
 **Policy payload example:**
@@ -163,9 +163,9 @@ sequenceDiagram
   "name": "restrict-region",
   "type": "Global",
   "priority": 10,
-  "labelSelector": { "serviceType": "vm" },
+  "label_selector": { "service_type": "vm" },
   "enabled": true,
-  "regoCode": "package restrict_region\n..."
+  "rego_code": "package restrict_region\n..."
 }
 ```
 
@@ -208,7 +208,7 @@ sequenceDiagram
         PE->>PE: Validate selected_agent against agent constraints
     end
 
-    PE-->>PM: 200 OK {evaluatedServiceInstance, selectedAgent, status}
+    PE-->>PM: 200 OK {evaluated_service_instance, selected_agent, status}
 ```
 
 **Evaluation request (Placement Manager → Policy Manager):**
@@ -217,10 +217,10 @@ sequenceDiagram
 {
   "service_instance": {
     "spec": {
-      "serviceType": "vm",
+      "service_type": "vm",
       "memory": { "size": "2GB" },
       "vcpu": { "count": 2 },
-      "guestOS": { "type": "fedora-39" },
+      "guest_os": { "type": "fedora-39" },
       "metadata": { "name": "fedora-vm" }
     }
   },
@@ -228,13 +228,13 @@ sequenceDiagram
     {
       "name": "agent-prod-eu-west-1",
       "environment": "prod-eu-west-1",
-      "serviceTypes": ["vm", "container"],
+      "service_types": ["vm", "container"],
       "cost": "medium"
     },
     {
       "name": "agent-dev-us-east-1",
       "environment": "dev-us-east-1",
-      "serviceTypes": ["vm"],
+      "service_types": ["vm"],
       "cost": "low"
     }
   ]
@@ -246,10 +246,10 @@ sequenceDiagram
 ```json
 {
   "spec": {
-    "serviceType": "vm",
+    "service_type": "vm",
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
-    "guestOS": { "type": "fedora-39" },
+    "guest_os": { "type": "fedora-39" },
     "metadata": { "name": "fedora-vm" }
   },
   "agent": "",
@@ -259,7 +259,7 @@ sequenceDiagram
     {
       "name": "prod-eu-agent",
       "environment": "prod-eu-west-1",
-      "serviceTypes": ["vm", "database"],
+      "service_types": ["vm", "database"],
       "cost": "medium"
     }
   ],
@@ -296,8 +296,8 @@ sequenceDiagram
 
 ```json
 {
-  "evaluatedServiceInstance": { "...": "final mutated spec" },
-  "selectedAgent": "agent-prod-eu-west-1",
+  "evaluated_service_instance": { "...": "final mutated spec" },
+  "selected_agent": "agent-prod-eu-west-1",
   "status": "APPROVED | MODIFIED"
 }
 ```
@@ -321,17 +321,17 @@ use JSON Schema (draft 2020-12) for validation.
 ### 3.1 ServiceType Registration
 
 ServiceTypes are defined as JSON Schemas that describe the shape of a service
-request. All ServiceTypes share a common structure with `serviceType`,
-`metadata`, and optional `providerHints`.
+request. All ServiceTypes share a common structure with `service_type`,
+`metadata`, and optional `provider_hints`.
 
 In V1, dynamic registration of `ServiceType` is not supported
 
 ```mermaid
 graph LR
     subgraph CommonFields[Common Fields]
-        ST[serviceType: string]
+        ST[service_type: string]
         MD[metadata: name, labels]
-        PH[providerHints: provider-specific config]
+        PH[provider_hints: provider-specific config]
     end
 
     subgraph ServiceTypeSchemas[ServiceType Schemas]
@@ -351,17 +351,17 @@ graph LR
 
 ### 3.2 Supported ServiceTypes
 
-#### VM (`serviceType: vm`)
+#### VM (`service_type: vm`)
 
-| Field                 | Type    | Required | Description                                   |
-| --------------------- | ------- | -------- | --------------------------------------------- |
-| `vcpu.count`          | integer | yes      | Number of virtual CPUs                        |
-| `memory.size`         | string  | yes      | Memory size (e.g., `"8GB"`)                   |
-| `storage.disks[]`     | array   | no       | Disks; root disk must be named `"boot"`       |
-| `guestOS.type`        | string  | yes      | OS image (e.g., `"rhel-9"`, `"ubuntu-22.04"`) |
-| `access.sshPublicKey` | string  | no       | SSH public key for access                     |
+| Field                   | Type    | Required | Description                                   |
+| ----------------------- | ------- | -------- | --------------------------------------------- |
+| `vcpu.count`            | integer | yes      | Number of virtual CPUs                        |
+| `memory.size`           | string  | yes      | Memory size (e.g., `"8GB"`)                   |
+| `storage.disks[]`       | array   | no       | Disks; root disk must be named `"boot"`       |
+| `guest_os.type`         | string  | yes      | OS image (e.g., `"rhel-9"`, `"ubuntu-22.04"`) |
+| `access.ssh_public_key` | string  | no       | SSH public key for access                     |
 
-#### Container (`serviceType: container`)
+#### Container (`service_type: container`)
 
 | Field                      | Type    | Required | Description                                    |
 | -------------------------- | ------- | -------- | ---------------------------------------------- |
@@ -372,7 +372,7 @@ graph LR
 | `process.env[]`            | array   | no       | Environment variables                          |
 | `network.ports[]`          | array   | no       | Container ports                                |
 
-#### Database (`serviceType: database`)
+#### Database (`service_type: database`)
 
 | Field               | Type    | Required | Description                            |
 | ------------------- | ------- | -------- | -------------------------------------- |
@@ -382,24 +382,24 @@ graph LR
 | `resources.memory`  | string  | yes      | Memory allocation                      |
 | `resources.storage` | string  | yes      | Storage allocation                     |
 
-#### Cluster (`serviceType: cluster`)
+#### Cluster (`service_type: cluster`)
 
-| Field                                   | Type    | Required | Description                           |
-| --------------------------------------- | ------- | -------- | ------------------------------------- |
-| `version`                               | string  | yes      | Kubernetes version                    |
-| `nodes.controlPlane.count`              | integer | yes      | Control plane node count (1, 3, or 5) |
-| `nodes.controlPlane.cpu/memory/storage` | various | yes      | Control plane resources               |
-| `nodes.worker.count`                    | integer | yes      | Worker node count                     |
-| `nodes.worker.cpu/memory/storage`       | various | yes      | Worker node resources                 |
+| Field                                    | Type    | Required | Description                           |
+| ---------------------------------------- | ------- | -------- | ------------------------------------- |
+| `version`                                | string  | yes      | Kubernetes version                    |
+| `nodes.control_plane.count`              | integer | yes      | Control plane node count (1, 3, or 5) |
+| `nodes.control_plane.cpu/memory/storage` | various | yes      | Control plane resources               |
+| `nodes.worker.count`                     | integer | yes      | Worker node count                     |
+| `nodes.worker.cpu/memory/storage`        | various | yes      | Worker node resources                 |
 
-#### Storage (`serviceType: storage`)
+#### Storage (`service_type: storage`)
 
-| Field                                   | Type   | Required | Description                                                  |
-| --------------------------------------- | ------ | -------- | ------------------------------------------------------------ |
-| `capacity`                              | string | yes      | Volume size (e.g., `"100Gi"`, `"1TB"`)                       |
-| `providerHints.kubernetes.storageClass` | string | no       | Kubernetes StorageClass name                                 |
-| `providerHints.kubernetes.volumeMode`   | string | no       | `Filesystem` or `Block`                                      |
-| `providerHints.kubernetes.accessMode`   | string | no       | PVC access mode (e.g., `"ReadWriteOnce"`, `"ReadWriteMany"`) |
+| Field                                     | Type   | Required | Description                                                  |
+| ----------------------------------------- | ------ | -------- | ------------------------------------------------------------ |
+| `capacity`                                | string | yes      | Volume size (e.g., `"100Gi"`, `"1TB"`)                       |
+| `provider_hints.kubernetes.storage_class` | string | no       | Kubernetes StorageClass name                                 |
+| `provider_hints.kubernetes.volume_mode`   | string | no       | `Filesystem` or `Block`                                      |
+| `provider_hints.kubernetes.access_mode`   | string | no       | PVC access mode (e.g., `"ReadWriteOnce"`, `"ReadWriteMany"`) |
 
 ---
 
@@ -420,21 +420,21 @@ sequenceDiagram
     participant CM as Catalog Manager
 
     Admin->>CM: POST /api/v1/catalog-items
-    Note right of CM: Payload includes:<br/>- serviceType reference<br/>- field definitions with:<br/>  - path (e.g., "resources.cpu")<br/>  - default value<br/>  - editable flag<br/>  - validationSchema
+    Note right of CM: Payload includes:<br/>- service_type reference<br/>- field definitions with:<br/>  - path (e.g., "resources.cpu")<br/>  - default value<br/>  - editable flag<br/>  - validation_schema
 
     CM->>CM: Validate CatalogItem schema
-    CM-->>Admin: 201 Created {catalogItemId}
+    CM-->>Admin: 201 Created {catalog_item_id}
 ```
 
 **CatalogItem example:**
 
 ```yaml
-apiVersion: v1alpha1
+api_version: v1alpha1
 kind: CatalogItem
 metadata:
   name: production-postgres
 spec:
-  serviceType: database
+  service_type: database
   fields:
     - path: "engine"
       default: "postgresql"
@@ -442,12 +442,12 @@ spec:
     - path: "version"
       editable: true
       default: "15"
-      validationSchema:
+      validation_schema:
         enum: ["14", "15", "16"]
     - path: "resources.cpu"
       editable: true
       default: 4
-      validationSchema:
+      validation_schema:
         minimum: 2
         maximum: 16
     - path: "resources.memory"
@@ -461,26 +461,26 @@ spec:
 **Storage CatalogItem example:**
 
 ```yaml
-apiVersion: v1alpha1
+api_version: v1alpha1
 kind: CatalogItem
 metadata:
   name: standard-block-volume
 spec:
-  serviceType: storage
+  service_type: storage
   fields:
     - path: "capacity"
       editable: true
       default: "100Gi"
-      validationSchema:
+      validation_schema:
         type: string
         pattern: '^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$'
-    - path: "providerHints.kubernetes.storageClass"
+    - path: "provider_hints.kubernetes.storage_class"
       editable: false
       default: "gp3-csi"
-    - path: "providerHints.kubernetes.volumeMode"
+    - path: "provider_hints.kubernetes.volume_mode"
       editable: false
       default: "Filesystem"
-    - path: "providerHints.kubernetes.accessMode"
+    - path: "provider_hints.kubernetes.access_mode"
       editable: false
       default: "ReadWriteOnce"
 ```
@@ -501,11 +501,11 @@ sequenceDiagram
     User->>UI: Select CatalogItem "production-postgres"
     UI->>UI: Render form with editable fields,<br/>defaults, and validation rules
     User->>UI: Customize editable fields<br/>(e.g., version="16", cpu=8)
-    UI->>UI: Client-side validation against validationSchema
-    User->>CM: POST /api/v1/catalog-item-instances<br/>{catalogItemId, userValues}
-    CM->>CM: Validate input against validationSchema
+    UI->>UI: Client-side validation against validation_schema
+    User->>CM: POST /api/v1/catalog-item-instances<br/>{catalog_item_id, user_values}
+    CM->>CM: Validate input against validation_schema
     CM->>CM: Merge defaults + user input → ServiceType payload
-    Note right of CM: Result:<br/>{serviceType: "database",<br/> engine: "postgresql",<br/> version: "16",<br/> resources: {cpu: 8, memory: "16GB", storage: "100GB"}}
+    Note right of CM: Result:<br/>{service_type: "database",<br/> engine: "postgresql",<br/> version: "16",<br/> resources: {cpu: 8, memory: "16GB", storage: "100GB"}}
     CM->>PM: POST /api/v1/resources<br/>{CatalogItemInstance, spec}
     PM-->>CM: 202 Accepted
     CM-->>User: Instance created (provisioning)
@@ -542,22 +542,22 @@ sequenceDiagram
 
     Note over AG: Embedded SPs registered<br/>internally at startup
 
-    SP->>AG: POST /api/v1/providers<br/>{name, displayName, endpoint, serviceType, metadata}
+    SP->>AG: POST /api/v1/providers<br/>{name, display_name, endpoint, service_type, metadata}
 
     alt Service type already served by another SP
         AG-->>SP: 409 Conflict<br/>{error: "service type X already served by provider Y"}
     else Name does not exist
-        AG->>AG: Create new SP entry, generate providerID
+        AG->>AG: Create new SP entry, generate provider_id
         AG-->>SP: 201 Created {id, name, status: "registered"}
-    else Name exists, same providerID
+    else Name exists, same provider_id
         AG->>AG: Update existing entry
         AG-->>SP: 200 OK {id, name, status: "registered"}
-    else Name exists, different providerID
+    else Name exists, different provider_id
         AG-->>SP: 409 Conflict
     end
 
     alt Service type list changed AND agent registered to DCM
-        AG->>DCM: POST /api/v1/agents<br/>{name, environment, serviceTypes, cost, topicName}
+        AG->>DCM: POST /api/v1/agents<br/>{name, environment, service_types, cost, topic_name}
         DCM->>DB: Update agent registration
         DCM-->>AG: 200 OK
     end
@@ -570,15 +570,15 @@ sequenceDiagram
 ```json
 {
   "name": "kubevirt-sp",
-  "displayName": "KubeVirt Service Provider",
+  "display_name": "KubeVirt Service Provider",
   "endpoint": "https://sp1.example.com/api/v1/vm",
-  "serviceType": "vm",
+  "service_type": "vm",
   "metadata": {
     "region": "us-east-1",
     "resources": {
-      "totalCpu": 200,
-      "totalMemory": "1TB",
-      "totalStorage": "2TB"
+      "total_cpu": 200,
+      "total_memory": "1TB",
+      "total_storage": "2TB"
     }
   }
 }
@@ -604,9 +604,9 @@ sequenceDiagram
     AG->>MS: Create topics (main + retry)
     Note over AG: Wait for at least 1 SP<br/>(embedded or external) to register<br/>and be healthy
 
-    AG->>DCM: POST /api/v1/agents<br/>{name, environment, serviceTypes,<br/>resourcesAvailable, cost, topicName}
+    AG->>DCM: POST /api/v1/agents<br/>{name, environment, service_types,<br/>resources_available, cost, topic_name}
     DCM->>DB: Store agent registration
-    DCM-->>AG: 201 Created {agentId}
+    DCM-->>AG: 201 Created {agent_id}
 ```
 
 **Registration payload (Agent → DCM):**
@@ -615,14 +615,14 @@ sequenceDiagram
 {
   "name": "agent-prod-eu-west-1",
   "environment": "prod-eu-west-1",
-  "serviceTypes": ["vm", "container"],
-  "resourcesAvailable": {
-    "totalCpu": 200,
-    "totalMemory": "1TB",
-    "totalStorage": "2TB"
+  "service_types": ["vm", "container"],
+  "resources_available": {
+    "total_cpu": 200,
+    "total_memory": "1TB",
+    "total_storage": "2TB"
   },
   "cost": "medium",
-  "topicName": "dcm.agents.agent-prod-eu-west-1"
+  "topic_name": "dcm.agents.agent-prod-eu-west-1"
 }
 ```
 
@@ -671,7 +671,7 @@ sequenceDiagram
 
     Note over AG: Embedded SPs: health<br/>checked in-process<br/>(no network call)
 
-    loop Every {healthCheckInterval} seconds (external SPs only)
+    loop Every {health_check_interval} seconds (external SPs only)
         AG->>SP: GET /health
         alt 200 OK, status: healthy
             SP-->>AG: {status: "healthy"}
@@ -700,8 +700,8 @@ sequenceDiagram
     participant AG as Agent
     participant DCM as DCM Control Plane
 
-    loop Every {heartbeatInterval} seconds
-        AG->>DCM: PUT /api/v1/agents/{agentId}/heartbeat<br/>{timestamp, consumerLag}
+    loop Every {heartbeat_interval} seconds
+        AG->>DCM: PUT /api/v1/agents/{agent_id}/heartbeat<br/>{timestamp, consumer_lag}
         DCM->>DCM: Update heartbeat, check lag
         DCM-->>AG: 200 OK
     end
@@ -713,7 +713,7 @@ sequenceDiagram
 #### 5.3.3 Consumer Lag Monitoring
 
 The Agent self-reports its consumer lag in each heartbeat. If the lag exceeds
-`consumerLagThreshold`, DCM marks the agent as **Congested** and stops routing
+`consumer_lag_threshold`, DCM marks the agent as **Congested** and stops routing
 new requests to it. When the lag drops below the threshold, the Congested state
 is cleared.
 
@@ -750,7 +750,7 @@ sequenceDiagram
     Platform->>SP: State change event<br/>(via informer watch or polling)
     SP->>SP: Map platform status → DCM status
     SP->>SP: Build CloudEvent
-    SP->>MS: Publish to NATS subject<br/>dcm.{serviceType}<br/>
+    SP->>MS: Publish to NATS subject<br/>dcm.{service_type}<br/>
 
     MS->>DCM: Deliver event
     DCM->>DCM: Validate CloudEvent schema
@@ -828,7 +828,7 @@ sequenceDiagram
 
     PM->>DB: Store original request (intent)
 
-    PM->>AR: Fetch available agents<br/>(healthy, not Congested, matching serviceType)
+    PM->>AR: Fetch available agents<br/>(healthy, not Congested, matching service_type)
     AR-->>PM: available_agents list
 
     PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {spec}, available_agents}
@@ -841,12 +841,12 @@ sequenceDiagram
         CM-->>User: Request denied
     end
 
-    PE-->>PM: 200 OK<br/>{evaluatedServiceInstance, selectedAgent, status}
-    PM->>DB: Store validated request with agentName
+    PE-->>PM: 200 OK<br/>{evaluated_service_instance, selected_agent, status}
+    PM->>DB: Store validated request with agent_name
 
-    PM->>SPRM: POST /api/v1/service-type-instances<br/>{agentName, serviceType, spec}
+    PM->>SPRM: POST /api/v1/service-type-instances<br/>{agent_name, service_type, spec}
 
-    SPRM->>AR: Lookup agent, get topicName
+    SPRM->>AR: Lookup agent, get topic_name
     alt Agent not found or unhealthy/Congested
         SPRM-->>PM: Error (404/503)
         PM->>DB: Delete records
@@ -854,28 +854,28 @@ sequenceDiagram
         CM-->>User: Agent unavailable
     end
 
-    SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topicName}<br/>{resourceId, serviceType, spec}
+    SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topic_name}<br/>{resource_id, service_type, spec}
     SPRM->>DB: Create instance record
-    SPRM-->>PM: 202 Accepted {instanceId, agentName, status: PENDING}
+    SPRM-->>PM: 202 Accepted {instance_id, agent_name, status: PENDING}
     PM-->>CM: 201 Created
     CM-->>User: Instance created (PENDING)
 
     Note over MS,AG: Async processing
     MS->>AG: Deliver creation request
     AG->>AG: Validate service type, select SP
-    AG->>SP: POST {spEndpoint}/api/v1/{serviceType}<br/>{spec}
-    SP-->>AG: {instanceId, status: PROVISIONING}
-    AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resourceId, agentName, topicName,<br/>status: PROVISIONING}
+    AG->>SP: POST {sp_endpoint}/api/v1/{service_type}<br/>{spec}
+    SP-->>AG: {instance_id, status: PROVISIONING}
+    AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resource_id, agent_name, topic_name,<br/>status: PROVISIONING}
     MS->>SPRM: Deliver response
     SPRM->>DB: Update instance: PROVISIONING
 
     opt Agent queues request (SP Unhealthy)
-        AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resourceId, status: QUEUED}
+        AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resource_id, status: QUEUED}
         MS->>SPRM: Deliver QUEUED response
         SPRM->>SPRM: Update instance: QUEUED
         SPRM->>PM: Notify: instance QUEUED
 
-        Note over PM: Start queuedRequestTimeout
+        Note over PM: Start queued_request_timeout
         alt Timeout or timeout = 0
             PM->>SPRM: DELETE instance
             PM->>PE: Re-evaluate excluding agent
@@ -893,7 +893,7 @@ holds the request in its retry topic and responds with a QUEUED CloudEvent. DCM
 records the QUEUED status. If the SP recovers, the Agent processes the held
 request. If the SP becomes Unavailable, the Agent rejects the held request with
 an error CloudEvent. The Placement Manager handles the QUEUED status via a
-`queuedRequestTimeout` timer (see
+`queued_request_timeout` timer (see
 [6.2 Placement Manager Flow](#62-placement-manager-flow)).
 
 ### 6.2 Placement Manager Flow
@@ -910,13 +910,13 @@ flowchart TD
     D --> E{Policy approved?}
     E -->|No| F[Delete intent record]
     F --> G[Return error to Catalog Manager]
-    E -->|Yes| H[Store validated request with agentName]
-    H --> I[Forward to SP Resource Manager<br/>with agentName, serviceType, spec]
+    E -->|Yes| H[Store validated request with agent_name]
+    H --> I[Forward to SP Resource Manager<br/>with agent_name, service_type, spec]
     I --> J{SPRM response?}
     J -->|Error| K[Delete records from Placement DB]
     K --> G
     J -->|202 Accepted| L[Return 201 Created<br/>to Catalog Manager]
-    J -->|QUEUED| M[Start queuedRequestTimeout timer]
+    J -->|QUEUED| M[Start queued_request_timeout timer]
     M --> N{Timeout?}
     N -->|Yes| O[Send DELETE to SPRM<br/>Re-evaluate excluding agent]
     O --> P{Alternative agent?}
@@ -930,11 +930,11 @@ flowchart TD
 {
   "CatalogItemInstance": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
   "spec": {
-    "serviceType": "vm",
+    "service_type": "vm",
     "memory": { "size": "2GB" },
     "vcpu": { "count": 2 },
-    "guestOS": { "type": "fedora-39" },
-    "access": { "sshPublicKey": "ssh-ed25519 ..." },
+    "guest_os": { "type": "fedora-39" },
+    "access": { "ssh_public_key": "ssh-ed25519 ..." },
     "metadata": { "name": "fedora-vm" }
   }
 }
@@ -946,7 +946,7 @@ flowchart TD
 {
   "CatalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
   "resource_name": "fedora-vm",
-  "agentName": "agent-prod-eu-west-1",
+  "agent_name": "agent-prod-eu-west-1",
   "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
 }
 ```
@@ -959,14 +959,14 @@ directly.
 
 ```mermaid
 flowchart TD
-    A[Receive request from Placement Manager<br/>agentName + serviceType + spec] --> B[Query Agent Registry<br/>by agentName]
+    A[Receive request from Placement Manager<br/>agent_name + service_type + spec] --> B[Query Agent Registry<br/>by agent_name]
     B --> C{Agent found?}
     C -->|No| D[Return 404 Not Found]
     C -->|Yes| E{Agent healthy<br/>and not Congested?}
     E -->|No| F[Return 503 Service Unavailable]
     E -->|Yes| G[Publish CloudEvent to agent topic<br/>via Messaging System]
     G --> H[Create instance record in DB]
-    H --> I[Return 202 Accepted<br/>instanceId, agentName, status: PENDING]
+    H --> I[Return 202 Accepted<br/>instance_id, agent_name, status: PENDING]
 ```
 
 ### 6.4 Service Provider Instance Creation
@@ -983,22 +983,22 @@ platform-native resources.
 flowchart LR
     subgraph KubeVirtSP[KubeVirt SP]
         A1[Receive VM spec] --> A2[Create VirtualMachine CR]
-        A2 --> A3[Return instanceId - PROVISIONING]
+        A2 --> A3[Return instance_id - PROVISIONING]
     end
 
     subgraph K8sContainerSP[K8s Container SP]
         B1[Receive Container spec] --> B2[Create Deployment and Service]
-        B2 --> B3[Return requestId - PENDING]
+        B2 --> B3[Return request_id - PENDING]
     end
 
     subgraph ACMClusterSP[ACM Cluster SP]
         C1[Receive Cluster spec] --> C2[Create HostedCluster and NodePool]
-        C2 --> C3[Return requestId - PENDING]
+        C2 --> C3[Return request_id - PENDING]
     end
 
     subgraph K8sStorageSP[K8s Storage SP]
         D1[Receive Storage spec] --> D2[Create PersistentVolumeClaim]
-        D2 --> D3[Return requestId - PROVISIONING]
+        D2 --> D3[Return request_id - PROVISIONING]
     end
 ```
 
@@ -1017,7 +1017,7 @@ flowchart TD
         A[Platform event detected<br/>via Informer watch or polling]
         A --> B[Map platform status<br/>to DCM status enum]
         B --> C[Build CloudEvent v1.0]
-        C --> D["Publish to NATS<br/>dcm.{serviceType}"]
+        C --> D["Publish to NATS<br/>dcm.{service_type}"]
     end
 
     subgraph DCM Core
@@ -1156,20 +1156,20 @@ sequenceDiagram
     participant SP as Service Provider
 
     User->>CM: Delete CatalogItemInstance
-    CM->>PM: DELETE /api/v1/resources/{resourceId}
-    PM->>DB: Lookup resource (agentName, serviceType, instanceId)
+    CM->>PM: DELETE /api/v1/resources/{resource_id}
+    PM->>DB: Lookup resource (agent_name, service_type, instance_id)
 
-    PM->>SPRM: DELETE /api/v1/service-type-instances/{instanceId}
-    SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topicName}<br/>type: dcm.request.delete<br/>{resourceId, serviceType}
+    PM->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}
+    SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topic_name}<br/>type: dcm.request.delete<br/>{resource_id, service_type}
     SPRM-->>PM: 202 Accepted
 
     MS->>AG: Deliver deletion request
-    AG->>SP: DELETE {spEndpoint}/api/v1/{serviceType}/{resourceId}
+    AG->>SP: DELETE {sp_endpoint}/api/v1/{service_type}/{resource_id}
     SP-->>AG: {status: DELETING}
-    AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resourceId, agentName, topicName,<br/>status: DELETING}
+    AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resource_id, agent_name, topic_name,<br/>status: DELETING}
 
     opt Agent queues request (SP Unhealthy)
-        AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resourceId, status: QUEUED}
+        AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resource_id, status: QUEUED}
         MS->>SPRM: Deliver QUEUED response
         SPRM->>SPRM: Update instance: QUEUED
         SPRM->>PM: Notify: deletion QUEUED
@@ -1177,11 +1177,11 @@ sequenceDiagram
         Note over PM: Resource stays DELETING.<br/>Deletion cannot be re-routed.<br/>Agent holds the request in its<br/>retry topic for automatic resolution.
 
         alt SP recovers — Agent processes held deletion
-            AG->>SP: DELETE {spEndpoint}/api/v1/{serviceType}/{resourceId}
+            AG->>SP: DELETE {sp_endpoint}/api/v1/{service_type}/{resource_id}
             SP-->>AG: {status: DELETING}
-            AG->>MS: PUBLISH CloudEvent<br/>{resourceId, status: DELETING}
+            AG->>MS: PUBLISH CloudEvent<br/>{resource_id, status: DELETING}
         else SP becomes Unavailable — Agent rejects
-            AG->>MS: PUBLISH CloudEvent<br/>{resourceId, error: "SP unavailable"}
+            AG->>MS: PUBLISH CloudEvent<br/>{resource_id, error: "SP unavailable"}
             MS->>SPRM: Deliver error
             Note over SPRM: Enqueue in cleanup queue<br/>for deferred retry.<br/>Resource stays DELETING.
         end

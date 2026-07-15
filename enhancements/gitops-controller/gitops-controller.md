@@ -124,7 +124,7 @@ and automatically deletes the corresponding CatalogItemInstance in DCM.
 #### GitRepository Resource Schema
 
 ```yaml
-apiVersion: v1alpha1
+api_version: v1alpha1
 kind: GitRepository
 metadata:
   name: production-apps
@@ -135,34 +135,34 @@ spec:
   path: "apps/production/"
   interval: 60s
   reconciliation:
-    retryPolicy:
-      maxRetries: 3
-      backoffSeconds: 30
+    retry_policy:
+      max_retries: 3
+      backoff_seconds: 30
 ```
 
 **Spec fields:**
 
-| Field                                            | Type     | Default  | Description                                                                                |
-| ------------------------------------------------ | -------- | -------- | ------------------------------------------------------------------------------------------ |
-| `spec.url`                                       | string   | required | Git repository URL                                                                         |
-| `spec.ref.branch`                                | string   | `main`   | Branch to watch                                                                            |
-| `spec.path`                                      | string   | `/`      | Directory within the repo; only YAML files at this path root are read (not subdirectories) |
-| `spec.interval`                                  | duration | `60s`    | Polling interval (min 10s)                                                                 |
-| `spec.reconciliation.retryPolicy.maxRetries`     | int      | `3`      | Max retries on submit failure                                                              |
-| `spec.reconciliation.retryPolicy.backoffSeconds` | int      | `30`     | Backoff between retries                                                                    |
+| Field                                              | Type     | Default  | Description                                                                                |
+| -------------------------------------------------- | -------- | -------- | ------------------------------------------------------------------------------------------ |
+| `spec.url`                                         | string   | required | Git repository URL                                                                         |
+| `spec.ref.branch`                                  | string   | `main`   | Branch to watch                                                                            |
+| `spec.path`                                        | string   | `/`      | Directory within the repo; only YAML files at this path root are read (not subdirectories) |
+| `spec.interval`                                    | duration | `60s`    | Polling interval (min 10s)                                                                 |
+| `spec.reconciliation.retry_policy.max_retries`     | int      | `3`      | Max retries on submit failure                                                              |
+| `spec.reconciliation.retry_policy.backoff_seconds` | int      | `30`     | Backoff between retries                                                                    |
 
 **Sync statuses:**
 
-| Status        | Meaning                                      |
-| ------------- | -------------------------------------------- |
-| `Synced`      | DCM state matches Git at `lastSyncedCommit`  |
-| `Error`       | Sync failed (auth, network, parse errors)    |
-| `In progress` | Lifecycle changes from Git are being applied |
+| Status        | Meaning                                       |
+| ------------- | --------------------------------------------- |
+| `Synced`      | DCM state matches Git at `last_synced_commit` |
+| `Error`       | Sync failed (auth, network, parse errors)     |
+| `In progress` | Lifecycle changes from Git are being applied  |
 
 **Sync status transitions:**
 
 - **Synced**: The controller sets the status to `Synced` when all
-  CatalogItemInstance YAML files present in Git at `lastSyncedCommit` have
+  CatalogItemInstance YAML files present in Git at `last_synced_commit` have
   corresponding instances in DCM, lifecycle operations from the latest
   reconciliation completed without failure, and no pending create or delete work
   remains.
@@ -250,7 +250,7 @@ flowchart TD
     K --> L[Classify created or deleted]
     L --> P["Set status In progress"]
     P --> M[Submit lifecycle changes to catalog]
-    M --> N[Update lastSyncedCommit]
+    M --> N[Update last_synced_commit]
     N --> F
 ```
 
@@ -334,7 +334,7 @@ sequenceDiagram
             Cat->>PM: Delete flow
             PM->>SPRM: Delete instance
         end
-        GC->>DB: Update lastSyncedCommit + status: Synced
+        GC->>DB: Update last_synced_commit + status: Synced
     end
 ```
 

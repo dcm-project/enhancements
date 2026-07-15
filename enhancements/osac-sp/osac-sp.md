@@ -204,7 +204,7 @@ the [environment agent enhancement](../environment-agent/environment-agent.md).
 DCM and OSAC maintain independent service catalogs. The OSAC SP does not expose
 OSAC's cluster catalog items to DCM, nor does DCM push its catalog definitions
 into OSAC. Instead, the OSAC SP maps DCM requests to OSAC templates via the
-`providerHints.osac.templateId` field. Administrators configure DCM catalog
+`provider_hints.osac.template_id` field. Administrators configure DCM catalog
 items that reference the appropriate OSAC template, keeping each system's
 catalog management self-contained.
 
@@ -265,11 +265,11 @@ sequenceDiagram
     participant DCM as DCM Control Plane
 
     Note over SP: Startup complete
-    SP->>AG: POST /api/v1/providers (serviceType: cluster)
+    SP->>AG: POST /api/v1/providers (service_type: cluster)
     AG-->>SP: 201 Created (lease TTL)
-    SP->>AG: POST /api/v1/providers (serviceType: vm)
+    SP->>AG: POST /api/v1/providers (service_type: vm)
     AG-->>SP: 201 Created (lease TTL)
-    AG->>DCM: Register agent (serviceTypes: [cluster, vm])
+    AG->>DCM: Register agent (service_types: [cluster, vm])
     DCM-->>AG: 200 OK
 
     loop Lease renewal
@@ -322,7 +322,7 @@ enhancement:
 
 - **Subject:** `dcm.cluster` or `dcm.vm`
 - **Type:** `dcm.status.cluster` or `dcm.status.vm`
-- **Source:** `dcm/providers/{providerName}`
+- **Source:** `dcm/providers/{provider_name}`
 
 ```mermaid
 sequenceDiagram
@@ -364,9 +364,10 @@ OSAC fulfillment service.
 The OSAC SP registers with the environment agent on startup. Since registration
 is per service type, the SP makes two registration calls. The two calls use
 **different `name` values** — the agent's registration endpoint is idempotent on
-`name` alone (not `name`+`serviceType`), so registering both service types under
-the same name would make the second call an _update_ of the first, overwriting
-the `cluster` registration's `serviceType` instead of adding a second one (see
+`name` alone (not `name`+`service_type`), so registering both service types
+under the same name would make the second call an _update_ of the first,
+overwriting the `cluster` registration's `service_type` instead of adding a
+second one (see
 [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md#update-service-provider-capabilities-flow)).
 The single OSAC SP process registers as two distinct named providers:
 
@@ -375,7 +376,7 @@ The single OSAC SP process registers as two distinct named providers:
 ```json
 {
   "name": "osac-sp-cluster",
-  "serviceType": "cluster",
+  "service_type": "cluster",
   "endpoint": "https://osac-sp.example.com/api/v1alpha1/clusters"
 }
 ```
@@ -385,7 +386,7 @@ The single OSAC SP process registers as two distinct named providers:
 ```json
 {
   "name": "osac-sp-vm",
-  "serviceType": "vm",
+  "service_type": "vm",
   "endpoint": "https://osac-sp.example.com/api/v1alpha1/vms"
 }
 ```
@@ -396,19 +397,19 @@ SP reports.
 
 #### Capability Advertisement
 
-| Field                       | Type     | Description                                        |
-| --------------------------- | -------- | -------------------------------------------------- |
-| supportedPlatforms          | []string | Platforms this SP can provision (baremetal)        |
-| supportedProvisioningTypes  | []string | Provisioning methods available (hypershift for v1) |
-| kubernetesSupportedVersions | []string | Kubernetes versions supported by this SP           |
+| Field                         | Type     | Description                                        |
+| ----------------------------- | -------- | -------------------------------------------------- |
+| supported_platforms           | []string | Platforms this SP can provision (baremetal)        |
+| supported_provisioning_types  | []string | Provisioning methods available (hypershift for v1) |
+| kubernetes_supported_versions | []string | Kubernetes versions supported by this SP           |
 
 OSAC has no capability-discovery API for these values — its
 [`Capabilities`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/capabilities_service.proto)
 service reports only authentication metadata (trusted OAuth token issuers), not
 supported platforms or versions. The SP therefore advertises
-`supportedPlatforms` and `supportedProvisioningTypes` as static values
+`supported_platforms` and `supported_provisioning_types` as static values
 (`baremetal`, `hypershift`), since OSAC currently supports nothing else.
-`kubernetesSupportedVersions` is a hardcoded compatibility list maintained by
+`kubernetes_supported_versions` is a hardcoded compatibility list maintained by
 the SP (see [Version Translation](#version-translation)), not a value queried
 from OSAC.
 
@@ -432,21 +433,21 @@ from the messaging topic to the appropriate SP based on service type.
 
 #### Cluster Endpoints
 
-| Method | Endpoint                           | Description               |
-| ------ | ---------------------------------- | ------------------------- |
-| POST   | /api/v1alpha1/clusters             | Create a new cluster      |
-| GET    | /api/v1alpha1/clusters             | List all clusters         |
-| GET    | /api/v1alpha1/clusters/{clusterId} | Get a cluster instance    |
-| DELETE | /api/v1alpha1/clusters/{clusterId} | Delete a cluster instance |
+| Method | Endpoint                            | Description               |
+| ------ | ----------------------------------- | ------------------------- |
+| POST   | /api/v1alpha1/clusters              | Create a new cluster      |
+| GET    | /api/v1alpha1/clusters              | List all clusters         |
+| GET    | /api/v1alpha1/clusters/{cluster_id} | Get a cluster instance    |
+| DELETE | /api/v1alpha1/clusters/{cluster_id} | Delete a cluster instance |
 
 #### VM Endpoints
 
-| Method | Endpoint                 | Description          |
-| ------ | ------------------------ | -------------------- |
-| POST   | /api/v1alpha1/vms        | Create a new VM      |
-| GET    | /api/v1alpha1/vms        | List all VMs         |
-| GET    | /api/v1alpha1/vms/{vmId} | Get a VM instance    |
-| DELETE | /api/v1alpha1/vms/{vmId} | Delete a VM instance |
+| Method | Endpoint                  | Description          |
+| ------ | ------------------------- | -------------------- |
+| POST   | /api/v1alpha1/vms         | Create a new VM      |
+| GET    | /api/v1alpha1/vms         | List all VMs         |
+| GET    | /api/v1alpha1/vms/{vm_id} | Get a VM instance    |
+| DELETE | /api/v1alpha1/vms/{vm_id} | Delete a VM instance |
 
 #### Common Endpoints
 
@@ -472,15 +473,15 @@ The OSAC SP translates the DCM cluster request into an
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                | OSAC Field               | Notes                                                                                                                  |
-| ------------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| resourceId               | id                       | DCM-issued identifier from the creation request, set as `Cluster.id` — see [Idempotent Creation](#idempotent-creation) |
-| version                  | spec.release_image       | SP translates K8s version to OCP image                                                                                 |
-| nodes.controlPlane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                                                                             |
-| nodes.worker.count       | spec.node_sets[key].size | Number of worker nodes for template's key                                                                              |
-| nodes.worker.cpu/memory  | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing)                                                         |
-| metadata.name            | metadata.name            | Cluster name (DNS label format)                                                                                        |
-| providerHints.osac       | (see below)              | OSAC-specific parameters                                                                                               |
+| DCM Field                 | OSAC Field               | Notes                                                                                                                  |
+| ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| resource_id               | id                       | DCM-issued identifier from the creation request, set as `Cluster.id` — see [Idempotent Creation](#idempotent-creation) |
+| version                   | spec.release_image       | SP translates K8s version to OCP image                                                                                 |
+| nodes.control_plane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                                                                             |
+| nodes.worker.count        | spec.node_sets[key].size | Number of worker nodes for template's key                                                                              |
+| nodes.worker.cpu/memory   | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing)                                                         |
+| metadata.name             | metadata.name            | Cluster name (DNS label format)                                                                                        |
+| provider_hints.osac       | (see below)              | OSAC-specific parameters                                                                                               |
 
 ##### Node Sizing
 
@@ -489,7 +490,7 @@ OSAC clusters use
 with `host_type` (a predefined identifier like `acme_1tb` from the
 [HostTypes service](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/host_types_service.proto))
 and `size` (node count). Node-set keys (e.g. `compute`, `gpu`) are also defined
-by the template, not a fixed `worker`/`controlPlane` split.
+by the template, not a fixed `worker`/`control_plane` split.
 
 Critically, `host_type` for each node-set key is **fixed by the OSAC cluster
 template selected for the request**:
@@ -505,7 +506,7 @@ DCM must therefore select a template whose node sets already provide the desired
 host type:
 
 - Each DCM catalog item for a cluster size tier (e.g. `small`, `medium`,
-  `large`) is configured with a different `providerHints.osac.templateId`, and
+  `large`) is configured with a different `provider_hints.osac.template_id`, and
   the corresponding OSAC template pre-defines the host type(s) appropriate for
   that tier.
 - `nodes.worker.cpu`/`memory`/`storage` in the DCM request are informational
@@ -520,15 +521,15 @@ host type:
 
 **Resolution:** reviewers agreed cluster sizing is coarser-grained than VM
 sizing for v1 — each DCM catalog size tier is configured with a
-`providerHints.osac.templateId` pointing at a pre-provisioned OSAC template for
-that tier, per the mapping above. The OSAC SP does **not** maintain an internal
-size-tier matrix — it is a pass-through: whatever `templateId` arrives in
-`providerHints.osac` is sent to OSAC as-is (see
+`provider_hints.osac.template_id` pointing at a pre-provisioned OSAC template
+for that tier, per the mapping above. The OSAC SP does **not** maintain an
+internal size-tier matrix — it is a pass-through: whatever `template_id` arrives
+in `provider_hints.osac` is sent to OSAC as-is (see
 [Catalog Independence](#catalog-independence)). The mapping is entirely
 expressed as DCM catalog item configuration, authored by whoever administers the
 DCM catalog. This still leaves DCM catalog size tiers and OSAC template tiers as
 two independently-maintained sources of truth: whoever adds a new DCM size tier
-must also ensure a matching OSAC template exists and wire the `templateId` by
+must also ensure a matching OSAC template exists and wire the `template_id` by
 hand, with no automated check that keeps them in sync. Accepted for v1 on the
 assumption that size tiers change infrequently; if catalog churn makes the
 manual wiring error-prone in practice, revisit whether DCM needs a way to query
@@ -537,22 +538,22 @@ keep both catalogs aligned.
 
 **Provider Hints (osac):**
 
-| Field        | Type   | Required | Description                                    |
-| ------------ | ------ | -------- | ---------------------------------------------- |
-| templateId   | string | Yes      | OSAC cluster template to use for provisioning  |
-| baseDomain   | string | No       | Base DNS domain for the cluster                |
-| pullSecret   | string | No       | Pull secret reference for cluster image pulls  |
-| sshKey       | string | No       | SSH public key for node access                 |
-| releaseImage | string | No       | Specific OCP release image (overrides version) |
+| Field         | Type   | Required | Description                                    |
+| ------------- | ------ | -------- | ---------------------------------------------- |
+| template_id   | string | Yes      | OSAC cluster template to use for provisioning  |
+| base_domain   | string | No       | Base DNS domain for the cluster                |
+| pull_secret   | string | No       | Pull secret reference for cluster image pulls  |
+| ssh_key       | string | No       | SSH public key for node access                 |
+| release_image | string | No       | Specific OCP release image (overrides version) |
 
 **Example Request Payload:**
 
 ```json
 {
-  "resourceId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "resource_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "version": "1.29",
   "nodes": {
-    "controlPlane": {
+    "control_plane": {
       "count": 3
     },
     "worker": {
@@ -565,17 +566,17 @@ keep both catalogs aligned.
   "metadata": {
     "name": "sovereign-ai-cluster-01"
   },
-  "providerHints": {
+  "provider_hints": {
     "osac": {
-      "templateId": "default-hcp",
-      "baseDomain": "moc.example.com"
+      "template_id": "default-hcp",
+      "base_domain": "moc.example.com"
     }
   },
-  "serviceType": "cluster"
+  "service_type": "cluster"
 }
 ```
 
-`resourceId` is generated by the environment agent's control-plane side (see
+`resource_id` is generated by the environment agent's control-plane side (see
 [Creation Request](../environment-agent/environment-agent.md#cloudevent-message-definitions))
 and forwarded unchanged through the agent to this endpoint. See
 [Idempotent Creation](#idempotent-creation) for how the SP uses it.
@@ -585,26 +586,26 @@ state:
 
 ```json
 {
-  "requestId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "name": "sovereign-ai-cluster-01",
   "status": "PROGRESSING",
   "platform": "baremetal",
   "version": "1.29",
-  "apiEndpoint": "",
-  "consoleUrl": "",
+  "api_endpoint": "",
+  "console_url": "",
   "nodes": {
-    "controlPlane": { "ready": 0, "total": 3 },
+    "control_plane": { "ready": 0, "total": 3 },
     "worker": { "ready": 0, "total": 3 }
   },
   "kubeconfig": "",
   "metadata": {
     "namespace": "sovereign-ai-cluster-01",
-    "createdAt": "2026-06-29T14:30:00Z"
+    "created_at": "2026-06-29T14:30:00Z"
   }
 }
 ```
 
-`requestId` in the response is the same value as `resourceId` in the request —
+`request_id` in the response is the same value as `resource_id` in the request —
 it is not a newly generated identifier (see
 [Idempotent Creation](#idempotent-creation)).
 
@@ -613,9 +614,9 @@ it is not a newly generated identifier (see
 - **400 Bad Request**: Invalid request payload or missing required fields
 - **401 Unauthorized**: OIDC token expired or invalid (SP-to-OSAC auth failure)
 - **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
-- **409 Conflict**: A cluster with the same `resourceId` or `metadata.name`
+- **409 Conflict**: A cluster with the same `resource_id` or `metadata.name`
   already exists — see [Idempotent Creation](#idempotent-creation) for how a
-  `resourceId` conflict is handled
+  `resource_id` conflict is handled
 - **422 Unprocessable Entity**: No suitable host_type for requested resources
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -633,34 +634,34 @@ The OSAC SP translates the DCM VM request into a
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                     | OSAC Field              | Notes                                                                                                                          |
-| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| resourceId                    | id                      | DCM-issued identifier from the creation request, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
-| vcpu.count                    | spec.cores              | Only when `providerHints.osac.instanceType` is unset — see below                                                               |
-| memory.size                   | spec.memory_gib         | Convert to GiB integer; only when `instanceType` is unset                                                                      |
-| storage.disks[boot].capacity  | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                                          |
-| storage.disks[*]              | spec.additional_disks   | Additional disks                                                                                                               |
-| guestOS.type                  | spec.image              | Mapped to image source_ref                                                                                                     |
-| access.sshPublicKey           | spec.ssh_key            | SSH public key                                                                                                                 |
-| metadata.name                 | metadata.name           | Instance name (DNS label)                                                                                                      |
-| providerHints.osac.templateId | spec.template           | OSAC template reference                                                                                                        |
+| DCM Field                       | OSAC Field              | Notes                                                                                                                          |
+| ------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| resource_id                     | id                      | DCM-issued identifier from the creation request, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
+| vcpu.count                      | spec.cores              | Only when `provider_hints.osac.instance_type` is unset — see below                                                             |
+| memory.size                     | spec.memory_gib         | Convert to GiB integer; only when `instance_type` is unset                                                                     |
+| storage.disks[boot].capacity    | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                                          |
+| storage.disks[*]                | spec.additional_disks   | Additional disks                                                                                                               |
+| guest_os.type                   | spec.image              | Mapped to image source_ref                                                                                                     |
+| access.ssh_public_key           | spec.ssh_key            | SSH public key                                                                                                                 |
+| metadata.name                   | metadata.name           | Instance name (DNS label)                                                                                                      |
+| provider_hints.osac.template_id | spec.template           | OSAC template reference                                                                                                        |
 
-As with cluster creation, `resourceId` is generated by the environment agent's
+As with cluster creation, `resource_id` is generated by the environment agent's
 control-plane side and forwarded unchanged through the agent to this endpoint —
 see [Idempotent Creation](#idempotent-creation).
 
 **Provider Hints (osac) for VMs:**
 
-| Field        | Type   | Required | Description                                                           |
-| ------------ | ------ | -------- | --------------------------------------------------------------------- |
-| templateId   | string | Yes      | OSAC compute instance template                                        |
-| instanceType | string | No       | OSAC instance_type name; mutually exclusive with `cores`/`memory_gib` |
-| isWindows    | bool   | No       | Windows guest OS flag                                                 |
+| Field         | Type   | Required | Description                                                           |
+| ------------- | ------ | -------- | --------------------------------------------------------------------- |
+| template_id   | string | Yes      | OSAC compute instance template                                        |
+| instance_type | string | No       | OSAC instance_type name; mutually exclusive with `cores`/`memory_gib` |
+| is_windows    | bool   | No       | Windows guest OS flag                                                 |
 
 `instance_type` and `cores`/`memory_gib` are mutually exclusive on
 `ComputeInstances/Create` — setting both is rejected. When
-`providerHints.osac.instanceType` is set, the SP sends `spec.instance_type` and
-omits `spec.cores`/`spec.memory_gib` entirely (dropping `vcpu.count`/
+`provider_hints.osac.instance_type` is set, the SP sends `spec.instance_type`
+and omits `spec.cores`/`spec.memory_gib` entirely (dropping `vcpu.count`/
 `memory.size` from the request). When it's unset, the SP falls back to the
 direct `cores`/`memory_gib` mapping, which OSAC currently accepts but flags as
 deprecated (see [VM Sizing](#vm-sizing)).
@@ -694,17 +695,17 @@ fields is set.
 
 ```json
 {
-  "requestId": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+  "request_id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
   "name": "ai-worker-01",
   "status": "PROVISIONING",
   "metadata": {
     "namespace": "ai-worker-01",
-    "createdAt": "2026-06-29T15:00:00Z"
+    "created_at": "2026-06-29T15:00:00Z"
   }
 }
 ```
 
-`requestId` in the response is the same value as `resourceId` in the request —
+`request_id` in the response is the same value as `resource_id` in the request —
 see [Idempotent Creation](#idempotent-creation).
 
 **Error Handling:**
@@ -712,9 +713,9 @@ see [Idempotent Creation](#idempotent-creation).
 - **400 Bad Request**: Invalid request payload or missing required fields
 - **401 Unauthorized**: OIDC token expired or invalid
 - **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
-- **409 Conflict**: A VM with the same `resourceId` or `metadata.name` already
+- **409 Conflict**: A VM with the same `resource_id` or `metadata.name` already
   exists — see [Idempotent Creation](#idempotent-creation) for how a
-  `resourceId` conflict is handled
+  `resource_id` conflict is handled
 - **422 Unprocessable Entity**: Unsupported configuration
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -742,20 +743,20 @@ results to resources it manages.
 {
   "results": [
     {
-      "requestId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "sovereign-ai-cluster-01",
       "status": "ACTIVE",
       "platform": "baremetal",
       "version": "1.29",
-      "apiEndpoint": "https://api.sovereign-ai-cluster-01.moc.example.com:6443",
-      "consoleUrl": "https://console-openshift-console.apps.sovereign-ai-cluster-01.moc.example.com",
+      "api_endpoint": "https://api.sovereign-ai-cluster-01.moc.example.com:6443",
+      "console_url": "https://console-openshift-console.apps.sovereign-ai-cluster-01.moc.example.com",
       "nodes": {
-        "controlPlane": { "ready": 3, "total": 3 },
+        "control_plane": { "ready": 3, "total": 3 },
         "worker": { "ready": 3, "total": 3 }
       },
       "metadata": {
         "namespace": "sovereign-ai-cluster-01",
-        "createdAt": "2026-06-29T14:30:00Z"
+        "created_at": "2026-06-29T14:30:00Z"
       }
     }
   ],
@@ -771,15 +772,15 @@ results to resources it manages.
 - **500 Internal Server Error**: Unexpected error querying OSAC
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
 
-#### GET /api/v1alpha1/clusters/{clusterId}
+#### GET /api/v1alpha1/clusters/{cluster_id}
 
 **Description:** Get a specific cluster instance.
 
 **Process Flow:**
 
-1. Handler receives `GET` request with `clusterId` path parameter.
+1. Handler receives `GET` request with `cluster_id` path parameter.
 2. Calls `osac.public.v1.Clusters/Get` gRPC method using the stored OSAC cluster
-   ID mapped to `clusterId`.
+   ID mapped to `cluster_id`.
 3. Translates OSAC cluster status to DCM response format.
 4. When cluster reaches `ACTIVE` status, retrieves credentials via
    `osac.public.v1.Clusters/GetKubeconfig`.
@@ -796,11 +797,11 @@ results to resources it manages.
 
 - **401 Unauthorized**: OIDC token expired or invalid
 - **403 Forbidden**: Insufficient permissions
-- **404 Not Found**: Cluster with the specified `clusterId` does not exist
+- **404 Not Found**: Cluster with the specified `cluster_id` does not exist
 - **500 Internal Server Error**: Unexpected error querying OSAC
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
 
-#### DELETE /api/v1alpha1/clusters/{clusterId}
+#### DELETE /api/v1alpha1/clusters/{cluster_id}
 
 **Description:** Delete a cluster instance.
 
@@ -846,7 +847,7 @@ sequenceDiagram
     participant FS as OSAC Fulfillment Service
     participant OP as OSAC Operator
 
-    AG->>SP: DELETE /api/v1alpha1/clusters/{clusterId}
+    AG->>SP: DELETE /api/v1alpha1/clusters/{cluster_id}
     SP->>SP: Look up OSAC ID from mapping store
     SP->>FS: osac.public.v1.Clusters/Delete (gRPC)
     FS->>FS: Set deletion_timestamp (record still returned by Get/List)
@@ -862,11 +863,11 @@ sequenceDiagram
 
 - **401 Unauthorized**: OIDC token expired or invalid
 - **403 Forbidden**: Insufficient permissions
-- **404 Not Found**: Cluster with the specified `clusterId` does not exist
+- **404 Not Found**: Cluster with the specified `cluster_id` does not exist
 - **500 Internal Server Error**: Unexpected error during deletion
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
 
-#### GET /api/v1alpha1/vms (List) / GET /api/v1alpha1/vms/{vmId} / DELETE /api/v1alpha1/vms/{vmId}
+#### GET /api/v1alpha1/vms (List) / GET /api/v1alpha1/vms/{vm_id} / DELETE /api/v1alpha1/vms/{vm_id}
 
 VM endpoints follow the same patterns as cluster endpoints, using
 `osac.public.v1.ComputeInstances` methods (`List`, `Get`, `Delete`). Pagination
@@ -890,10 +891,10 @@ The health check verifies:
 Per the
 [environment agent's message definitions](../environment-agent/environment-agent.md#cloudevent-message-definitions),
 the `dcm.request.create` event DCM publishes already carries a DCM-generated
-`resourceId`, specifically so that a duplicate delivery — e.g. after a
+`resource_id`, specifically so that a duplicate delivery — e.g. after a
 [split-brain agent failover](../environment-agent/environment-agent.md#risks-and-mitigations)
 — can be recognized as a retry instead of creating a second resource. The agent
-forwards this `resourceId` unchanged in the `POST` body to the SP.
+forwards this `resource_id` unchanged in the `POST` body to the SP.
 
 OSAC's fulfillment service already supports this pattern natively: its generic
 create path
@@ -932,9 +933,9 @@ if errors.As(err, &alreadyExistsErr) {
 }
 ```
 
-The OSAC SP sets `resourceId` as `Cluster.id`/`ComputeInstance.id` on every
+The OSAC SP sets `resource_id` as `Cluster.id`/`ComputeInstance.id` on every
 `Create` call instead of leaving it empty. On a retried request with the same
-`resourceId`, OSAC's `AlreadyExists` response is treated as success: the SP
+`resource_id`, OSAC's `AlreadyExists` response is treated as success: the SP
 fetches the existing object by `id` and returns it as if the create had just
 succeeded, rather than surfacing an error to DCM.
 
@@ -946,39 +947,39 @@ sequenceDiagram
     participant FS as OSAC Fulfillment Service
 
     Note over DCM,AG: Normal path
-    DCM->>AG: PUBLISH dcm.request.create<br/>{resourceId, serviceType, spec}
-    AG->>SP: POST /api/v1alpha1/clusters<br/>{resourceId, ...spec}
-    SP->>FS: Clusters/Create<br/>(Cluster.id = resourceId)
+    DCM->>AG: PUBLISH dcm.request.create<br/>{resource_id, service_type, spec}
+    AG->>SP: POST /api/v1alpha1/clusters<br/>{resource_id, ...spec}
+    SP->>FS: Clusters/Create<br/>(Cluster.id = resource_id)
     FS-->>SP: 201 Created
-    SP-->>AG: 201 Created {requestId: resourceId}
-    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resourceId, status: PROVISIONING}
+    SP-->>AG: 201 Created {request_id: resource_id}
+    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resource_id, status: PROVISIONING}
 
-    Note over DCM,AG: Retry path — same resourceId,<br/>e.g. after agent failover mid-flight
-    DCM->>AG: PUBLISH dcm.request.create<br/>{resourceId, serviceType, spec}
-    AG->>SP: POST /api/v1alpha1/clusters<br/>{resourceId, ...spec}
-    SP->>FS: Clusters/Create<br/>(Cluster.id = resourceId)
+    Note over DCM,AG: Retry path — same resource_id,<br/>e.g. after agent failover mid-flight
+    DCM->>AG: PUBLISH dcm.request.create<br/>{resource_id, service_type, spec}
+    AG->>SP: POST /api/v1alpha1/clusters<br/>{resource_id, ...spec}
+    SP->>FS: Clusters/Create<br/>(Cluster.id = resource_id)
     FS-->>SP: AlreadyExists (id already taken)
-    SP->>FS: Clusters/Get(resourceId)
+    SP->>FS: Clusters/Get(resource_id)
     FS-->>SP: Existing Cluster object
-    SP-->>AG: 201 Created {requestId: resourceId}<br/>(idempotent — no duplicate created)
-    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resourceId, status: PROVISIONING}
+    SP-->>AG: 201 Created {request_id: resource_id}<br/>(idempotent — no duplicate created)
+    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resource_id, status: PROVISIONING}
 ```
 
 #### ID Mapping
 
-Because `resourceId` is set directly as OSAC's own `id` at creation time (see
+Because `resource_id` is set directly as OSAC's own `id` at creation time (see
 [Idempotent Creation](#idempotent-creation)), the two identifiers are the same
 value — the SP does not need a separate translation table to go from a DCM
 identifier to an OSAC one. `GET`/`DELETE` on
-`/api/v1alpha1/clusters/{clusterId}` and `/api/v1alpha1/vms/{vmId}` use that
+`/api/v1alpha1/clusters/{cluster_id}` and `/api/v1alpha1/vms/{vm_id}` use that
 same value directly as OSAC's `id` (see
 [Status Mapping](#status-mapping-osac-to-dcm)).
 
 **Rehydration:** From the SP's perspective, rehydration is indistinguishable
 from an ordinary create followed by an ordinary delete for a different
-`resourceId` — the SP has no rehydration-specific logic. See
+`resource_id` — the SP has no rehydration-specific logic. See
 [Rehydration Flow](../rehydration-flow/rehydration-flow.md) for how DCM
-generates the new `resourceId` and defers the old resource's deletion.
+generates the new `resource_id` and defers the old resource's deletion.
 
 #### Ownership Tracking
 
@@ -987,7 +988,7 @@ The SP sets
 on every created resource:
 
 - `metadata.labels["dcm.io/managed-by"] = "dcm"`
-- `metadata.labels["dcm.io/instance-id"] = "<resourceId>"`
+- `metadata.labels["dcm.io/instance-id"] = "<resource_id>"`
 - `metadata.labels["dcm.io/service-type"] = "cluster"` or `"vm"`
 
 `dcm.io/instance-id` duplicates the object's own `id` (see

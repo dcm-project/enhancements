@@ -114,9 +114,9 @@ instances managed by the SP and cannot be overridden per-container.
 
 #### Networking Configuration
 
-| Field               | Type   | Required | Description                                                       |
-| ------------------- | ------ | -------- | ----------------------------------------------------------------- |
-| externalServiceType | string | Yes      | Service type for `external` visibility (LoadBalancer or NodePort) |
+| Field                 | Type   | Required | Description                                                       |
+| --------------------- | ------ | -------- | ----------------------------------------------------------------- |
+| external_service_type | string | Yes      | Service type for `external` visibility (LoadBalancer or NodePort) |
 
 Service creation is driven by the per-port `visibility` field defined in the
 Container Port schema (see
@@ -128,7 +128,7 @@ Each port declares its visibility as `none`, `internal`, or `external`:
 - When all non-none ports have `visibility=internal`, the Service type is
   `ClusterIP`.
 - When any port has `visibility=external`, the Service type is the configured
-  `externalServiceType`.
+  `external_service_type`.
 - When all ports have `visibility=none` (or no ports exist), no Service is
   created.
 
@@ -146,17 +146,17 @@ Example request payload:
 ```json
 {
   "name": "k8s-container-sp",
-  "serviceType": "container",
-  "schemaVersion": "v1alpha1",
-  "displayName": "Kubernetes Container Service Provider",
+  "service_type": "container",
+  "schema_version": "v1alpha1",
+  "display_name": "Kubernetes Container Service Provider",
   "endpoint": "https://k8s-container-sp.example.com/api/v1alpha1/containers",
   "operations": ["CREATE", "DELETE", "READ"],
   "metadata": {
     "zone": "us-east-1b",
-    "regionCode": "us-east-1",
+    "region_code": "us-east-1",
     "resources": {
-      "totalCpu": "200",
-      "totalMemory": "2TB"
+      "total_cpu": "200",
+      "total_memory": "2TB"
     }
   }
 }
@@ -170,8 +170,8 @@ the
 
 **K8s Container SP-specific requirements:**
 
-- `serviceType` field must be set to `"container"`
-- `schemaVersion` field must be set to `"v1alpha1"`
+- `service_type` field must be set to `"container"`
+- `schema_version` field must be set to `"v1alpha1"`
 - `operations` field must include at minimum: `CREATE`, `READ`, `DELETE`
 - `metadata.resources` fields may or may not define the cluster capacity **at
   the time of registration**
@@ -191,13 +191,13 @@ resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                               | Description                   |
-| ------ | -------------------------------------- | ----------------------------- |
-| POST   | /api/v1alpha1/containers               | Create a new container        |
-| GET    | /api/v1alpha1/containers               | List all containers           |
-| GET    | /api/v1alpha1/containers/{containerId} | Get a container instance      |
-| DELETE | /api/v1alpha1/containers/{containerId} | Delete a container instance   |
-| GET    | /api/v1alpha1/containers/health        | K8s Container SP health check |
+| Method | Endpoint                                | Description                   |
+| ------ | --------------------------------------- | ----------------------------- |
+| POST   | /api/v1alpha1/containers                | Create a new container        |
+| GET    | /api/v1alpha1/containers                | List all containers           |
+| GET    | /api/v1alpha1/containers/{container_id} | Get a container instance      |
+| DELETE | /api/v1alpha1/containers/{container_id} | Delete a container instance   |
+| GET    | /api/v1alpha1/containers/health         | K8s Container SP health check |
 
 ##### AEP Compliance
 
@@ -223,20 +223,20 @@ be labeled with:
 The `dcm-instance-id` is a unique identifier — either a server-generated UUID or
 a client-specified ID provided via the `?id=` query parameter (validated against
 AEP-122 pattern `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`). Kubernetes resource
-names are server-assigned using the `generateName` mechanism with
+names are server-assigned using the `generate_name` mechanism with
 `metadata.name` as the prefix (e.g., `"web-app-"`). If a container with the same
 `dcm-instance-id` already exists, the K8s Container SP returns a `409 Conflict`
 error response without modifying the existing resource.
 
-**providerHints:**
+**provider_hints:**
 
-The request body supports an optional `providerHints` field (type: object,
+The request body supports an optional `provider_hints` field (type: object,
 additionalProperties: true) as defined in the
 [Service Type Definitions](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#providerhints-object).
-The SP accepts `providerHints` on input but does not act on hint content in the
+The SP accepts `provider_hints` on input but does not act on hint content in the
 current implementation.
 
-> **Note**: It is not yet designed how `providerHints` can be leveraged within
+> **Note**: It is not yet designed how `provider_hints` can be leveraged within
 > the DCM control plane to influence provider behavior. As a result, Service
 > creation is currently driven by the per-port `visibility` field (see
 > Networking Configuration above), which is the canonical approach. Future
@@ -248,7 +248,7 @@ current implementation.
 ```json
 {
   "spec": {
-    "serviceType": "container",
+    "service_type": "container",
     "metadata": {
       "name": "web-app"
     },
@@ -267,8 +267,8 @@ current implementation.
     },
     "network": {
       "ports": [
-        { "containerPort": 8080, "visibility": "external" },
-        { "containerPort": 9090, "visibility": "internal" }
+        { "container_port": 8080, "visibility": "external" },
+        { "container_port": 9090, "visibility": "internal" }
       ]
     }
   }
@@ -278,8 +278,9 @@ current implementation.
 The request and response use the same `Container` schema. The `spec` field
 contains the container input fields as defined in the
 [Container Schema](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#containers).
-Server-generated read-only fields (`id`, `path`, `status`, `createTime`,
-`updateTime`, `service`, `spec.metadata.namespace`) appear only in the response.
+Server-generated read-only fields (`id`, `path`, `status`, `create_time`,
+`update_time`, `service`, `spec.metadata.namespace`) appear only in the
+response.
 
 **Response:** Returns `201 Created` with the following payload. The status is
 set to `PENDING` after the resource is created.
@@ -291,10 +292,10 @@ set to `PENDING` after the resource is created.
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "path": "containers/123e4567-e89b-12d3-a456-426614174000",
   "status": "PENDING",
-  "createTime": "2026-01-21T10:00:00Z",
-  "updateTime": "2026-01-21T10:00:00Z",
+  "create_time": "2026-01-21T10:00:00Z",
+  "update_time": "2026-01-21T10:00:00Z",
   "spec": {
-    "serviceType": "container",
+    "service_type": "container",
     "metadata": {
       "name": "web-app",
       "namespace": "production"
@@ -314,18 +315,18 @@ set to `PENDING` after the resource is created.
     },
     "network": {
       "ports": [
-        { "containerPort": 8080, "visibility": "external" },
-        { "containerPort": 9090, "visibility": "internal" }
+        { "container_port": 8080, "visibility": "external" },
+        { "container_port": 9090, "visibility": "internal" }
       ]
     }
   },
   "service": {
     "name": "web-app-k7x2m",
-    "clusterIP": "10.96.45.12",
+    "cluster_ip": "10.96.45.12",
     "type": "LoadBalancer",
     "ports": [
-      { "port": 8080, "targetPort": 8080, "protocol": "TCP" },
-      { "port": 9090, "targetPort": 9090, "protocol": "TCP" }
+      { "port": 8080, "target_port": 8080, "protocol": "TCP" },
+      { "port": 9090, "target_port": 9090, "protocol": "TCP" }
     ]
   }
 }
@@ -350,16 +351,16 @@ set to `PENDING` after the resource is created.
 
 **Query Parameters:**
 
-- `maxPageSize` (optional): Maximum number of resources to return in a single
+- `max_page_size` (optional): Maximum number of resources to return in a single
   page. Default: 50.
-- `pageToken` (optional): Token indicating the starting point for the page.
+- `page_token` (optional): Token indicating the starting point for the page.
 
 **Process Flow:**
 
 1. Handler receives `GET` request with optional pagination parameters.
 2. Calls `ListContainersFromCluster()` with pagination context.
 3. Returns fully-populated container resources per AEP-132.
-4. Response includes pagination metadata (`nextPageToken`).
+4. Response includes pagination metadata (`next_page_token`).
 
 **Example Response Payload:**
 
@@ -370,10 +371,10 @@ set to `PENDING` after the resource is created.
       "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "path": "containers/696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "status": "RUNNING",
-      "createTime": "2026-01-20T08:00:00Z",
-      "updateTime": "2026-01-20T08:01:30Z",
+      "create_time": "2026-01-20T08:00:00Z",
+      "update_time": "2026-01-20T08:01:30Z",
       "spec": {
-        "serviceType": "container",
+        "service_type": "container",
         "metadata": {
           "name": "web-app",
           "namespace": "production"
@@ -386,19 +387,19 @@ set to `PENDING` after the resource is created.
         "network": {
           "ip": "10.244.0.25",
           "ports": [
-            { "containerPort": 8080, "visibility": "external" },
-            { "containerPort": 9090, "visibility": "internal" }
+            { "container_port": 8080, "visibility": "external" },
+            { "container_port": 9090, "visibility": "internal" }
           ]
         }
       },
       "service": {
         "name": "web-app-k7x2m",
-        "clusterIP": "10.96.45.12",
+        "cluster_ip": "10.96.45.12",
         "type": "LoadBalancer",
-        "externalIP": "34.123.45.67",
+        "external_ip": "34.123.45.67",
         "ports": [
-          { "port": 8080, "targetPort": 8080, "protocol": "TCP" },
-          { "port": 9090, "targetPort": 9090, "protocol": "TCP" }
+          { "port": 8080, "target_port": 8080, "protocol": "TCP" },
+          { "port": 9090, "target_port": 9090, "protocol": "TCP" }
         ]
       }
     },
@@ -406,10 +407,10 @@ set to `PENDING` after the resource is created.
       "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
       "path": "containers/c66be104-eea3-4246-975c-e6cc9b32d74d",
       "status": "FAILED",
-      "createTime": "2026-01-20T09:00:00Z",
-      "updateTime": "2026-01-20T09:02:00Z",
+      "create_time": "2026-01-20T09:00:00Z",
+      "update_time": "2026-01-20T09:02:00Z",
       "spec": {
-        "serviceType": "container",
+        "service_type": "container",
         "metadata": {
           "name": "api-gateway",
           "namespace": "production"
@@ -421,24 +422,24 @@ set to `PENDING` after the resource is created.
         },
         "network": {
           "ip": "10.244.0.26",
-          "ports": [{ "containerPort": 3000, "visibility": "internal" }]
+          "ports": [{ "container_port": 3000, "visibility": "internal" }]
         }
       },
       "service": {
         "name": "api-gateway-m9p3q",
-        "clusterIP": "10.96.45.13",
+        "cluster_ip": "10.96.45.13",
         "type": "ClusterIP",
-        "ports": [{ "port": 3000, "targetPort": 3000, "protocol": "TCP" }]
+        "ports": [{ "port": 3000, "target_port": 3000, "protocol": "TCP" }]
       }
     },
     {
       "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
       "path": "containers/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
       "status": "PENDING",
-      "createTime": "2026-01-20T10:00:00Z",
-      "updateTime": "2026-01-20T10:00:00Z",
+      "create_time": "2026-01-20T10:00:00Z",
+      "update_time": "2026-01-20T10:00:00Z",
       "spec": {
-        "serviceType": "container",
+        "service_type": "container",
         "metadata": {
           "name": "worker-service",
           "namespace": "production"
@@ -449,12 +450,12 @@ set to `PENDING` after the resource is created.
           "memory": { "min": "1GB", "max": "4GB" }
         },
         "network": {
-          "ports": [{ "containerPort": 5000, "visibility": "none" }]
+          "ports": [{ "container_port": 5000, "visibility": "none" }]
         }
       }
     }
   ],
-  "nextPageToken": "a1b2c3d4e5f6"
+  "next_page_token": "a1b2c3d4e5f6"
 }
 ```
 
@@ -462,7 +463,7 @@ set to `PENDING` after the resource is created.
 AEP-132. Each container instance includes all fields (read-only envelope fields
 plus the full `spec` with all input fields echoed back) to match the detail
 level of the GET single resource endpoint. The `service` field is omitted for
-containers where all ports have `visibility=none`. The `externalIP` field is
+containers where all ports have `visibility=none`. The `external_ip` field is
 included only for LoadBalancer type Services when an external IP has been
 assigned.
 
@@ -471,20 +472,20 @@ assigned.
 - **400 Bad Request**: Invalid pagination parameters
 - **500 Internal Server Error**: Unexpected error querying Kubernetes API
 
-#### GET /api/v1alpha1/containers/{containerId}
+#### GET /api/v1alpha1/containers/{container_id}
 
 **Description:** Get a specific container instance.
 
 **Process Flow:**
 
-1. Handler receives `GET` request with `containerId` path parameter.
+1. Handler receives `GET` request with `container_id` path parameter.
 2. Calls `GetContainerFromCluster(containerId)`.
 3. Cluster lookup: Query Kubernetes API for `Deployment` with matching
    `dcm.project/dcm-instance-id` label.
 4. Pod details: Query `Pod` for runtime information. Extract IP address from Pod
    status. Extract current phase (`Running`, `Pending`, etc.).
 5. Service details: Query `Service` with matching `dcm.project/dcm-instance-id`
-   label. Extract clusterIP, type, and externalIP (if applicable).
+   label. Extract cluster_ip, type, and external_ip (if applicable).
 6. Response payload: Return complete container instance object.
 
 **Example Response Payload:**
@@ -494,10 +495,10 @@ assigned.
   "id": "123e4567-e89b-12d3-a456-426614174000",
   "path": "containers/123e4567-e89b-12d3-a456-426614174000",
   "status": "RUNNING",
-  "createTime": "2026-01-21T10:00:00Z",
-  "updateTime": "2026-01-21T10:01:30Z",
+  "create_time": "2026-01-21T10:00:00Z",
+  "update_time": "2026-01-21T10:01:30Z",
   "spec": {
-    "serviceType": "container",
+    "service_type": "container",
     "metadata": {
       "name": "web-app",
       "namespace": "production"
@@ -518,19 +519,19 @@ assigned.
     "network": {
       "ip": "10.244.0.25",
       "ports": [
-        { "containerPort": 8080, "visibility": "external" },
-        { "containerPort": 9090, "visibility": "internal" }
+        { "container_port": 8080, "visibility": "external" },
+        { "container_port": 9090, "visibility": "internal" }
       ]
     }
   },
   "service": {
     "name": "web-app-k7x2m",
-    "clusterIP": "10.96.45.12",
+    "cluster_ip": "10.96.45.12",
     "type": "LoadBalancer",
-    "externalIP": "34.123.45.67",
+    "external_ip": "34.123.45.67",
     "ports": [
-      { "port": 8080, "targetPort": 8080, "protocol": "TCP" },
-      { "port": 9090, "targetPort": 9090, "protocol": "TCP" }
+      { "port": 8080, "target_port": 8080, "protocol": "TCP" },
+      { "port": 9090, "target_port": 9090, "protocol": "TCP" }
     ]
   }
 }
@@ -546,10 +547,10 @@ assigned.
 
 **Error Handling:**
 
-- **404 Not Found**: Container with the specified `containerId` does not exist
+- **404 Not Found**: Container with the specified `container_id` does not exist
 - **500 Internal Server Error**: Unexpected error querying Kubernetes API
 
-#### DELETE /api/v1alpha1/containers/{containerId}
+#### DELETE /api/v1alpha1/containers/{container_id}
 
 **Description:** Delete a container instance.
 
@@ -559,7 +560,7 @@ Remove a single container instance (`Deployment` with cascading delete for
 
 **Error Handling:**
 
-- **404 Not Found**: Container with the specified `containerId` does not exist
+- **404 Not Found**: Container with the specified `container_id` does not exist
 - **500 Internal Server Error**: Unexpected error during resource deletion
 
 #### GET /api/v1alpha1/containers/health
@@ -621,7 +622,7 @@ from both resource types using the following precedence rules:
 - Status updates are debounced to avoid flooding the messaging system during
   rapid status oscillation (e.g., running→error→running within milliseconds)
 - Status updates are published to the messaging system using CloudEvents format
-- The `instanceId` of the DCM resource is stored in the label
+- The `instance_id` of the DCM resource is stored in the label
   `dcm.project/dcm-instance-id`
 
 For detailed implementation of the `SharedIndexInformer` pattern (setup phase,
@@ -640,14 +641,14 @@ subject `dcm.container`.
 
 **CloudEvent Attributes:**
 
-| Attribute       | Value                          |
-| --------------- | ------------------------------ |
-| specversion     | 1.0                            |
-| id              | Unique event identifier (UUID) |
-| source          | `dcm/providers/{providerName}` |
-| type            | `dcm.status.container`         |
-| subject         | `dcm.container`                |
-| datacontenttype | `application/json`             |
+| Attribute       | Value                           |
+| --------------- | ------------------------------- |
+| specversion     | 1.0                             |
+| id              | Unique event identifier (UUID)  |
+| source          | `dcm/providers/{provider_name}` |
+| type            | `dcm.status.container`          |
+| subject         | `dcm.container`                 |
+| datacontenttype | `application/json`              |
 
 **Data Payload Structure:**
 

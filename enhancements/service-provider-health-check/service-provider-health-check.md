@@ -67,15 +67,16 @@ monitors Agent health via periodic REST heartbeats and tracks consumer lag.
      - **Success Criteria:** HTTP 200 OK.
 
 2. **Agent Health Monitoring (Agent → DCM):**
-   - **Mechanism:** Agent sends `PUT /api/v1/agents/{agentId}/heartbeat` to DCM.
-   - **Frequency:** Every `heartbeatInterval` seconds (configurable).
+   - **Mechanism:** Agent sends `PUT /api/v1/agents/{agent_id}/heartbeat` to
+     DCM.
+   - **Frequency:** Every `heartbeat_interval` seconds (configurable).
    - **Failure:** If no heartbeat within configurable threshold, DCM marks agent
      as Unavailable.
 
 3. **Consumer Lag Monitoring:**
    - Agent self-reports consumer lag in heartbeat payload
-     `{timestamp, consumerLag}`.
-   - DCM marks agent as **Congested** when lag exceeds `consumerLagThreshold`.
+     `{timestamp, consumer_lag}`.
+   - DCM marks agent as **Congested** when lag exceeds `consumer_lag_threshold`.
    - DCM stops routing new requests to a Congested agent.
 
 ### Health Check Flow
@@ -128,9 +129,9 @@ full details on retry topic behavior.
 The Agent reports its own liveness to DCM via periodic REST heartbeats. DCM
 tracks the last heartbeat timestamp for each agent.
 
-- **Endpoint:** `PUT /api/v1/agents/{agentId}/heartbeat`
-- **Payload:** `{timestamp, consumerLag}`
-- **Frequency:** Every `heartbeatInterval` seconds (configurable).
+- **Endpoint:** `PUT /api/v1/agents/{agent_id}/heartbeat`
+- **Payload:** `{timestamp, consumer_lag}`
+- **Frequency:** Every `heartbeat_interval` seconds (configurable).
 - If no heartbeat is received within a configurable threshold, DCM marks the
   agent as **Unavailable**.
 - On restart, the Agent re-registers to DCM, which resets the heartbeat tracker.
@@ -142,13 +143,13 @@ sequenceDiagram
     participant DCM as DCM Control Plane
     participant DB as Database
 
-    loop Every {heartbeatInterval} seconds
-        AG->>DCM: PUT /api/v1/agents/{agentId}/heartbeat<br/>{timestamp, consumerLag}
+    loop Every {heartbeat_interval} seconds
+        AG->>DCM: PUT /api/v1/agents/{agent_id}/heartbeat<br/>{timestamp, consumer_lag}
         DCM->>DB: Update heartbeat timestamp and lag
-        DCM->>DCM: Check consumerLag against threshold
-        alt consumerLag >= consumerLagThreshold
+        DCM->>DCM: Check consumer_lag against threshold
+        alt consumer_lag >= consumer_lag_threshold
             DCM->>DB: Mark agent as Congested
-        else consumerLag < consumerLagThreshold
+        else consumer_lag < consumer_lag_threshold
             DCM->>DB: Clear Congested state (if set)
         end
         DCM-->>AG: 200 OK
@@ -161,12 +162,12 @@ sequenceDiagram
 ## Consumer Lag Monitoring
 
 The Agent self-reports the number of pending messages on its topic as
-`consumerLag` in each heartbeat. DCM compares this value against a global
-`consumerLagThreshold`.
+`consumer_lag` in each heartbeat. DCM compares this value against a global
+`consumer_lag_threshold`.
 
-- When `consumerLag >= consumerLagThreshold`, DCM marks the agent as
+- When `consumer_lag >= consumer_lag_threshold`, DCM marks the agent as
   **Congested** and stops routing new requests to it.
-- When `consumerLag` drops below the threshold on a subsequent heartbeat, DCM
+- When `consumer_lag` drops below the threshold on a subsequent heartbeat, DCM
   clears the Congested state.
 
 ## Agent Health State Summary
@@ -180,8 +181,8 @@ The Agent self-reports the number of pending messages on its topic as
 ```mermaid
 stateDiagram-v2
     [*] --> Ready: Agent registers
-    Ready --> Congested: consumerLag >= threshold
-    Congested --> Ready: consumerLag < threshold
+    Ready --> Congested: consumer_lag >= threshold
+    Congested --> Ready: consumer_lag < threshold
     Ready --> Unavailable: Heartbeat timeout
     Congested --> Unavailable: Heartbeat timeout
     Unavailable --> Ready: Agent re-registers

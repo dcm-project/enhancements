@@ -181,14 +181,14 @@ overridden per-volume in v1.
 
 #### Storage Defaults
 
-| Field               | Type   | Default       | Description                                     |
-| ------------------- | ------ | ------------- | ----------------------------------------------- |
-| defaultStorageClass | string | (cluster)     | StorageClass used when not specified in request |
-| defaultAccessMode   | string | ReadWriteOnce | PVC access mode when not specified in request   |
+| Field                 | Type   | Default       | Description                                     |
+| --------------------- | ------ | ------------- | ----------------------------------------------- |
+| default_storage_class | string | (cluster)     | StorageClass used when not specified in request |
+| default_access_mode   | string | ReadWriteOnce | PVC access mode when not specified in request   |
 
 Per-volume `storage_class`, `volume_mode`, and `access_mode` may be set under
 `provider_hints.kubernetes` (see POST endpoint documentation). When
-`access_mode` is omitted, the SP applies `defaultAccessMode`.
+`access_mode` is omitted, the SP applies `default_access_mode`.
 
 ### Registration Flow
 
@@ -228,10 +228,10 @@ the
 
 **K8s Storage SP-specific requirements:**
 
-- `serviceType` field must be set to `"storage"`
+- `service_type` field must be set to `"storage"`
 - `operations` field must include: `CREATE`, `READ`, `UPDATE`, `DELETE`
-- `metadata.resources.totalStorage` may reflect cluster capacity at registration
-  time (optional)
+- `metadata.resources.total_storage` may reflect cluster capacity at
+  registration time (optional)
 
 #### Registration Process
 
@@ -476,7 +476,7 @@ SP does not call CSI directly. Typical sequence:
    for the new size to be visible inside the container)
 
 Whether expansion completes **online** (while the Pod is running) depends on the
-CSI driver, `volumeMode` (`Filesystem` vs `Block`), and mount state — not only
+CSI driver, `volume_mode` (`Filesystem` vs `Block`), and mount state — not only
 `allowVolumeExpansion` on the StorageClass.
 
 | What the SP can validate before PATCH | What the SP cannot validate before PATCH    |
@@ -523,7 +523,7 @@ messaging system.
 
 Status updates are published using the [CloudEvents](https://cloudevents.io/)
 specification (v1.0). Events are published to NATS subject `dcm.storage`
-(`dcm.{serviceType}` pattern). See
+(`dcm.{service_type}` pattern). See
 [Service Provider Status Reporting](../state-management/service-provider-status-reporting.md)
 for the platform-wide CloudEvents contract and status mapping guidelines.
 
@@ -533,12 +533,12 @@ for the platform-wide CloudEvents contract and status mapping guidelines.
 
 **CloudEvent attributes:**
 
-| Attribute         | Value                          |
-| ----------------- | ------------------------------ |
-| `source`          | `dcm/providers/{providerName}` |
-| `type`            | `dcm.status.storage`           |
-| `subject`         | `dcm.storage`                  |
-| `datacontenttype` | `application/json`             |
+| Attribute         | Value                           |
+| ----------------- | ------------------------------- |
+| `source`          | `dcm/providers/{provider_name}` |
+| `type`            | `dcm.status.storage`            |
+| `subject`         | `dcm.storage`                   |
+| `datacontenttype` | `application/json`              |
 
 Instance identity is carried in the data payload `id` field (from the
 `dcm-instance-id` label), not in the NATS subject.
@@ -589,7 +589,7 @@ For official definitions, see
 
 **Implementation Notes:**
 
-- The `instanceId` is read from the `dcm.project/dcm-instance-id` label on the
+- The `instance_id` is read from the `dcm.project/dcm-instance-id` label on the
   PVC.
 - When bound, the status message may include `volume_name` from
   `spec.metadata.volume_name` (mapped from `pvc.spec.volumeName`).

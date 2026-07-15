@@ -118,11 +118,11 @@ flowchart TD
 
 #### Catalog Manager
 
-| Method | Endpoint                                                         | Description                        |
-| ------ | ---------------------------------------------------------------- | ---------------------------------- |
-| POST   | /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate | Trigger rehydration of an instance |
+| Method | Endpoint                                                            | Description                        |
+| ------ | ------------------------------------------------------------------- | ---------------------------------- |
+| POST   | /api/v1/catalog-item-instances/{catalog_item_instance_id}:rehydrate | Trigger rehydration of an instance |
 
-**POST /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate**
+**POST /api/v1/catalog-item-instances/{catalog_item_instance_id}:rehydrate**
 
 Triggers rehydration of an existing CatalogItemInstance. The Catalog Manager
 does **not** regenerate the ServiceType payload. It generates a new InstanceID
@@ -133,11 +133,11 @@ Response: Returns `202 Accepted` if the rehydration process has started.
 
 #### Placement Manager
 
-| Method | Endpoint                                 | Description                    |
-| ------ | ---------------------------------------- | ------------------------------ |
-| POST   | /api/v1/resources/{instanceId}:rehydrate | Rehydrate an existing resource |
+| Method | Endpoint                                  | Description                    |
+| ------ | ----------------------------------------- | ------------------------------ |
+| POST   | /api/v1/resources/{instance_id}:rehydrate | Rehydrate an existing resource |
 
-**POST /api/v1/resources/{instanceId}:rehydrate**
+**POST /api/v1/resources/{instance_id}:rehydrate**
 
 Triggers the rehydration of an existing resource. The Placement Manager
 retrieves the original intent from the Placement DB and orchestrates creation of
@@ -147,7 +147,7 @@ Request body:
 
 ```json
 {
-  "newInstanceId": "<new-instance-id>"
+  "new_instance_id": "<new-instance-id>"
 }
 ```
 
@@ -169,56 +169,56 @@ sequenceDiagram
     participant SPRM as SP Resource Manager
     participant MS as Messaging System
 
-    User->>CM: POST /api/v1/catalog-item-instances/{catalogItemInstanceId}:rehydrate
-    CM->>CM: Generate newResourceId
-    CM->>CM_DB: Update resourceId reference to newResourceId
+    User->>CM: POST /api/v1/catalog-item-instances/{catalog_item_instance_id}:rehydrate
+    CM->>CM: Generate new_resource_id
+    CM->>CM_DB: Update resource_id reference to new_resource_id
 
-    CM->>PM: POST /api/v1/resources/{resourceId}:rehydrate<br/>{newResourceId}
+    CM->>PM: POST /api/v1/resources/{resource_id}:rehydrate<br/>{new_resource_id}
 
     activate PM
 
-    PM->>DB: Retrieve original intent by resourceId
-    DB-->>PM: {originalRequest, agentName, oldResourceId}
+    PM->>DB: Retrieve original intent by resource_id
+    DB-->>PM: {original_request, agent_name, old_resource_id}
 
     PM->>DB: Fetch available agents<br/>(healthy, non-Congested)
     DB-->>PM: available_agents list
 
-    PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {originalSpec}, available_agents}
+    PM->>PE: POST /api/v1alpha1/policies:evaluateRequest<br/>{service_instance: {original_spec}, available_agents}
 
     alt Policy rejects
         PE-->>PM: 406 Not Acceptable
         PM->>DB: Update record (policy rejected)
         PM-->>CM: Error (policy rejected)
-        CM->>CM_DB: Rollback resourceId to currentResourceId
+        CM->>CM_DB: Rollback resource_id to current_resource_id
         CM-->>User: Rehydration failed (policy rejected)
 
     else Policy approves
-        PE-->>PM: 200 OK<br/>{evaluatedServiceInstance, selectedAgent, status}
+        PE-->>PM: 200 OK<br/>{evaluated_service_instance, selected_agent, status}
 
-        PM->>DB: Store validated request with newResourceId<br/>{validatedPayload, new agentName}
+        PM->>DB: Store validated request with new_resource_id<br/>{validated_payload, new agent_name}
 
-        PM->>SPRM: POST /api/v1/service-type-instances<br/>{newResourceId, agentName, serviceType, spec}
+        PM->>SPRM: POST /api/v1/service-type-instances<br/>{new_resource_id, agent_name, service_type, spec}
         activate SPRM
 
         alt Agent not found or unhealthy
             SPRM-->>PM: Error response
             PM-->>CM: Error (agent unavailable)
-            CM->>CM_DB: Rollback resourceId to currentResourceId
+            CM->>CM_DB: Rollback resource_id to current_resource_id
             CM-->>User: Rehydration failed
         else Agent healthy
-            SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topicName}<br/>type: dcm.request.create<br/>{newResourceId, serviceType, spec}
-            SPRM-->>PM: 202 Accepted<br/>{newResourceId, agentName, status: PENDING}
+            SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topic_name}<br/>type: dcm.request.create<br/>{new_resource_id, service_type, spec}
+            SPRM-->>PM: 202 Accepted<br/>{new_resource_id, agent_name, status: PENDING}
         end
         deactivate SPRM
 
-        PM->>SPRM: DELETE /api/v1/service-type-instances/{oldResourceId}?deferred=true
+        PM->>SPRM: DELETE /api/v1/service-type-instances/{old_resource_id}?deferred=true
         activate SPRM
-        SPRM->>SPRM: Record pending cleanup<br/>{oldResourceId, agentName}
+        SPRM->>SPRM: Record pending cleanup<br/>{old_resource_id, agent_name}
         SPRM-->>PM: 200 OK (deletion deferred)
         deactivate SPRM
 
         PM->>DB: Remove old instance record
-        PM-->>CM: 202 Accepted {newInstanceId, status}
+        PM-->>CM: 202 Accepted {new_instance_id, status}
         CM-->>User: Rehydration started<br/>{status: PENDING}
     end
     deactivate PM
@@ -231,22 +231,22 @@ sequenceDiagram
    - Catalog Manager does **not** regenerate the ServiceType payload from the
      CatalogItem. This ensures that only policy and environment changes are
      applied, not changes to the underlying CatalogItem or ServiceType
-   - Catalog Manager reads the current resourceId from its database
-   - Catalog Manager generates a new resourceId for the downstream services
-   - Catalog Manager updates its database with the new resourceId **before**
+   - Catalog Manager reads the current resource_id from its database
+   - Catalog Manager generates a new resource_id for the downstream services
+   - Catalog Manager updates its database with the new resource_id **before**
      calling Placement Manager (see
      [DB-First Update Order](#catalog-manager-db-first-update-order)). The
-     update uses compare-and-swap (CAS): it only succeeds if the resourceId
+     update uses compare-and-swap (CAS): it only succeeds if the resource_id
      still matches the value read earlier, preventing concurrent rehydrates from
      both proceeding
    - Catalog Manager then forwards the request to the Placement Manager
-     rehydrate endpoint with the current resourceId (in the URL) and the new
-     resourceId (in the request body)
+     rehydrate endpoint with the current resource_id (in the URL) and the new
+     resource_id (in the request body)
 
 2. **Intent Retrieval**
    - Placement Manager retrieves the original intent (the user's original
      request) from the Placement DB using the current InstanceID
-   - The original intent includes the spec, the current agentName, and the old
+   - The original intent includes the spec, the current agent_name, and the old
      InstanceID
 
 3. **Fetch Available Agents**
@@ -263,22 +263,23 @@ sequenceDiagram
      Tenant, User)
    - If the policy rejects the request, the Placement Manager updates the record
      and returns an error to Catalog Manager, which rolls back its database to
-     the original resourceId
+     the original resource_id
    - If the policy approves, the Placement Manager receives the evaluated
-     payload and the newly selected Agent (`selectedAgent`)
+     payload and the newly selected Agent (`selected_agent`)
 
 5. **Resource Creation**
    - Placement Manager stores the new validated request in the Placement DB with
-     the new InstanceID and the new `agentName`
+     the new InstanceID and the new `agent_name`
    - Placement Manager delegates instance creation to SP Resource Manager with
-     the new InstanceID, the new agentName, serviceType, and the evaluated spec
+     the new InstanceID, the new agent_name, service_type, and the evaluated
+     spec
    - Since the new InstanceID is different from the old one, there is no ID
      conflict in SP Resource Manager
    - SP Resource Manager publishes a creation CloudEvent to the agent's
      messaging topic
    - On success, the resource enters `PENDING` state
    - On failure, Catalog Manager rolls back its database to the original
-     resourceId
+     resource_id
 
 6. **Delete Old Resource**
    - Once the new resource is created, Placement Manager requests SP Resource
@@ -302,9 +303,9 @@ enqueues the instance for background cleanup:
 
 1. The SP Resource Manager records the pending deletion in a **cleanup queue**
    (persisted in the database) with the following information:
-   - `instanceId`: The instance to be deleted
-   - `agentName`: The Agent that manages the instance
-   - `serviceType`: The type of the service
+   - `instance_id`: The instance to be deleted
+   - `agent_name`: The Agent that manages the instance
+   - `service_type`: The type of the service
    - `timestamp`: When the deletion was requested
 2. The SP Resource Manager returns success to the Placement Manager, allowing
    the rehydration flow to continue
@@ -364,13 +365,13 @@ flowchart TD
 
 ```json
 {
-  "instanceId": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-  "agentName": "prod-eu-agent",
-  "serviceType": "vm",
-  "requestedAt": "2026-03-23T10:00:00Z",
-  "retryCount": 0,
+  "instance_id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+  "agent_name": "prod-eu-agent",
+  "service_type": "vm",
+  "requested_at": "2026-03-23T10:00:00Z",
+  "retry_count": 0,
   "status": "PENDING",
-  "lastAttempt": null
+  "last_attempt": null
 }
 ```
 
@@ -392,7 +393,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[Receive rehydrate request<br/>for instanceId with newInstanceId] --> B[Retrieve original intent<br/>from Placement DB]
+    A[Receive rehydrate request<br/>for instance_id with new_instance_id] --> B[Retrieve original intent<br/>from Placement DB]
     B --> C{Intent found?}
     C -->|No| D[Return 404 Not Found]
     C -->|Yes| E[Fetch available agents]
@@ -400,8 +401,8 @@ flowchart TD
     F --> G{Policy approved?}
     G -->|No| H[Update record in Placement DB]
     H --> I[Return error to Catalog Manager]
-    G -->|Yes| J[Store validated request<br/>with newInstanceId and agentName]
-    J --> K[Forward to SP Resource Manager<br/>with newInstanceId, agentName, and spec]
+    G -->|Yes| J[Store validated request<br/>with new_instance_id and agent_name]
+    J --> K[Forward to SP Resource Manager<br/>with new_instance_id, agent_name, and spec]
     K --> L{Creation succeeded?}
     L -->|No| I
     L -->|Yes| M[Request SP Resource Manager<br/>to delete old resource<br/>with deferred flag]
