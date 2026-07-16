@@ -130,8 +130,8 @@ As an administrator, I want to be able to list and monitor existing databases.
 #### DCM SP Health Check
 
 CloudNativePG Database SP must expose a health endpoint
-`http://<provider-ip>:<port>/health` for DCM control plane to pole every 10
-seconds. See documentation for
+`http://<provider-ip>:<port>/api/v1alpha1/databases/health` for DCM control
+plane to pole every 10 seconds. See documentation for
 [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
 
 #### DCM SP Status Reporting
@@ -148,13 +148,13 @@ default behavior for all postgres clusters managed by this provider instance.
 
 #### Namespace Configuration
 
-| Field        | Type   | Default | Description                                                       |
-| ------------ | ------ | ------- | ----------------------------------------------------------------- |
-| namespace    | string | default | Kubernates namespace for all managed resources                    |
-| imageCatalog | string | N/A     | Sets the default image catalog that is used for PostgreSQL images |
+| Field         | Type   | Default | Description                                                       |
+| ------------- | ------ | ------- | ----------------------------------------------------------------- |
+| namespace     | string | default | Kubernates namespace for all managed resources                    |
+| image_catalog | string | N/A     | Sets the default image catalog that is used for PostgreSQL images |
 
 All resources created by this Service Provider (`Cluster`) are deployed in the
-configured `namespace`. The `imageCatalog` field specifies the `ImageCatalog`
+configured `namespace`. The `image_catalog` field specifies the `ImageCatalog`
 resource within the named `namespace` that manages the container images for
 PostgreSQL, catalogged by version. If not specified, the CloudNativePG Database
 SP will use the default images defined in the operator installation. These
@@ -163,9 +163,9 @@ per-resource.
 
 #### Network Configuration
 
-| Field               | Type   | Required | Description                                                           |
-| ------------------- | ------ | -------- | --------------------------------------------------------------------- |
-| externalServiceType | string | Yes      | Service type for `external` visibility (`LoadBalancer` or `NodePort`) |
+| Field                 | Type   | Required | Description                                                           |
+| --------------------- | ------ | -------- | --------------------------------------------------------------------- |
+| external_service_type | string | Yes      | Service type for `external` visibility (`LoadBalancer` or `NodePort`) |
 
 Service creation is driven by the per-database `visibility` field defined in the
 Database Service Type schema (see
@@ -175,11 +175,11 @@ valid for database workloads as by default, an `internal` service is created)
 
 #### Storage Configuration
 
-| Field               | Type   | Default | Description                                        |
-| ------------------- | ------ | ------- | -------------------------------------------------- |
-| defaultStorageClass | string | N/A     | Default storage class for PVCs managed by Clusters |
+| Field                 | Type   | Default | Description                                        |
+| --------------------- | ------ | ------- | -------------------------------------------------- |
+| default_storage_class | string | N/A     | Default storage class for PVCs managed by Clusters |
 
-When specified, the `defaultStorageClass` field sets the default storage class
+When specified, the `default_storage_class` field sets the default storage class
 where `PersistentVolumeClaims` managed by `Cluster` resources would be created,
 otherwise, the default storage class of the cluster is used. Users can override
 this default per `Cluster` resource via `providerHints.postgres.storage` (see
@@ -187,11 +187,11 @@ POST endpoint documentation).
 
 #### Postgres Configuration
 
-| Field          | Type | Default | Description                                              |
-| -------------- | ---- | ------- | -------------------------------------------------------- |
-| defaultVersion | int  | 18      | The default version of PostgreSQL that would be deployed |
+| Field           | Type | Default | Description                                              |
+| --------------- | ---- | ------- | -------------------------------------------------------- |
+| default_version | int  | 18      | The default version of PostgreSQL that would be deployed |
 
-The `defaultVersion` field sets the default version of PostgreSQL to run, and
+The `default_version` field sets the default version of PostgreSQL to run, and
 CloudNativePG selects the correct image automatically for the container The
 relevant images for the selected version must be available to CloudNativePG, and
 mentioned in the `ImageCatalog` matching the tag to the correct major version,
@@ -212,17 +212,17 @@ Example request payload:
 ```json
 {
   "name": "cnpg-sp",
-  "serviceType": "database",
-  "displayName": "CloudNativePG Database Service Provider",
+  "service_type": "database",
+  "display_name": "CloudNativePG Database Service Provider",
   "endpoint": "https://cnpg-database-sp.example.com/api/v1alpha1/databases",
   "operations": ["CREATE", "DELETE", "READ"],
   "metadata": {
     "zone": "us-east-1b",
     "region": "us-east-1",
     "resources": {
-      "totalCpu": "200",
-      "totalMemory": "2TB",
-      "totalStorage": "100TB"
+      "total_cpu": "200",
+      "total_memory": "2TB",
+      "total_storage": "100TB"
     }
   }
 }
@@ -236,7 +236,7 @@ the
 
 **CloudNativePG Database SP-specific requirements:**
 
-- `serviceType` field must be set to `database`
+- `service_type` field must be set to `database`
 - `operations` field must include: `CREATE`, `READ`, `DELETE`
 - `metadata.resources` fields may or may not define the cluster capacity **at
   the time of registration**
@@ -254,13 +254,13 @@ resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                             | Description                            |
-| ------ | ------------------------------------ | -------------------------------------- |
-| POST   | /api/v1alpha1/databases              | Create a new database                  |
-| GET    | /api/v1alpha1/databases              | List all databases                     |
-| GET    | /api/v1alpha1/databases/{databaseId} | Get a database instance                |
-| DELETE | /api/v1alpha1/databases/{databaseId} | Delete a database instance             |
-| GET    | /api/v1alpha1/health                 | CloudNativePG Database SP health check |
+| Method | Endpoint                              | Description                            |
+| ------ | ------------------------------------- | -------------------------------------- |
+| POST   | /api/v1alpha1/databases               | Create a new database                  |
+| GET    | /api/v1alpha1/databases               | List all databases                     |
+| GET    | /api/v1alpha1/databases/{database_id} | Get a database instance                |
+| DELETE | /api/v1alpha1/databases/{database_id} | Delete a database instance             |
+| GET    | /api/v1alpha1/databases/health        | CloudNativePG Database SP health check |
 
 ##### AEP Complience
 
@@ -316,35 +316,35 @@ set in the SP configuration, see
 
 **ProviderHints:**
 
-The request body supports an optional `providerHints` field (type: object,
+The request body supports an optional `provider_hints` field (type: object,
 additionalProperties: true) as defined in the
 [Service Type Definitions](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-type-definitions/service-type-definitions.md#providerhints-object).
-The SP accepts `providerHints` on input but does not act on its content in the
+The SP accepts `provider_hints` on input but does not act on its content in the
 current implementation.
 
-> **Note**: It is not yet designed how `providerHints` can be leveraged within
+> **Note**: It is not yet designed how `provider_hints` can be leveraged within
 > the DCM control plane to influence provider behavior. As a result, Service
 > creation is currently driven by the `network.visibility` field (see Networking
 > Configuration above), which is the canonical approach. Future iterations may
 > define how provider hints flow from catalog to provider and influence resource
 > creation.
 
-**Service Configuration via providerHints: Storage**
+**Service Configuration via provider_hints: Storage**
 
 Users can override the SP default storage configuration on a per-Cluster basis
-using `providerHints.postgres.storage`:
+using `provider_hints.postgres.storage`:
 
-| Field        | Type   | Description                                 |
-| ------------ | ------ | ------------------------------------------- |
-| storageClass | string | The storage class used for Cluster intances |
+| Field         | Type   | Description                                 |
+| ------------- | ------ | ------------------------------------------- |
+| storage_class | string | The storage class used for Cluster intances |
 
-If `providerHints.postgres.storage` is not specified, the SP uses its configured
-defaults.
+If `provider_hints.postgres.storage` is not specified, the SP uses its
+configured defaults.
 
 **Service Configuration via providerHints: Initial DB state**:
 
 Users can override default SP user creation behavior on a per-Cluster basis by
-specifying the `providerHints.postgres.initdb` field:
+specifying the `provider_hints.postgres.initdb` field:
 
 | Field    | Type   | Description                                                                  |
 | -------- | ------ | ---------------------------------------------------------------------------- |
@@ -359,7 +359,7 @@ specified, that would be created with the `password` specified. To configure the
 [Kubernetes.io/basic-auth](https://kubernetes.io/docs/concepts/configuration/secret/#basic-authentication-secret)
 type.
 
-If any of the fields in `providerHints.postgres.initdb` are not specified, the
+If any of the fields in `provider_hints.postgres.initdb` are not specified, the
 SP will follow the defaults defined in the
 [CloudNativePG Bootstrap documentation](https://cloudnative-pg.io/docs/1.29/bootstrap#bootstrap-an-empty-cluster-initdb),
 which are:
@@ -391,10 +391,10 @@ which are:
       "port": 5432,
       "visibility": "external"
     },
-    "providerHints": {
+    "provider_hints": {
       "postgres": {
         "storage": {
-          "storageClass": "az-b"
+          "storage_class": "az-b"
         },
         "initdb": {
           "database": "application",
@@ -407,17 +407,17 @@ which are:
   "metadata": {
     "name": "pg-db"
   },
-  "serviceType": "database"
+  "service_type": "database"
 }
 ```
 
-> **Note**: The `providerHints.postgres.storage`, section is optional. If
+> **Note**: The `provider_hints.postgres.storage`, section is optional. If
 > omitted, the SP uses it's configured defaults
 
-> **Note**: The `providerHints.postgres.initdb` section is optional. If omitted,
-> a default configuration is used as specified in
+> **Note**: The `provider_hints.postgres.initdb` section is optional. If
+> omitted, a default configuration is used as specified in
 > [Bootstrap](https://cloudnative-pg.io/docs/1.29/bootstrap#bootstrap-an-empty-cluster-initdb)
-> Additionally, the `providerHints.postgres.initdb` is a input only field,
+> Additionally, the `provider_hints.postgres.initdb` is a input only field,
 > following [AEP-203](https://aep.dev/203/#input-only.)
 
 > **Note**: The `resources` field is calculated per replica, so the resource
@@ -462,37 +462,37 @@ set to `PENDING` after the resource is created.
   "services": [
     {
       "name": "pg-db-rw",
-      "clusterIP": "10.2.30.1",
+      "cluster_ip": "10.2.30.1",
       "type": "ClusterIP",
       "ports": [
         {
           "port": 5432,
-          "targetPort": 5432,
+          "target_port": 5432,
           "protocol": "TCP"
         }
       ]
     },
     {
       "name": "pg-db-yx3w7",
-      "clusterIP": "10.96.15.6",
+      "cluster_ip": "10.96.15.6",
       "type": "LoadBalancer",
       "ports": [
         {
           "port": 5432,
-          "targetPort": 5432,
+          "target_port": 5432,
           "protocol": "TCP"
         }
       ]
     }
   ],
-  "connectionDetails": ""
+  "connection_details": ""
 }
 ```
 
-> **Note**: The `connectionDetails` field is an output only field following
-> [AEP-203](https://aep.dev/203/#output-only) The `connectionDetails` field is
+> **Note**: The `connection_details` field is an output only field following
+> [AEP-203](https://aep.dev/203/#output-only) The `connection_details` field is
 > empty at creation time and will be populated once the `Cluster` reaches
-> `RUNNING` status. The `connectionDetails` field will contain a base64-encoded
+> `RUNNING` status. The `connection_details` field will contain a base64-encoded
 > version of the database application connection details
 
 > **Note**: The `<database-name>-rw` service is always created and can not be
@@ -538,7 +538,7 @@ set to `PENDING` after the resource is created.
 ```
 
 > **Note**: Per AEP-132, LIST returns fully-populated resources. Fields like
-> `connectionDetails` may be empty for databases that are still provisioning or
+> `connection_details` may be empty for databases that are still provisioning or
 > have failed.
 
 **Error Handling:**
@@ -546,12 +546,12 @@ set to `PENDING` after the resource is created.
 - **400 Bad Request:** Invalid pagination parameters
 - **500 Internal Server Error:** Unexperted error querying Kubernetes API
 
-#### GET /api/v1alpha1/databases/{databaseId}
+#### GET /api/v1alpha1/databases/{database_id}
 
 **Description:** Get specific database instance.
 
-1. Handler recieves `GET` request with `databaseId` path parameter.
-2. Calls `GetDatabaseFromCluster(databaseId)`.
+1. Handler recieves `GET` request with `database_id` path parameter.
+2. Calls `GetDatabaseFromCluster(database_id)`.
 3. Cluster lookup: Query Kubernetes API for `Cluster` with matching
    `dcm.project/dcm-instance-id` label.
 4. Database details: Query `Cluster` for runtime information. Extract IP address
@@ -591,36 +591,36 @@ set to `PENDING` after the resource is created.
   "services": [
     {
       "name": "pg-db-rw",
-      "clusterIP": "10.2.30.1",
+      "cluster_ip": "10.2.30.1",
       "type": "ClusterIP",
       "ports": [
         {
           "port": 5432,
-          "targetPort": 5432,
+          "target_port": 5432,
           "protocol": "TCP"
         }
       ]
     },
     {
       "name": "pg-db-yx3w7",
-      "clusterIP": "10.96.15.6",
+      "cluster_ip": "10.96.15.6",
       "type": "LoadBalancer",
       "ports": [
         {
           "port": 5432,
-          "targetPort": 5432,
+          "target_port": 5432,
           "protocol": "TCP"
         }
       ]
     }
   ],
-  "connectionDetails": ""
+  "connection_details": ""
 }
 ```
 
 **Connection Details Field Behavior:**
 
-The `connectionDetails` field is populated based on the cluster status:
+The `connection_details` field is populated based on the cluster status:
 
 - **RUNNING:** Contains base64-encoded credentials and connection details
 - **PENDING:** Empty string. Credentials are not yet available as the Cluster is
@@ -629,11 +629,11 @@ The `connectionDetails` field is populated based on the cluster status:
   exist.
 - **UNKNOWN:** Empty string. Node lost; no valid credentials exist.
 
-The `connectionDetails` field follows the schema of the <cluster>-app secret's
+The `connection_details` field follows the schema of the <cluster>-app secret's
 format that is generated in the case no password is specified. If a password is
 specified, the PostgreSQL will generate the rest of the fields by querying the
 cluster and aggragating with user configuration. The details in the
-`connectionDetails` take on the following structure:
+`connection_details` take on the following structure:
 
 | Field         | Description                                                               |
 | ------------- | ------------------------------------------------------------------------- |
@@ -653,7 +653,7 @@ cluster and aggragating with user configuration. The details in the
 
 **Security Considerations:**
 
-The `connectionDetails` field contains sensitive credentials that grant access
+The `connection_details` field contains sensitive credentials that grant access
 to the provisioned Cluster. Implementations should:
 
 - Protect the API with proper authentication and authorization mechanisms.
@@ -668,10 +668,10 @@ AuthN/Z (Authentication/Authorization) and RBAC.
 
 **Error Handling:**
 
-- **404 Not Found:** Database with the specified `databaseId` does not exist
+- **404 Not Found:** Database with the specified `database_id` does not exist
 - **500 Internal Server Error:** Unexpected error querying Kubernetes API
 
-#### DELETE /api/v1alpha1/databases/{databaseId}
+#### DELETE /api/v1alpha1/databases/{database_id}
 
 **Description:** Delete a database instance
 
@@ -682,7 +682,7 @@ CloudNativePG), and returns `204 No Content`.
 
 **Process Flow:**
 
-1. Handler receives `DELETE` request with `databaseId` path parameter.
+1. Handler receives `DELETE` request with `database_id` path parameter.
 2. Lookup `Cluster` resource by `dcm.project/dcm-instance-id` label.
 3. Delete the resource with cascading delition.
 4. Lookup `Secret` resources by `dcm.project/dcm-instance-id` label.
@@ -700,10 +700,10 @@ complete, the CloudNativePG Database SP will publish a `DELETED` event.
 
 **Error Handling:**
 
-- **404 Not Found:** Database with specified `databaseId` does not exist
+- **404 Not Found:** Database with specified `database_id` does not exist
 - **500 Internal Server Error:** Unexpected error during resource deletion
 
-#### GET /api/v1alpha1/health
+#### GET /api/v1alpha1/databases/health
 
 **Description:** Retrieve the health status for the CloudNativePG Database
 Service Provider API.
@@ -792,12 +792,12 @@ informers instead of one.
 
 **CloudEvent attributes:**
 
-| Attribute         | Value                          |
-| ----------------- | ------------------------------ |
-| `source`          | `dcm/providers/{providerName}` |
-| `type`            | `dcm.status.database`          |
-| `subject`         | `dcm.database`                 |
-| `datacontenttype` | `application/json`             |
+| Attribute         | Value                           |
+| ----------------- | ------------------------------- |
+| `source`          | `dcm/providers/{provider_name}` |
+| `type`            | `dcm.status.database`           |
+| `subject`         | `dcm.database`                  |
+| `datacontenttype` | `application/json`              |
 
 Instance identity is carried in the data payload `id` field (from the
 `dcm.project/dcm-instance-id` label), not in the NATS subject.
@@ -843,16 +843,18 @@ found).
 
 ##### Single Instance Database Status Mapping (Primary instance only)
 
-| DCM Status | Primary Source | Kubernetes Condition                           | Precedence |
-| ---------- | -------------- | ---------------------------------------------- | ---------- |
-| PENDING    | Pod            | Pod.Phase = `Pending`                          | 1          |
-| PENDING    | Cluster        | Cluster.readyInstances = 0 AND no Pod exists   | 2          |
-| RUNNING    | Pod            | Pod.Phase = `Running`                          | 1          |
-| FAILED     | Pod            | Pod.Phase = `Failed`                           | 1          |
-| FAILED     | PVC            | Pod.Phase = `Pending` AND PVC.Phase = `FAILED` | 1          |
-| FAILED     | Cluster        | Cluster.instances = 0                          | 2          |
-| UNKNOWN    | Pod            | Pod.Phase = `Unknown` (node lost)              | 1          |
-| DELETED    | All            | Neither Cluster nor Pod found                  | 3          |
+| DCM Status | Primary Source | Kubernetes Condition                                                                     | Precedence |
+| ---------- | -------------- | ---------------------------------------------------------------------------------------- | ---------- |
+| PENDING    | Pod            | Pod.Phase = `Pending`                                                                    | 1          |
+| PENDING    | Pod            | Pod or PVC has `deletionTimestamp` set and Cluster does not have `deletionTimestamp` set | 1          |
+| PENDING    | Cluster        | Cluster.readyInstances = 0 AND no Pod exists                                             | 2          |
+| RUNNING    | Pod            | Pod.Phase = `Running`                                                                    | 1          |
+| FAILED     | Pod            | Pod.Phase = `Failed`                                                                     | 1          |
+| FAILED     | PVC            | Pod.Phase = `Pending` AND PVC.Phase = `Lost`                                             | 1          |
+| FAILED     | Cluster        | Cluster.instances = 0                                                                    | 2          |
+| UNKNOWN    | Pod            | Pod.Phase = `Unknown` (node lost)                                                        | 1          |
+| DELETING   | Cluster        | Cluster has `deletionTimestamp` set                                                      | 2          |
+| DELETED    | All            | Neither Cluster nor Pod found                                                            | 3          |
 
 ##### Multi Instance Database Status Mapping
 
@@ -870,8 +872,9 @@ instance's state by the following table:
 | -------------- | -------------- | -------------------------------------------------- | ---------- |
 | PENDING        | Pod            | Pod.Phase = `Pending` AND NOT PVC.Phase = `FAILED` | 1          |
 | RUNNING        | Pod            | Pod.Phase = `Running`                              | 1          |
+| PENDING        | either         | Either Pod or PVC has `deletionTimestamp` set      | 1          |
 | FAILED         | Pod            | Pod.Phase = `Failed`                               | 1          |
-| FAILED         | PVC            | Pod.Phase = `Pending` AND PVC.Phase = `FAILED`     | 1          |
+| FAILED         | PVC            | Pod.Phase = `Pending` AND PVC.Phase = `Lost`       | 1          |
 | UNKNOWN        | Pod            | Pod.Phase = `Unknown` (node lost)                  | 1          |
 | DELETED        | Both           | Pod not found in cluster                           | 2          |
 
@@ -879,13 +882,16 @@ instance's state by the following table:
 > non-primary nodes and for v1, we do not destinguish the two for status
 > reconciliation
 
+> **Note**: The `DELETING` status is not relevant on a per instance basis as it
+> is determained by the `Cluster` resource
+
 **Precedence Rules**:
 
 - **1 (Pod)**: Highest priority - report Pod status if Pod exists (`PENDING`,
   `RUNNING`, `FAILED`, or `UNKNOWN`), while `PVC` failure takes priority over
   `POD`'s `PENDING` phase
 - **2 (PVC)**: Fallback - report PVC status in case Pod is stuck in a pending
-  state (`PENDING`/`BOUND` or `FAILED`)
+  state (`Pending`/`Bound` or `Lost`)
 - **3 (Both)**: Resource cleanup complete - report `DELETED` when neither PVC
   not Pod exists
 
@@ -901,6 +907,7 @@ mapping:
 | RUNNING    | All instances  | all instances RUNNING                                                                                                                | 1          |
 | FAILED     | Any instance   | any instance FAILED                                                                                                                  | 1          |
 | UNKNOWN    | Any instance   | Any instance UNKNOWN AND no replica FAILED                                                                                           | 1          |
+| DELETING   | Cluster        | Cluster has `deletionTimestamp` set                                                                                                  | 1          |
 | DELETED    | All            | All instances DELETED and Cluster not found                                                                                          | 3          |
 
 > **Note**: The `SUCCEEDED` status defined in the
@@ -920,6 +927,10 @@ mapping:
   `PENDING`)
 - **3 (ALL)**: Resource cleanup complete - report `DELETED` when neither Cluster
   nor any replica exists
+
+> **Note**: The only state where cluster has precedence over instance is
+> `DELETING`, this is due to `DELETING` being a status that "trickles down" from
+> user command rather than "bubble up" from runtime events
 
 For official definitions, see
 
