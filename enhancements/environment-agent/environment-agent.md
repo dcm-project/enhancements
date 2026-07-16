@@ -169,11 +169,10 @@ The agent differentiates its behavior based on the SP health state:
 - **Unavailable:** The agent removes the service type from its advertised list,
   updates DCM, and rejects any held requests for that service type.
 
-The agent exposes the health status of each registered SP via a `/api/v1/status`
-endpoint. On Kubernetes/OpenShift deployments, the agent additionally surfaces
-this information as custom pod conditions on its own pod, allowing
-administrators to quickly identify which SPs are causing issues via
-`oc describe pod`.
+The agent exposes the health status of each registered SP. On
+Kubernetes/OpenShift deployments, the agent additionally surfaces this
+information as custom pod conditions on its own pod, allowing administrators to
+quickly identify which SPs are causing issues via `oc describe pod`.
 
 The agent reports its own liveness to DCM via periodic REST heartbeats. DCM
 tracks the last heartbeat timestamp and marks the agent as unavailable if no
@@ -254,10 +253,11 @@ flowchart TD
 
 #### Agent Endpoints
 
-| Method | Endpoint          | Description                                                                                                   |
-| ------ | ----------------- | ------------------------------------------------------------------------------------------------------------- |
-| POST   | /api/v1/providers | SP registration — reuses the [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md) contract |
-| GET    | /api/v1/status    | Agent status — health of all registered SPs                                                                   |
+| Method | Endpoint                        | Description                                                                                                   |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| POST   | /api/v1/providers               | SP registration — reuses the [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md) contract |
+| GET    | /api/v1/providers               | List all registered SPs (embedded and external)                                                               |
+| GET    | /api/v1/providers/{provider_id} | Get a specific registered SP by ID                                                                            |
 
 ##### `POST /api/v1/providers` — SP Registration (External SPs only)
 
@@ -278,37 +278,18 @@ registration with `409 Conflict`:
 
 Embedded SPs register internally at startup and do not use this endpoint.
 
-##### `GET /api/v1/status` — Agent Status
+##### `GET /api/v1/providers` — List Registered SPs
 
-Returns the health state of all registered SPs (both embedded and external).
-This endpoint is always available, regardless of the deployment mode
-(Kubernetes, Docker, standalone), and is the primary way to inspect the agent's
-view of its Service Providers.
+Returns the list of all SPs registered to the agent, including both embedded and
+external SPs. Each entry includes the provider ID, name, service type, whether
+the SP is embedded or external, and its current health status (Ready, Unhealthy,
+or Unavailable).
 
-Example response:
+##### `GET /api/v1/providers/{provider_id}` — Get a Specific SP
 
-```json
-{
-  "providers": [
-    {
-      "provider_id": "sp-container-001",
-      "name": "k8s-container",
-      "service_type": "container",
-      "type": "embedded",
-      "status": "Ready",
-      "last_check": "2026-06-05T10:30:00Z"
-    },
-    {
-      "provider_id": "sp-db-001",
-      "name": "db-provider",
-      "service_type": "database",
-      "type": "external",
-      "status": "Unhealthy",
-      "last_check": "2026-06-05T10:30:00Z"
-    }
-  ]
-}
-```
+Returns the details of a single registered SP identified by its provider ID,
+including its current health status. Returns `404 Not Found` if no SP with the
+given ID is registered.
 
 #### DCM Endpoints
 
@@ -1009,10 +990,9 @@ state):
 
 ##### Agent Status
 
-The agent exposes the health status of all registered SPs via the
-`GET /api/v1/status` endpoint (see
-[Agent Endpoints — `GET /api/v1/status`](#get-apiv1status--agent-status) for the
-response format).
+The agent exposes the health status of all registered SPs. The mechanism for
+exposing this information is left to the implementation (e.g., a REST endpoint,
+metrics, logs).
 
 ##### Pod Conditions (Kubernetes / OpenShift)
 
@@ -1145,9 +1125,8 @@ sequenceDiagram
    - The agent processes held requests from the retry topic for that service
      type
 6. The agent exposes the health status of all registered SPs (both embedded and
-   external) via the `GET /api/v1/status` endpoint. On Kubernetes/OpenShift
-   deployments, the agent additionally surfaces this information as custom pod
-   conditions on its own pod (see
+   external). On Kubernetes/OpenShift deployments, the agent additionally
+   surfaces this information as custom pod conditions on its own pod (see
    [Pod Conditions](#pod-conditions-kubernetes--openshift))
 
 ### CloudEvent Message Definitions
@@ -1400,13 +1379,13 @@ an `UPDATING` status).
 
 ### Observability and Metrics
 
-The agent currently exposes SP health via the `/api/v1/status` endpoint and
-Kubernetes pod conditions, but does not emit structured telemetry. A future
-iteration would add agent-level observability: Prometheus metrics for request
-throughput (by service type and outcome), SP health state transitions, retry
-topic depth, and end-to-end message latency. Distributed tracing (e.g.,
-OpenTelemetry) across the DCM → messaging system → agent → SP path would help
-diagnose latency and failures in the creation flow.
+The agent currently exposes SP health via Kubernetes pod conditions, but does
+not emit structured telemetry. A future iteration would add agent-level
+observability: Prometheus metrics for request throughput (by service type and
+outcome), SP health state transitions, retry topic depth, and end-to-end message
+latency. Distributed tracing (e.g., OpenTelemetry) across the DCM → messaging
+system → agent → SP path would help diagnose latency and failures in the
+creation flow.
 
 ### SP Lifecycle Management
 
