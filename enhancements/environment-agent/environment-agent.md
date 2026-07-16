@@ -998,10 +998,9 @@ metrics, logs).
 
 On Kubernetes or OpenShift deployments, the agent additionally exposes the
 health status of each registered SP as custom pod conditions on its own pod.
-This complements the `/api/v1/status` endpoint and allows administrators to
-inspect the agent's pod (e.g., via `oc describe pod`) and immediately see which
-SPs are healthy, unhealthy, or unavailable without having to query the agent's
-REST API.
+This complements the provider endpoints and allows administrators to inspect the
+agent's pod (e.g., via `oc describe pod`) and immediately see which SPs are
+healthy, unhealthy, or unavailable without having to query the agent's REST API.
 
 Each registered SP is represented as a separate pod condition, using the SP's
 provider ID as the condition type. The condition's `status` field reflects
