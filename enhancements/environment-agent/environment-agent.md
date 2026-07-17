@@ -285,6 +285,31 @@ external SPs. Each entry includes the provider ID, name, service type, whether
 the SP is embedded or external, and its current health status (Ready, Unhealthy,
 or Unavailable).
 
+Example response (fields shown are illustrative and may not be exhaustive):
+
+```json
+{
+  "providers": [
+    {
+      "provider_id": "sp-container-001",
+      "name": "k8s-container",
+      "service_type": "container",
+      "type": "embedded",
+      "status": "Ready",
+      "last_check": "2026-06-05T10:30:00Z"
+    },
+    {
+      "provider_id": "sp-db-001",
+      "name": "db-provider",
+      "service_type": "database",
+      "type": "external",
+      "status": "Unhealthy",
+      "last_check": "2026-06-05T10:30:00Z"
+    }
+  ]
+}
+```
+
 ##### `GET /api/v1/providers/{provider_id}` — Get a Specific SP
 
 Returns the details of a single registered SP identified by its provider ID,
