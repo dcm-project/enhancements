@@ -3,13 +3,17 @@ title: k8s-network-sp
 authors:
   - "@pwaresia"
 reviewers:
-  - "@gciavarrini"
+  - "@NoamNakash"
+  - "@croadfeldt"
+  - "@Fale"
+  - "@pkliczewski"
+  - "@chadcrum"
+  - "@LinskId"
+  - "@tkiss28"
   - "@jenniferubah"
   - "@machacekondra"
-  - "@ygalblum"
-  - "@croadfel"
-  - "@flocati"
-  - "@pkliczewski"
+  - "@gabriel-farache"
+  - "@gciavarrini"
 
 creation-date: 2026-06-03
 ---
@@ -114,11 +118,10 @@ service management across different infrastructure types.
 
 #### Kubernetes Integration
 
-- Uses `k8s.io/client-go` to interact with Kubernetes API.
 - Creates and manages `Service` resources.
 - Each network request creates a `Service` resource with the Kubernetes Service
-  type inferred from the generic `loadBalancerType` field and the presence of
-  `nodePorts` in providerHints.kubernetes. See
+  type inferred from the generic `routing_level` field and the presence of
+  `node_ports` in provider_hints.kubernetes. See
   [Service Type Inference](#service-type-inference) for the complete mapping
   table.
 - Services use label selectors to route traffic to matching pods.
@@ -134,18 +137,17 @@ service management across different infrastructure types.
 #### DCM SP Health Check
 
 K8s Network SP must expose a health endpoint
-`http://<provider-ip>:<port>/health` for DCM control plane to poll every 10
-seconds. See documentation for
+`http://<provider-ip>:<port>/api/<api_version>/networks/health` for DCM control
+plane to poll every 10 seconds. See documentation for
 [SP Health Check](https://github.com/dcm-project/enhancements/blob/main/enhancements/service-provider-health-check/service-provider-health-check.md).
 
 #### DCM SP Status Reporting
 
 - Publish status updates for network services to the messaging system using
-  CloudEvents format. Events are published to the subject:
-  `dcm.providers.{providerName}.network.instances.{instanceId}.status`
+  CloudEvents format.
 - See documentation for
   [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
-- Use a `SharedIndexInformer` to watch and monitor `Service` events.
+- Use the Kubernetes watch API to monitor `Service` events.
 
 ### SP Configuration
 
@@ -199,14 +201,14 @@ Example request payload:
 
 The environment agent handles the registration of the K8s Network SP with DCM.
 The registration request includes the K8s Network SP endpoint URL in the format:
-`fmt.Sprintf("%s/api/v1alpha1/networks", apiHost)`.
+`https://<api_host>:<port>/api/v1alpha1/networks`.
 
 ### Implementation Details/Notes/Constraints
 
 - Services created by this SP are labeled with `dcm.project/managed-by=dcm`,
   `dcm.project/dcm-instance-id=<UUID>`, and
   `dcm.project/dcm-service-type=network` for tracking and lifecycle management.
-- The `providerHints.kubernetes.selector` field is optional. Services can be
+- The `provider_hints.kubernetes.selector` field is optional. Services can be
   created without selectors for manual endpoint management (via EndpointSlices)
   or for services that proxy to external resources.
 - For Services with selectors: The SP does not validate whether pods matching
@@ -219,32 +221,32 @@ The registration request includes the K8s Network SP endpoint URL in the format:
   creation if NodePort conflicts occur.
 - Service names must be DNS-compatible (RFC 1035): lowercase alphanumeric,
   hyphens, max 63 characters.
-- When using providerHints.kubernetes.selector, Services can only select pods
+- When using provider_hints.kubernetes.selector, Services can only select pods
   within the same namespace (the namespace configured for this SP instance).
   Target workloads must exist in the same namespace.
 
 ### Service Type Inference
 
-The K8s Network SP infers the Kubernetes Service type from the
-`loadBalancerType` field and the presence of `nodePorts` in providerHints:
+The K8s Network SP infers the Kubernetes Service type from the `routing_level`
+field and the presence of `node_ports` in provider_hints:
 
-| loadBalancerType | nodePorts present? | K8s Service Type | Behavior                                      |
-| :--------------- | :----------------- | :--------------- | :-------------------------------------------- |
-| omitted          | No                 | ClusterIP        | Basic internal service                        |
-| omitted          | Yes                | NodePort         | Exposed on all node IPs with specified ports  |
-| network          | No                 | LoadBalancer     | LoadBalancer, nodePorts auto-allocated by K8s |
-| network          | Yes                | LoadBalancer     | LoadBalancer, uses specified nodePorts        |
-| application      | No                 | Ingress          | Not supported in v1 (return error)            |
-| application      | Yes                | Error            | Invalid: nodePorts not applicable for Ingress |
+| routing_level | node_ports present? | K8s Service Type | Behavior                                       |
+| :------------ | :------------------ | :--------------- | :--------------------------------------------- |
+| omitted       | No                  | ClusterIP        | Basic internal service                         |
+| omitted       | Yes                 | NodePort         | Exposed on all node IPs with specified ports   |
+| network       | No                  | LoadBalancer     | LoadBalancer, node_ports auto-allocated by K8s |
+| network       | Yes                 | LoadBalancer     | LoadBalancer, uses specified node_ports        |
+| application   | No                  | Ingress          | Not supported in v1 (return error)             |
+| application   | Yes                 | Error            | Invalid: node_ports not applicable for Ingress |
 
 ### Risks and Mitigations
 
 | Risk                                                                | Mitigation                                                                                                                                                                                                                                     |
 | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Service created but no matching pods exist (endpoints remain empty) | This is normal Kubernetes behavior. Services with providerHints.kubernetes.selector automatically update endpoints when matching pods become ready.                                                                                            |
+| Service created but no matching pods exist (endpoints remain empty) | This is normal Kubernetes behavior. Services with provider_hints.kubernetes.selector automatically update endpoints when matching pods become ready.                                                                                           |
 | LoadBalancer service stuck in Pending (no LB controller)            | Status reporting shows PENDING state; document cluster prerequisites (LoadBalancer controller required)                                                                                                                                        |
 | NodePort conflicts with existing services                           | Kubernetes API will reject with 409; SP returns error to user                                                                                                                                                                                  |
-| Orphaned services if pod labels change                              | Services use static selectors defined in providerHints.kubernetes.selector; users must manage pod labels to match                                                                                                                              |
+| Orphaned services if pod labels change                              | Services use static selectors defined in provider_hints.kubernetes.selector; users must manage pod labels to match                                                                                                                             |
 | Security: exposing services without authentication/authorization    | Document that Service type choice affects exposure scope: ClusterIP (cluster-internal), NodePort (accessible from nodes), LoadBalancer (publicly accessible). Users must ensure application-layer authentication before choosing LoadBalancer. |
 | RBAC permission issues in configured namespace                      | Document RBAC requirements; SP needs Service create/read/delete permissions in configured namespace                                                                                                                                            |
 
@@ -260,10 +262,10 @@ service resources.
 | Method | Endpoint                            | Description                   |
 | ------ | ----------------------------------- | ----------------------------- |
 | POST   | /api/v1alpha1/networks              | Create a new network instance |
+| GET    | /api/v1alpha1/networks/{network_id} | Get a network instance        |
 | GET    | /api/v1alpha1/networks              | List all network instances    |
-| GET    | /api/v1alpha1/networks/{instanceId} | Get a network instance        |
-| DELETE | /api/v1alpha1/networks/{instanceId} | Delete a network instance     |
-| GET    | /api/v1alpha1/health                | K8s Network SP health check   |
+| DELETE | /api/v1alpha1/networks/{network_id} | Delete a network instance     |
+| GET    | /api/v1alpha1/networks/health       | K8s Network SP health check   |
 
 ##### AEP Compliance
 
@@ -280,11 +282,12 @@ pre-defined by DCM core. See
 for the complete specification.
 
 The POST endpoint creates a Kubernetes Service resource. The generic
-`loadBalancerType` field expresses load balancing intent. The K8s Network SP
+`routing_level` field specifies whether traffic is handled at the transport
+level (TCP/UDP) or at the application level (HTTP/HTTPS). The K8s Network SP
 infers the Kubernetes Service type (ClusterIP, NodePort, LoadBalancer) from
-`loadBalancerType` and the presence of `nodePorts` in providerHints. When
-selectors are specified in providerHints.kubernetes.selector, the Service routes
-traffic to pods matching those label selectors.
+`routing_level` and the presence of `node_ports` in `provider_hints`. When
+selectors are specified in `provider_hints.kubernetes.selector`, the Service
+routes traffic to pods matching those label selectors.
 
 During creation of the Service resource, it must be labeled with:
 
@@ -299,65 +302,59 @@ resource.
 
 **Service Configuration:**
 
-The network service uses the generic `loadBalancerType` field to express load
-balancing intent:
+The network service uses the generic `routing_level` field to specify whether
+traffic is handled at the transport level (TCP/UDP) or at the application level
+(HTTP/HTTPS):
 
 **Generic Field:**
 
-| Field            | Type   | Required | Description                                              |
-| :--------------- | :----- | :------- | :------------------------------------------------------- |
-| loadBalancerType | string | No       | Load balancer tier: `network` (L4) or `application` (L7) |
+| Field         | Type   | Required | Description                                                                                             |
+| :------------ | :----- | :------- | :------------------------------------------------------------------------------------------------------ |
+| routing_level | string | No       | `network` for transport-level traffic (TCP/UDP), `application` for HTTP/HTTPS with routing capabilities |
 
-**Kubernetes-Specific Configuration (providerHints.kubernetes):**
+#### Kubernetes-Specific Configuration
 
-| Field     | Type              | Required | Description                                                                                                                                                                                        |
-| :-------- | :---------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| selector  | map[string]string | No       | Label selector to match target pods. If omitted, Service is created without selectors for manual endpoint management.                                                                              |
-| clusterIP | string            | No       | Specific clusterIP value. Can be a specific IP (within cluster CIDR), "None" (for headless services), or omitted for auto-assignment                                                               |
-| nodePorts | map[string]int    | No       | Map of port names to NodePort values (30000-32767). When present with no loadBalancerType, creates NodePort Service. With loadBalancerType: network, specifies nodePorts for LoadBalancer backend. |
+Kubernetes-specific fields under `provider_hints.kubernetes`:
 
-**Mapping: Generic Field + nodePorts → Kubernetes Service Type**
-
-| loadBalancerType | nodePorts present? | K8s Service Type | Notes                                  |
-| :--------------- | :----------------- | :--------------- | :------------------------------------- |
-| omitted          | No                 | ClusterIP        | Basic internal service                 |
-| omitted          | Yes                | NodePort         | Exposed on all node IPs (dev/test)     |
-| network          | No                 | LoadBalancer     | LoadBalancer, auto-allocated nodePorts |
-| network          | Yes                | LoadBalancer     | LoadBalancer, specified nodePorts      |
-| application      | No                 | Ingress          | Not supported in v1 (Non-Goal)         |
-| application      | Yes                | Error            | nodePorts not applicable for Ingress   |
+| Field      | Type              | Required | Description                                                                                                                                                                                   |
+| :--------- | :---------------- | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| selector   | map[string]string | No       | Label selector to match target pods. If omitted, Service is created without selectors for manual endpoint management.                                                                         |
+| cluster_ip | string            | No       | Specific cluster IP value. Can be a specific IP (within cluster CIDR), "None" (for headless services), or omitted for auto-assignment                                                         |
+| node_ports | map[string]int    | No       | Map of port names to NodePort values (30000-32767). When present with no routing_level, creates NodePort Service. With routing_level: network, specifies node_ports for LoadBalancer backend. |
 
 **Example Request Payload (LoadBalancer):**
 
 ```json
 {
-  "ports": [
-    {
-      "name": "http",
-      "protocol": "TCP",
-      "port": 80,
-      "targetPort": 8080
+  "spec": {
+    "service_type": "network",
+    "metadata": {
+      "name": "web-frontend-service"
     },
-    {
-      "name": "https",
-      "protocol": "TCP",
-      "port": 443,
-      "targetPort": 8443
-    }
-  ],
-  "metadata": {
-    "name": "web-frontend-service"
-  },
-  "loadBalancerType": "network",
-  "providerHints": {
-    "kubernetes": {
-      "selector": {
-        "app": "web-frontend",
-        "tier": "frontend"
+    "ports": [
+      {
+        "name": "http",
+        "protocol": "TCP",
+        "port": 80,
+        "target_port": 8080
+      },
+      {
+        "name": "https",
+        "protocol": "TCP",
+        "port": 443,
+        "target_port": 8443
+      }
+    ],
+    "routing_level": "network",
+    "provider_hints": {
+      "kubernetes": {
+        "selector": {
+          "app": "web-frontend",
+          "tier": "frontend"
+        }
       }
     }
-  },
-  "serviceType": "network"
+  }
 }
 ```
 
@@ -365,27 +362,29 @@ balancing intent:
 
 ```json
 {
-  "ports": [
-    {
-      "name": "http",
-      "protocol": "TCP",
-      "port": 80,
-      "targetPort": 8080
+  "spec": {
+    "service_type": "network",
+    "metadata": {
+      "name": "lb-fixed-nodeport"
+    },
+    "ports": [
+      {
+        "name": "http",
+        "protocol": "TCP",
+        "port": 80,
+        "target_port": 8080
+      }
+    ],
+    "routing_level": "network",
+    "provider_hints": {
+      "kubernetes": {
+        "selector": {
+          "app": "backend"
+        },
+        "node_ports": { "http": 30808 }
+      }
     }
-  ],
-  "metadata": {
-    "name": "lb-fixed-nodeport"
-  },
-  "loadBalancerType": "network",
-  "providerHints": {
-    "kubernetes": {
-      "selector": {
-        "app": "backend"
-      },
-      "nodePorts": { "http": 30808 }
-    }
-  },
-  "serviceType": "network"
+  }
 }
 ```
 
@@ -393,14 +392,16 @@ balancing intent:
 
 ```json
 {
-  "ports": [{ "protocol": "TCP", "port": 3000, "targetPort": 3000 }],
-  "metadata": { "name": "internal-api" },
-  "providerHints": {
-    "kubernetes": {
-      "selector": { "app": "api" }
+  "spec": {
+    "service_type": "network",
+    "metadata": { "name": "internal-api" },
+    "ports": [{ "protocol": "TCP", "port": 3000, "target_port": 3000 }],
+    "provider_hints": {
+      "kubernetes": {
+        "selector": { "app": "api" }
+      }
     }
-  },
-  "serviceType": "network"
+  }
 }
 ```
 
@@ -408,67 +409,66 @@ balancing intent:
 
 ```json
 {
-  "ports": [{ "name": "http", "port": 80, "targetPort": 8080 }],
-  "metadata": { "name": "dev-service" },
-  "providerHints": {
-    "kubernetes": {
-      "selector": { "app": "dev" },
-      "nodePorts": { "http": 30080 }
+  "spec": {
+    "service_type": "network",
+    "metadata": { "name": "dev-service" },
+    "ports": [{ "name": "http", "port": 80, "target_port": 8080 }],
+    "provider_hints": {
+      "kubernetes": {
+        "selector": { "app": "dev" },
+        "node_ports": { "http": 30080 }
+      }
     }
-  },
-  "serviceType": "network"
+  }
 }
 ```
 
-> **Note**: The `loadBalancerType` field expresses load balancing intent. The
-> K8s Network SP infers the Kubernetes Service type from `loadBalancerType` and
-> the presence of `nodePorts`:
->
-> - No `loadBalancerType` + no `nodePorts` → ClusterIP
-> - No `loadBalancerType` + `nodePorts` present → NodePort
-> - `loadBalancerType: network` → LoadBalancer (nodePorts auto-allocated or
->   specified)
->
-> Platform-specific configuration:
->
-> - `selector` is optional. If omitted, the Service is created without selectors
->   for manual endpoint management (via EndpointSlices) or for services that
->   proxy to external resources.
-> - `clusterIP` can be a specific IP from the cluster's service CIDR, `"None"`
->   for headless services, or omitted for auto-assignment.
-> - `nodePorts` (in request) is a map under `providerHints.kubernetes`. In
->   responses, each port object has a `nodePort` field (singular) showing the
->   allocated value. The `nodePorts` keys must match port `name` fields in the
->   ports[] array.
+> The K8s Network SP infers the Kubernetes Service type from `routing_level` and
+> the presence of `node_ports` — see
+> [Service Type Inference](#service-type-inference) for the complete mapping.
+> For details on `selector`, `cluster_ip`, and `node_ports`, see
+> [Kubernetes-Specific Configuration](#kubernetes-specific-configuration).
 
-**Response:** Returns `201 Created` with the following payload. The status is
-set to `PENDING` after the resource is created.
+The request and response use the Network schema wrapped in a `spec` envelope.
+Server-generated read-only fields (`id`, `path`, `status`,
+`spec.metadata.namespace`, `kubernetes`) appear only in the response.
+
+**Response:** Returns `201 Created` with the following payload. The initial
+status is `READY` for ClusterIP and NodePort services or `PENDING` for
+LoadBalancer services (waiting for external IP assignment).
 
 **Example Response Payload:**
 
 ```json
 {
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "web-frontend-service",
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "path": "networks/123e4567-e89b-12d3-a456-426614174000",
   "status": "PENDING",
-  "ports": [
-    {
-      "name": "http",
-      "protocol": "TCP",
-      "port": 80,
-      "targetPort": 8080
+  "spec": {
+    "service_type": "network",
+    "metadata": {
+      "name": "web-frontend-service",
+      "namespace": "production"
     },
-    {
-      "name": "https",
-      "protocol": "TCP",
-      "port": 443,
-      "targetPort": 8443
-    }
-  ],
-  "loadBalancerType": "network",
-  "metadata": {
+    "ports": [
+      {
+        "name": "http",
+        "protocol": "TCP",
+        "port": 80,
+        "target_port": 8080
+      },
+      {
+        "name": "https",
+        "protocol": "TCP",
+        "port": 443,
+        "target_port": 8443
+      }
+    ],
+    "routing_level": "network"
+  },
+  "kubernetes": {
     "type": "LoadBalancer",
-    "clusterIP": "10.96.45.12",
+    "cluster_ip": "10.96.45.12",
     "selector": {
       "app": "web-frontend",
       "tier": "frontend"
@@ -477,26 +477,88 @@ set to `PENDING` after the resource is created.
 }
 ```
 
-> **Note**: The response includes the `loadBalancerType` field from the request.
-> The `metadata` field contains Kubernetes-specific details:
+> **Note**: The response wraps the portable network schema fields in a `spec`
+> envelope. The `spec` field contains only portable fields (`service_type`,
+> `metadata`, `ports`, `routing_level`) - not `provider_hints`. The `kubernetes`
+> field (response-only) contains Kubernetes-specific runtime state:
 >
 > - `type`: The actual K8s Service type created (ClusterIP, NodePort,
->   LoadBalancer) - response-only, inferred from `loadBalancerType` and
->   `nodePorts` presence
-> - `clusterIP`: Auto-assigned or user-specified cluster IP
+>   LoadBalancer) - inferred from `routing_level` and `node_ports` presence in
+>   the request
+> - `cluster_ip`: Auto-assigned or user-specified cluster IP
 > - `selector`: Label selectors for pod routing
-> - `externalIPs`: Array of external IPs or hostnames for LoadBalancer services
+> - `external_ips`: Array of external IPs or hostnames for LoadBalancer services
 >   (from `.status.loadBalancer.ingress[]`). Populated asynchronously.
-> - `nodePort`: Per-port field showing the allocated NodePort value
->   (auto-assigned or from request `providerHints.kubernetes.nodePorts`)
+> - `node_port`: Per-port field showing the allocated NodePort value
+>   (auto-assigned or from request `provider_hints.kubernetes.node_ports`)
 
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload, missing required fields, or
   invalid port numbers
 - **409 Conflict**: Service with the same `metadata.name` already exists in the
-  target namespace
+  target namespace, or NodePort value conflicts with an existing Service
 - **500 Internal Server Error**: Unexpected error during resource creation
+
+#### GET /api/v1alpha1/networks/{network_id}
+
+**Description:** Get a specific network instance.
+
+**Process Flow:**
+
+1. Handler receives `GET` request with `network_id` path parameter.
+2. Calls `GetServiceFromCluster(network_id)`.
+3. Cluster lookup: Query Kubernetes API for `Service` with matching
+   `dcm.project/dcm-instance-id` label.
+4. Response payload: Return complete service instance object.
+
+**Example Response Payload:**
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "path": "networks/123e4567-e89b-12d3-a456-426614174000",
+  "status": "READY",
+  "spec": {
+    "service_type": "network",
+    "metadata": {
+      "name": "web-frontend-service",
+      "namespace": "production"
+    },
+    "ports": [
+      {
+        "name": "http",
+        "protocol": "TCP",
+        "port": 80,
+        "target_port": 8080,
+        "node_port": 31234
+      },
+      {
+        "name": "https",
+        "protocol": "TCP",
+        "port": 443,
+        "target_port": 8443,
+        "node_port": 31235
+      }
+    ],
+    "routing_level": "network"
+  },
+  "kubernetes": {
+    "type": "LoadBalancer",
+    "cluster_ip": "10.96.45.12",
+    "external_ips": ["34.123.45.67"],
+    "selector": {
+      "app": "web-frontend",
+      "tier": "frontend"
+    }
+  }
+}
+```
+
+**Error Handling:**
+
+- **404 Not Found**: Service with the specified `network_id` does not exist
+- **500 Internal Server Error**: Unexpected error querying Kubernetes API
 
 #### GET /api/v1alpha1/networks
 
@@ -521,64 +583,85 @@ set to `PENDING` after the resource is created.
 {
   "results": [
     {
-      "requestId": "123e4567-e89b-12d3-a456-426614174000",
-      "name": "web-frontend-service",
+      "id": "123e4567-e89b-12d3-a456-426614174000",
+      "path": "networks/123e4567-e89b-12d3-a456-426614174000",
       "status": "READY",
-      "loadBalancerType": "network",
-      "ports": [
-        {
-          "name": "http",
-          "protocol": "TCP",
-          "port": 80,
-          "targetPort": 8080,
-          "nodePort": 31234
-        }
-      ],
-      "metadata": {
+      "spec": {
+        "service_type": "network",
+        "metadata": {
+          "name": "web-frontend-service",
+          "namespace": "production"
+        },
+        "ports": [
+          {
+            "name": "http",
+            "protocol": "TCP",
+            "port": 80,
+            "target_port": 8080,
+            "node_port": 31234
+          }
+        ],
+        "routing_level": "network"
+      },
+      "kubernetes": {
         "type": "LoadBalancer",
-        "clusterIP": "10.96.45.12",
-        "externalIPs": ["34.123.45.67"],
+        "cluster_ip": "10.96.45.12",
+        "external_ips": ["34.123.45.67"],
         "selector": {
           "app": "web-frontend"
         }
       }
     },
     {
-      "requestId": "456e7890-e89b-12d3-a456-426614174001",
-      "name": "api-gateway",
+      "id": "456e7890-e89b-12d3-a456-426614174001",
+      "path": "networks/456e7890-e89b-12d3-a456-426614174001",
       "status": "READY",
-      "ports": [
-        {
-          "name": "api",
-          "protocol": "TCP",
-          "port": 3000,
-          "targetPort": 3000
-        }
-      ],
-      "metadata": {
+      "spec": {
+        "service_type": "network",
+        "metadata": {
+          "name": "api-gateway",
+          "namespace": "production"
+        },
+        "ports": [
+          {
+            "name": "api",
+            "protocol": "TCP",
+            "port": 3000,
+            "target_port": 3000
+          }
+        ]
+      },
+      "kubernetes": {
         "type": "ClusterIP",
-        "clusterIP": "10.96.45.13",
+        "cluster_ip": "10.96.45.13",
         "selector": {
           "app": "api-gateway"
         }
       }
     },
     {
-      "requestId": "789e1234-e89b-12d3-a456-426614174002",
-      "name": "dev-service",
+      "id": "789e1234-e89b-12d3-a456-426614174002",
+      "path": "networks/789e1234-e89b-12d3-a456-426614174002",
       "status": "READY",
-      "ports": [
-        {
-          "name": "http",
-          "protocol": "TCP",
-          "port": 8080,
-          "targetPort": 8080,
-          "nodePort": 30080
-        }
-      ],
-      "metadata": {
+      "spec": {
+        "service_type": "network",
+        "metadata": {
+          "name": "dev-service",
+          "namespace": "production"
+        },
+        "ports": [
+          {
+            "name": "http",
+            "protocol": "TCP",
+            "port": 8080,
+            "target_port": 8080,
+            "node_port": 30080
+          }
+        ]
+      },
+      "kubernetes": {
         "type": "NodePort",
-        "clusterIP": "10.96.45.14",
+        "cluster_ip": "10.96.45.14",
         "selector": {
           "app": "dev"
         }
@@ -589,70 +672,12 @@ set to `PENDING` after the resource is created.
 }
 ```
 
-> **Note:** Each response includes the `loadBalancerType` field (if specified in
-> the request). The `metadata.type` field shows the actual Kubernetes Service
-> type created. Platform-specific details (clusterIP, externalIPs, selector,
-> nodePort) are in the `metadata` object.
-
 **Error Handling:**
 
 - **400 Bad Request**: Invalid pagination parameters
 - **500 Internal Server Error**: Unexpected error querying Kubernetes API
 
-#### GET /api/v1alpha1/networks/{instanceId}
-
-**Description:** Get a specific network instance.
-
-**Process Flow:**
-
-1. Handler receives `GET` request with `instanceId` path parameter.
-2. Calls `GetServiceFromCluster(instanceId)`.
-3. Cluster lookup: Query Kubernetes API for `Service` with matching
-   `dcm.project/dcm-instance-id` label.
-4. Response payload: Return complete service instance object.
-
-**Example Response Payload:**
-
-```json
-{
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
-  "name": "web-frontend-service",
-  "status": "READY",
-  "loadBalancerType": "network",
-  "ports": [
-    {
-      "name": "http",
-      "protocol": "TCP",
-      "port": 80,
-      "targetPort": 8080,
-      "nodePort": 31234
-    },
-    {
-      "name": "https",
-      "protocol": "TCP",
-      "port": 443,
-      "targetPort": 8443,
-      "nodePort": 31235
-    }
-  ],
-  "metadata": {
-    "type": "LoadBalancer",
-    "clusterIP": "10.96.45.12",
-    "externalIPs": ["34.123.45.67"],
-    "selector": {
-      "app": "web-frontend",
-      "tier": "frontend"
-    }
-  }
-}
-```
-
-**Error Handling:**
-
-- **404 Not Found**: Service with the specified `instanceId` does not exist
-- **500 Internal Server Error**: Unexpected error querying Kubernetes API
-
-#### DELETE /api/v1alpha1/networks/{instanceId}
+#### DELETE /api/v1alpha1/networks/{network_id}
 
 **Description:** Delete a network instance.
 
@@ -660,10 +685,10 @@ Remove a single Kubernetes Service resource and returns `204 No Content`.
 
 **Error Handling:**
 
-- **404 Not Found**: Service with the specified `instanceId` does not exist
+- **404 Not Found**: Service with the specified `network_id` does not exist
 - **500 Internal Server Error**: Unexpected error during resource deletion
 
-#### GET /api/v1alpha1/health
+#### GET /api/v1alpha1/networks/health
 
 **Description:** Retrieve the health status for the Kubernetes Service Network
 Provider API.
@@ -704,7 +729,7 @@ traffic to pods matching a selector. The Service object itself only tracks
   events)
 - The informer uses label selector:
   `dcm.project/managed-by=dcm,dcm.project/dcm-service-type=network`
-- The `instanceId` is retrieved from the `dcm.project/dcm-instance-id` label on
+- The `network_id` is retrieved from the `dcm.project/dcm-instance-id` label on
   the Service
 
 #### CloudEvents Format
@@ -712,49 +737,50 @@ traffic to pods matching a selector. The Service object itself only tracks
 Status updates are published to the messaging system using the
 [CloudEvents](https://cloudevents.io/) specification (v1.0). This provides a
 standardized "fire-and-forget" mechanism that decouples the K8s Network SP from
-the DCM backend.
+the DCM backend. Events are published to the messaging system on the subject
+`dcm.network`.
 
-**Message Subject Hierarchy:**
+**CloudEvent Attributes:**
 
-Events are published to the following subject format:
+| Attribute       | Value                           |
+| --------------- | ------------------------------- |
+| specversion     | 1.0                             |
+| id              | Unique event identifier (UUID)  |
+| source          | `dcm/providers/{provider_name}` |
+| type            | `dcm.status.network`            |
+| subject         | `dcm.network`                   |
+| datacontenttype | `application/json`              |
 
-`dcm.providers.{providerName}.network.instances.{instanceId}.status`
+**Data Payload Structure:**
 
-- `providerName`: Unique name of the Kubernetes Network Service Provider
-- `instanceId`: UUID of the network service (from `dcm.project/dcm-instance-id`
-  label)
-
-Events are published to the following type format:
-
-`dcm.providers.{providerName}.status.update`
-
-- `providerName`: Unique name of the Kubernetes Network Service Provider
-
-**Payload Structure:**
-
-```golang
-type NetworkServiceStatus struct {
-    Id      string `json:"id"`
-    Status  string `json:"status"`
-    Message string `json:"message"`
+```json
+{
+  "id": "<dcm-instance-id>",
+  "status": "<DCM_STATUS>",
+  "message": "<human-readable description>"
 }
 ```
 
-**Example Event:**
+The instance identity is carried in the data payload's `id` field, not in the
+messaging subject or CloudEvent attributes. This allows a single wildcard
+subscription (`dcm.*`) on the consumer side.
 
-```golang
-cloudevents "github.com/cloudevents/sdk-go/v2"
+**Example Event Payload:**
 
-event := cloudevents.NewEvent()
-event.SetID("event-123-456")
-event.SetSource("k8s-network-sp-prod")
-event.SetType("dcm.providers.k8s-network-sp.status.update")
-event.SetSubject("dcm.providers.k8s-network-sp.network.instances.abc-123.status")
-event.SetData(cloudevents.ApplicationJSON, NetworkServiceStatus{
-    Id:      "abc-123",
-    Status:  "READY",
-    Message: "Service ready",
-})
+```json
+{
+  "specversion": "1.0",
+  "id": "event-123-456",
+  "source": "dcm/providers/k8s-network-sp",
+  "type": "dcm.status.network",
+  "subject": "dcm.network",
+  "datacontenttype": "application/json",
+  "data": {
+    "id": "abc-123",
+    "status": "READY",
+    "message": "Service ready"
+  }
+}
 ```
 
 See
@@ -773,6 +799,9 @@ statuses. The K8s Network SP uses field-based inspection to determine status.
 | READY      | Service exists AND `.spec.type` = NodePort                                                      |
 | READY      | Service exists AND `.spec.type` = ClusterIP                                                     |
 | DELETED    | Service resource not found in cluster                                                           |
+
+For official definitions, see
+[Kubernetes Service](https://kubernetes.io/docs/concepts/services-networking/service/).
 
 **Field Notes**:
 
@@ -798,39 +827,3 @@ endpoints are normal and do not affect service status during:
 - Scaling to zero
 - Temporary pod failures
 - Headless services (`.spec.clusterIP = "None"`)
-
-### Test Plan
-
-**Unit Tests:**
-
-- API endpoint handlers (POST, GET, DELETE)
-- Service creation logic with label application
-- Selector and port configuration validation
-- Error handling and HTTP status code verification
-- CloudEvents payload formatting
-
-**Integration Tests:**
-
-- Deploy K8s Network SP to KIND/Minikube cluster
-- Create Services of each type (ClusterIP, NodePort, LoadBalancer)
-- Verify Service resources created in Kubernetes with correct labels
-- Verify Service selector correctly configured (traffic will route when matching
-  pods exist)
-- Delete Service and verify cleanup
-
-**Status Reporting Tests:**
-
-- Verify SharedIndexInformer watches Services with correct label selectors
-- Test status transitions: PENDING → READY for LoadBalancer (when external IP
-  assigned)
-- Test READY status for ClusterIP and NodePort services (immediately after
-  creation)
-- Test DELETED status when Service removed from cluster
-- Verify CloudEvents published to correct NATS subject
-- Validate CloudEvents payload structure and content
-
-**End-to-End Tests:**
-
-- Full workflow through DCM Placement Manager
-- Service creation request → K8s Network SP → Service in cluster
-- Status updates propagated back to DCM via messaging system

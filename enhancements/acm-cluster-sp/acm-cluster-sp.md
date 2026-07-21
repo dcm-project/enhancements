@@ -173,7 +173,7 @@ seconds. See documentation for
 
 - Publish status updates for cluster instances to the messaging system using
   CloudEvents format. Events are published to the subject:
-  `dcm.providers.{providerName}.cluster.instances.{instanceId}.status`
+  `dcm.providers.{provider_name}.cluster.instances.{instance_id}.status`
 - See documentation for
   [SP Status Reporting](https://github.com/dcm-project/enhancements/blob/main/enhancements/state-management/service-provider-status-reporting.md).
 - Use `SharedIndexInformer` to watch `HostedCluster` resources.
@@ -207,7 +207,7 @@ resources (see Assumptions section).
   - `kubevirt` - Worker nodes as VMs on OpenShift Virtualization
   - `baremetal` - Worker nodes on bare metal hosts via Agent provider
 
-`defaultPlatform` is used when `providerHints.acm.platform` is not specified in
+`defaultPlatform` is used when `provider_hints.acm.platform` is not specified in
 the request.
 
 > **Note**: v1 uses HyperShift exclusively for cluster provisioning. There is no
@@ -268,20 +268,20 @@ The `metadata.Capabilities` field advertises what this SP instance supports.
 Users and DCM can query registered providers to discover supported platforms,
 provisioning types, and Kubernetes versions before making requests.
 
-| Field                       | Type     | Description                                           |
-| --------------------------- | -------- | ----------------------------------------------------- |
-| supportedPlatforms          | []string | Platforms this SP can provision (kubevirt, baremetal) |
-| supportedProvisioningTypes  | []string | Provisioning methods available (hypershift for v1)    |
-| kubernetesSupportedVersions | []string | Kubernetes versions supported by this SP              |
+| Field                         | Type     | Description                                           |
+| ----------------------------- | -------- | ----------------------------------------------------- |
+| supported_platforms           | []string | Platforms this SP can provision (kubevirt, baremetal) |
+| supported_provisioning_types  | []string | Provisioning methods available (hypershift for v1)    |
+| kubernetes_supported_versions | []string | Kubernetes versions supported by this SP              |
 
 The SP populates these values based on:
 
-- **supportedPlatforms**: Platforms for which infrastructure is configured on
+- **supported_platforms**: Platforms for which infrastructure is configured on
   the ACM hub cluster (KubeVirt infrastructure and/or Agent/InfraEnv resources).
-- **supportedProvisioningTypes**: For v1, this is always `["hypershift"]` as
+- **supported_provisioning_types**: For v1, this is always `["hypershift"]` as
   Hive-based provisioning is not supported in this version.
-- **kubernetesSupportedVersions**: Kubernetes versions that this SP supports. A
-  Cluster SP must advertise the Kubernetes versions it supports, not the
+- **kubernetes_supported_versions**: Kubernetes versions that this SP supports.
+  A Cluster SP must advertise the Kubernetes versions it supports, not the
   platform-specific versions (e.g., OpenShift versions). The SP maintains an
   internal compatibility matrix to translate between Kubernetes versions and
   platform-specific versions. The implementation of this matrix (static
@@ -298,7 +298,7 @@ the
 
 **ACM Cluster SP-specific requirements:**
 
-- `serviceType` field must be set to `"cluster"`
+- `service_type` field must be set to `"cluster"`
 - `operations` field must include at minimum: `CREATE`, `READ`, `DELETE`
 - `metadata.resources` fields may represent the aggregate capacity of the
   infrastructure platforms managed by the ACM hub
@@ -317,13 +317,13 @@ resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                           | Description               |
-| ------ | ---------------------------------- | ------------------------- |
-| POST   | /api/v1alpha1/clusters             | Create a new cluster      |
-| GET    | /api/v1alpha1/clusters             | List all clusters         |
-| GET    | /api/v1alpha1/clusters/{clusterId} | Get a cluster instance    |
-| DELETE | /api/v1alpha1/clusters/{clusterId} | Delete a cluster instance |
-| GET    | /api/v1alpha1/health               | ACM Cluster SP health     |
+| Method | Endpoint                            | Description               |
+| ------ | ----------------------------------- | ------------------------- |
+| POST   | /api/v1alpha1/clusters              | Create a new cluster      |
+| GET    | /api/v1alpha1/clusters              | List all clusters         |
+| GET    | /api/v1alpha1/clusters/{cluster_id} | Get a cluster instance    |
+| DELETE | /api/v1alpha1/clusters/{cluster_id} | Delete a cluster instance |
+| GET    | /api/v1alpha1/health                | ACM Cluster SP health     |
 
 ##### AEP Compliance
 
@@ -350,20 +350,20 @@ DCM. If a cluster with the same `metadata.name` already exists, the ACM Cluster
 SP returns a `409 Conflict` error response without modifying the existing
 resource.
 
-**Provisioning Method Selection via providerHints:**
+**Provisioning Method Selection via provider_hints:**
 
 Users specify the provisioning method and platform configuration using
-`providerHints.acm`:
+`provider_hints.acm`:
 
-| Field       | Type   | Description                                        |
-| ----------- | ------ | -------------------------------------------------- |
-| platform    | string | Infrastructure platform: `kubevirt` or `baremetal` |
-| baseDomain  | string | Base DNS (Domain Name System) domain for cluster   |
-| infraEnv    | string | (BareMetal only) Name of the InfraEnv resource     |
-| agentLabels | object | (BareMetal only) Labels for agent selection        |
+| Field        | Type   | Description                                        |
+| ------------ | ------ | -------------------------------------------------- |
+| platform     | string | Infrastructure platform: `kubevirt` or `baremetal` |
+| base_domain  | string | Base DNS (Domain Name System) domain for cluster   |
+| infra_env    | string | (BareMetal only) Name of the InfraEnv resource     |
+| agent_labels | object | (BareMetal only) Labels for agent selection        |
 
-> **Note**: v1 uses HyperShift exclusively. There is no `provisioningType` field
-> as the provisioning method is fixed.
+> **Note**: v1 uses HyperShift exclusively. There is no `provisioning_type`
+> field as the provisioning method is fixed.
 
 **Version Field Handling:**
 
@@ -396,7 +396,7 @@ translates these abstract specifications to platform-specific instance types.
 {
   "version": "4.15",
   "nodes": {
-    "controlPlane": {
+    "control_plane": {
       "count": 3,
       "cpu": 4,
       "memory": "16GB",
@@ -412,13 +412,13 @@ translates these abstract specifications to platform-specific instance types.
   "metadata": {
     "name": "dev-cluster-01"
   },
-  "providerHints": {
+  "provider_hints": {
     "acm": {
       "platform": "kubevirt",
-      "baseDomain": "example.com"
+      "base_domain": "example.com"
     }
   },
-  "serviceType": "cluster"
+  "service_type": "cluster"
 }
 ```
 
@@ -428,7 +428,7 @@ translates these abstract specifications to platform-specific instance types.
 {
   "version": "4.15",
   "nodes": {
-    "controlPlane": {
+    "control_plane": {
       "count": 3,
       "cpu": 4,
       "memory": "16GB",
@@ -444,29 +444,29 @@ translates these abstract specifications to platform-specific instance types.
   "metadata": {
     "name": "prod-cluster-01"
   },
-  "providerHints": {
+  "provider_hints": {
     "acm": {
       "platform": "baremetal",
-      "baseDomain": "example.com",
-      "infraEnv": "production-infraenv",
-      "agentLabels": {
+      "base_domain": "example.com",
+      "infra_env": "production-infraenv",
+      "agent_labels": {
         "location": "datacenter-1",
         "role": "worker"
       }
     }
   },
-  "serviceType": "cluster"
+  "service_type": "cluster"
 }
 ```
 
 > **Note**: For HyperShift deployments (both KubeVirt and BareMetal):
 >
-> - The `controlPlane.count` field is **ignored**. HyperShift manages control
+> - The `control_plane.count` field is **ignored**. HyperShift manages control
 >   plane high availability internally as pods on the ACM hub cluster, not as
 >   discrete VMs.
-> - The `controlPlane.cpu` and `controlPlane.memory` fields define resource
+> - The `control_plane.cpu` and `control_plane.memory` fields define resource
 >   requests for the hosted control plane pods running on the hub cluster.
-> - The `controlPlane.storage` field is ignored for HyperShift (etcd storage is
+> - The `control_plane.storage` field is ignored for HyperShift (etcd storage is
 >   managed by the HyperShift operator).
 > - The `worker` configuration defines the `NodePool` for worker nodes.
 
@@ -475,10 +475,11 @@ translates these abstract specifications to platform-specific instance types.
 - **KubeVirt**: Worker nodes are created as VMs on the OpenShift Virtualization
   infrastructure. The `worker.cpu`, `worker.memory`, and `worker.storage` values
   are used to configure the VM specifications.
-- **BareMetal**: The `infraEnv` field references the InfraEnv resource for agent
-  discovery. The `agentLabels` field is used to select specific agents from the
-  pool of available bare metal hosts. The `worker.cpu`, `worker.memory`, and
-  `worker.storage` values are used as minimum requirements for agent selection.
+- **BareMetal**: The `infra_env` field references the InfraEnv resource for
+  agent discovery. The `agent_labels` field is used to select specific agents
+  from the pool of available bare metal hosts. The `worker.cpu`,
+  `worker.memory`, and `worker.storage` values are used as minimum requirements
+  for agent selection.
 
 **Response:** Returns `201 Created` with the following payload. The status is
 set to `PENDING` after the resource is created.
@@ -487,16 +488,16 @@ set to `PENDING` after the resource is created.
 
 ```json
 {
-  "requestId": "123e4567-e89b-12d3-a456-426614174000",
+  "request_id": "123e4567-e89b-12d3-a456-426614174000",
   "name": "dev-cluster-01",
   "status": "PENDING",
-  "provisioningType": "hypershift",
+  "provisioning_type": "hypershift",
   "platform": "kubevirt",
   "version": "4.15",
-  "apiEndpoint": "",
-  "consoleUrl": "",
+  "api_endpoint": "",
+  "console_url": "",
   "nodes": {
-    "controlPlane": {
+    "control_plane": {
       "ready": 0,
       "total": 3
     },
@@ -508,14 +509,14 @@ set to `PENDING` after the resource is created.
   "kubeconfig": "",
   "metadata": {
     "namespace": "dev-cluster-01",
-    "createdAt": "2026-01-29T10:30:00Z"
+    "created_at": "2026-01-29T10:30:00Z"
   }
 }
 ```
 
 > **Note**: The payload above is **only** an example. This will be updated when
-> the schema contract is finalized by DCM. Fields like `apiEndpoint`,
-> `consoleUrl`, and `kubeconfig` are empty at creation time and will be
+> the schema contract is finalized by DCM. Fields like `api_endpoint`,
+> `console_url`, and `kubeconfig` are empty at creation time and will be
 > populated once the cluster reaches `READY` status. The `kubeconfig` field will
 > contain a base64-encoded kubeconfig file that provides admin access to the
 > provisioned cluster.
@@ -559,7 +560,7 @@ set to `PENDING` after the resource is created.
 ```
 
 > **Note**: Per AEP-132, LIST returns fully-populated resources. Fields like
-> `apiEndpoint`, `consoleUrl`, and `kubeconfig` may be empty for clusters that
+> `api_endpoint`, `console_url`, and `kubeconfig` may be empty for clusters that
 > are still provisioning or have failed.
 
 **Error Handling:**
@@ -567,7 +568,7 @@ set to `PENDING` after the resource is created.
 - **400 Bad Request**: Invalid pagination parameters
 - **500 Internal Server Error**: Unexpected error querying ACM hub
 
-#### GET /api/v1alpha1/clusters/{clusterId}
+#### GET /api/v1alpha1/clusters/{cluster_id}
 
 **Description:** Get a specific cluster instance.
 
@@ -576,8 +577,8 @@ set to `PENDING` after the resource is created.
 
 **Process Flow:**
 
-1. Handler receives `GET` request with `clusterId` path parameter.
-2. Calls `GetClusterFromHub(clusterId)`.
+1. Handler receives `GET` request with `cluster_id` path parameter.
+2. Calls `GetClusterFromHub(cluster_id)`.
 3. Cluster lookup: Query ACM hub for `HostedCluster` with matching
    `dcm-instance-id` label.
 4. Extract cluster details: API endpoint, console URL, version, node counts.
@@ -613,10 +614,10 @@ care of.
 
 **Error Handling:**
 
-- **404 Not Found**: Cluster with the specified `clusterId` does not exist
+- **404 Not Found**: Cluster with the specified `cluster_id` does not exist
 - **500 Internal Server Error**: Unexpected error querying ACM hub
 
-#### DELETE /api/v1alpha1/clusters/{clusterId}
+#### DELETE /api/v1alpha1/clusters/{cluster_id}
 
 **Description:** Delete a cluster instance.
 
@@ -626,14 +627,14 @@ resources including `NodePools` and `ManagedCluster`), and returns
 
 **Process Flow:**
 
-1. Handler receives `DELETE` request with `clusterId` path parameter.
+1. Handler receives `DELETE` request with `cluster_id` path parameter.
 2. Lookup `HostedCluster` resource by `dcm-instance-id` label.
 3. Delete the resource with cascading deletion.
 4. Return `204 No Content` on success.
 
 **Error Handling:**
 
-- **404 Not Found**: Cluster with the specified `clusterId` does not exist
+- **404 Not Found**: Cluster with the specified `cluster_id` does not exist
 - **500 Internal Server Error**: Unexpected error during resource deletion
 
 #### GET /api/v1alpha1/health
@@ -661,7 +662,7 @@ Resources are watched with the label selector:
 - `managed-by=dcm`
 - `dcm-service-type=cluster`
 
-The `instanceId` of the DCM resource is stored in the label `dcm-instance-id`.
+The `instance_id` of the DCM resource is stored in the label `dcm-instance-id`.
 
 For detailed implementation of the `SharedIndexInformer` pattern (setup phase,
 event processing flow, pros and cons), see the
@@ -677,14 +678,14 @@ Status updates are published to the messaging system using the
 
 Events are published to the following subject format:
 
-`dcm.providers.{providerName}.cluster.instances.{instanceId}.status`
+`dcm.providers.{provider_name}.cluster.instances.{instance_id}.status`
 
-- `providerName`: Unique name of the ACM Cluster Service Provider
-- `instanceId`: UUID of the cluster instance (from `dcm-instance-id` label)
+- `provider_name`: Unique name of the ACM Cluster Service Provider
+- `instance_id`: UUID of the cluster instance (from `dcm-instance-id` label)
 
 Events are published with the following type format:
 
-`dcm.providers.{providerName}.status.update`
+`dcm.providers.{provider_name}.status.update`
 
 **Payload Structure:**
 
