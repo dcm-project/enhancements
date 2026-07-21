@@ -9,6 +9,7 @@ words:
   - flocati
   - pkliczewski
   - gabriel-farache
+  - jordigilh
   - Authorino
   - codegen
   - cutover
@@ -17,18 +18,25 @@ words:
   - ITSM
   - jdoe
   - Kessel
+  - KMSID
   - Kuadrant
   - kubeconfig
+  - kubelet
   - oapi
   - OSAC
+  - osac
   - rego
   - RHDH
+  - RWOP
   - opa
   - dcm
   - dcm-api
   - dcm-platform
   - dcm-server
+  - dcmv
+  - datacontenttype
   - frontmatter
+  - Gitea
   - kubevirt
   - monolith
   - monorepo
@@ -39,3 +47,45 @@ words:
   - unhold
   - Virt
   - virtualmachines
+  - specversion
+  - datacontenttype
+  - myapp
+  - baremetal
+  - hypershift
+  - grpcurl
+  - vcpu
+  - finalizer
+  - finalizers
+  - computeinstance
+  - pgerrcode
+  - grpcstatus
+  - grpccodes
+  - Errorf
+  - AAAAC
+  - AAAAI
+  - autonumber
+  - recompiles
+  - Crossplane
+  - dedup
+  - yblum
+  - myapp
+  - editability
+  - cloudevents
+  - infraenv
+  - eksctl
+  - Preboot
+  - deployables
+  - Containerfile
+  - befores
+  - idempotently
+  - subresource
+  - subfolders
+  - behaviour
+  - jubah
+  - vmspec
+  - containerspec
+  - databasespec
+  - clusterspec
+  - CAPI
+  - igavra
+  - Patroni
