@@ -338,14 +338,47 @@ common fields: _service_type, metadata, provider_hints_
 | engine    | Yes      | string                                  | Database engine type (e.g., _postgresql_, _mysql_, _mariadb_) |
 | version   | Yes      | string                                  | Engine version (e.g., _15_, _8.11_, _8.0_)                    |
 | resources | Yes      | [Resources](#database-resources-object) | Compute and storage resources                                 |
+| replicas  | No       | integer                                 | Number of replicas to create (default 1)                      |
+| network   | No       | [Network](#database-network-object)     | Network configuration                                         |
 
 #### Database resources Object
 
-| Field   | Required | Type    | Description                                   |
-| :------ | :------- | :------ | :-------------------------------------------- |
-| cpu     | Yes      | integer | Number of CPU cores                           |
-| memory  | Yes      | string  | Memory size with unit (e.g., _8GB_, _16GB_)   |
-| storage | Yes      | string  | Storage size with unit (e.g., _100GB_, _2TB_) |
+| Field   | Required | Type                                        | Description                                   |
+| :------ | :------- | :------------------------------------------ | :-------------------------------------------- |
+| cpu     | Yes      | [Cpu](#database-resources.cpu-object)       | CPU resource constraints                      |
+| memory  | Yes      | [Memory](#database-resources.memory-object) | Memory resource constrains                    |
+| storage | Yes      | string                                      | Storage size with unit (e.g., _100GB_, _2TB_) |
+
+> **Note**: The resources are per replica, not per database instance
+
+#### Database resources.cpu Object
+
+| Field | Required | Type   | Description                                                      |
+| :---- | :------- | :----- | :--------------------------------------------------------------- |
+| min   | Yes      | string | Minimum guaranteed CPU cores with or without unit (e.g. 500m, 1) |
+| max   | Yes      | string | Maximum allowed CPU cores with or without unit (e.g. 500m, 1)    |
+
+#### Database resources.memory Object
+
+| Field | Required | Type   | Description                                          |
+| :---- | :------- | :----- | :--------------------------------------------------- |
+| min   | Yes      | string | Minimum guaranteed memory with unit (e.g., 1GB, 2GB) |
+| max   | Yes      | string | Maximum allowed memory with unit (e.g, 2GB, 4GB)     |
+
+#### Database network Object
+
+| Field      | Required | Type    | Description                                 |
+| :--------- | :------- | :------ | :------------------------------------------ |
+| port       | No       | integer | Port for the database to listen on          |
+| visibility | No       | string  | Database visibility: _internal_, _external_ |
+
+The `visibility` field controls how the database's port is exposed by the
+Service Provider:
+
+- `internal` - the port is exposed within the Service Provider's platform (For
+  Kubernetes, creates only a `Service` resource of `ClusterIP` type)
+- `external` - the port is exposed externally (For Kubernetes, creates a
+  `Service` resource of `LoadBalancer` or `NodePort` type)
 
 ### Kubernetes Cluster
 
