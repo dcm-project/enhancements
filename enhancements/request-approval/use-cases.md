@@ -12,19 +12,21 @@ enhancement Open Question 1).
 
 ## Diagrams
 
-Copied for review convenience. Canonical copy:
-[Request lifecycle (V1)](./request-approval.md#request-lifecycle-v1). Sequence
-detail:
+Lifecycle for these scenarios (post-placement soft/hard deny). The full
+enhancement sequence may still catch up.
+
+Sequence detail (enhancement draft, may lag):
 [Soft deny override sequence](./request-approval.md#soft-deny-override-sequence).
 
 ```mermaid
 stateDiagram-v2
     [*] --> Submitted: User creates/updates/deletes
-    Submitted --> Evaluating: Policy Engine
+    Submitted --> Placed: Placement Manager
+    Placed --> Evaluating: Policy Engine
     Evaluating --> Provisioning: Allow or modified
     Evaluating --> Rejected: Hard deny
     Evaluating --> PendingOverride: Soft deny overridable
-    PendingOverride --> Provisioning: Override granted
+    PendingOverride --> Provisioning: Override approved
     PendingOverride --> Rejected: Override denied
     PendingOverride --> Expired: Timeout
     PendingOverride --> Cancelled: Requester cancels
@@ -37,6 +39,10 @@ stateDiagram-v2
 ## Approval scenarios
 
 Unless noted, **Scope:** V1 · **Maps to:** UC #16.
+
+Soft-deny and hard-deny evaluation run **after placement**, on the
+post-placement payload (not on bare catalog intent alone). CatalogItem checks
+still run earlier as today.
 
 ### Soft deny
 
@@ -55,11 +61,12 @@ Soft policy examples:
 
 **Flow:**
 
-1. Create reaches Placement Manager and Policy Engine.
-2. Soft deny with reason and eligible approver roles.
-3. Intent stored as `PendingOverride` with a deadline.
-4. Approver approves the override and records a reason.
-5. Placement and provisioning resume for that request.
+1. Create is accepted and CatalogItem validation runs as today.
+2. Placement Manager runs placement (agents and post-placement payload).
+3. Policy Engine returns soft deny with reason and eligible approver roles.
+4. Post-placement request stored as `PendingOverride` with a deadline.
+5. Approver approves the override and records a reason.
+6. Provisioning continues for that placed request (SP Resource Manager path).
 
 **End state:** Resource provisions. Audit links requester, approver, reason, and
 the soft denial.
@@ -91,8 +98,9 @@ Hard policy examples:
 
 **Flow:**
 
-1. Policy Engine returns hard deny.
-2. DCM rejects at once.
+1. Placement Manager runs placement.
+2. Policy Engine returns hard deny.
+3. DCM rejects at once. No `PendingOverride`.
 
 **End state:** Immediate rejection with reason.
 
@@ -133,11 +141,12 @@ Soft policy examples:
 
 **Flow:**
 
-1. Orchestration evaluates children.
+1. Orchestration expands the composite and runs placement per child as needed.
 2. Allowed children may proceed or wait per orchestration rules.
-3. Soft denied child enters `PendingOverride` for that child only.
+3. Soft denied child (post-placement) enters `PendingOverride` for that child
+   only.
 4. Approver approves the override for the blocked child and records a reason.
-5. Composite stays pending until that child clears.
+5. Composite stays pending until that child clears, then provisioning continues.
 
 **End state:** Children provision after the child override. No parent level
 approval in V1.
