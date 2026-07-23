@@ -26,6 +26,11 @@ see-also:
 
 ## Terminology
 
+- **Cycle**: A circular dependency among resources (A depends on B and B depends
+  on A, directly or through other nodes). Cycles cannot be topologically sorted
+  or assigned `dagLevel` values, so Placement rejects them during DAG compile time
+  and fails the request.
+
 - **DAG (Directed Acyclic graph)**: The dependency graph Placement compiles from
   a resolved `resources[]` payload. Placement combines CEL `${resource.field}`
   references in each spec with explicit `requiresResources` to form edges,
