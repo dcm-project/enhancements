@@ -23,9 +23,9 @@ stateDiagram-v2
     [*] --> Submitted: User creates/updates/deletes
     Submitted --> Placed: Placement Manager
     Placed --> Evaluating: Policy Engine
-    Evaluating --> Provisioning: Allow or modified
+    Evaluating --> Provisioning: Allow, modified, or soft deny with exemption
     Evaluating --> Rejected: Hard deny
-    Evaluating --> PendingOverride: Soft deny overridable
+    Evaluating --> PendingOverride: Soft deny, no exemption
     PendingOverride --> Provisioning: Override approved
     PendingOverride --> Rejected: Override denied
     PendingOverride --> Expired: Timeout
@@ -64,7 +64,8 @@ Soft policy examples:
 1. Create is accepted and CatalogItem validation runs as today.
 2. Placement Manager runs placement (agents and post-placement payload).
 3. Policy Engine returns soft deny with reason and eligible approver roles.
-4. Post-placement request stored as `PendingOverride` with a deadline.
+4. No thin exemption matches. Request stored as `PendingOverride` with a
+   deadline.
 5. Approver approves the override and records a reason.
 6. Provisioning continues for that placed request (SP Resource Manager path).
 
@@ -126,8 +127,8 @@ delete intent.
 
 ### Composite
 
-**Scope:** V1 lean if Open Question 4 is per child · **Maps to:** UC #16 on a UC
-#2 child.
+**Scope:** V1 if Open Question 4 is per child · **Maps to:** UC #16 on a UC #2
+child.
 
 #### Child needs override
 
@@ -151,12 +152,32 @@ Soft policy examples:
 **End state:** Children provision after the child override. No parent level
 approval in V1.
 
+### Soft deny with thin exemption
+
+**Scope:** V1 · **Maps to:** UC #16 (auto-skip branch).
+
+Known exception class: soft deny would fire, but an active thin exemption
+matches. No human step.
+
+Example: soft deny reason `vm.memory.soft_max`, exemption for team `platform`.
+
+**Flow:**
+
+1. Placement completes. Soft deny candidate on the post-placement payload.
+2. Thin exemption matches (reason/policy id, optional scope such as team).
+3. No `PendingOverride`. Request proceeds.
+4. Audit records the exemption id.
+
+**End state:** Allowed without a human. If the exemption expires or is revoked,
+the next matching request uses the Soft deny human path above.
+
 ### Deferred
 
-**Scope:** Deferred · **Maps to:** not UC #16.
+**Scope:** Deferred · **Maps to:** not UC #16 as V1.
 
 - **Pre-provision gate:** Approve matching creates before provision even when
-  policies allow. See enhancement Alternative 1 and Open Question 1.
+  policies allow. See enhancement Open Question 1.
 - **Dual approval:** Two approvers required for a destructive delete.
-- **Standing exception grant:** Pre-authorized waiver for a time window, not a
-  one-shot override per request.
+- **Full standing grants:** Richer match, waiver lifecycle, and optional
+  “promote a one-shot grant into a lasting rule.” V1 stops at the thin exemption
+  scenario above.
