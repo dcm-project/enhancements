@@ -18,6 +18,12 @@ see-also:
 
 # Placement Manager
 
+## Open Questions
+
+- Which sequence diagram presentation to use for the end-to-end service creation
+  flow? See comparison document for the two options:
+  [creation-flow.md](./creation-flow.md)
+
 ## Terminology
 
 - **DAG (Directed Acyclic graph)**: The dependency graph Placement compiles from
@@ -468,6 +474,8 @@ Example of response payload
 ## Design Details
 
 ### Service Creation Flow
+
+This section is yet to be determined. Please refer to the _Open Question 1_
 
 Creation is documented in two sequence diagrams for readability. One combined
 diagram repeated the same Catalog → Policy → SPRM steps alongside DAG-specific
