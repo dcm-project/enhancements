@@ -4,18 +4,20 @@ Companion to [`request-approval.md`](./request-approval.md). Local scenarios for
 review. Not the DCM UC #1–#21 numbering. Status names may change at
 implementation time.
 
-V1 targets **UC #16** (policy override after soft deny). **UC #2** is composite
-context only. **UC #19** (profile policy resolution) is out of scope here.
+Initial scope targets **UC #16** (policy override after soft deny). **UC #19**
+(profile policy resolution) is out of scope here. See the enhancement Summary
+for what **initial scope** means. Composite parent vs child override is defined
+in the enhancement (Open Question 4), not as a scenario here.
 
 Pre-provision approval without a policy deny is deferred (see Deferred and
 enhancement Open Question 1).
 
 ## Diagrams
 
-Lifecycle for these scenarios (post-placement soft/hard deny). The full
-enhancement sequence may still catch up.
+Lifecycle for these scenarios (soft/hard deny after placement; thin exemption
+can skip `PendingOverride`). Same shape as the enhancement request lifecycle.
 
-Sequence detail (enhancement draft, may lag):
+Sequence detail:
 [Soft deny override sequence](./request-approval.md#soft-deny-override-sequence).
 
 ```mermaid
@@ -26,7 +28,7 @@ stateDiagram-v2
     Evaluating --> Provisioning: Allow, modified, or soft deny with exemption
     Evaluating --> Rejected: Hard deny
     Evaluating --> PendingOverride: Soft deny, no exemption
-    PendingOverride --> Provisioning: Override approved
+    PendingOverride --> Provisioning: Override granted
     PendingOverride --> Rejected: Override denied
     PendingOverride --> Expired: Timeout
     PendingOverride --> Cancelled: Requester cancels
@@ -38,7 +40,7 @@ stateDiagram-v2
 
 ## Approval scenarios
 
-Unless noted, **Scope:** V1 · **Maps to:** UC #16.
+Unless noted, **Scope:** Initial scope · **Maps to:** UC #16.
 
 Soft-deny and hard-deny evaluation run **after placement**, on the
 post-placement payload (not on bare catalog intent alone). CatalogItem checks
@@ -107,7 +109,7 @@ Hard policy examples:
 
 ### Soft deny on delete
 
-**Scope:** V1 if Open Question 3 includes delete.
+**Scope:** Initial scope if Open Question 3 includes delete.
 
 #### Granted
 
@@ -125,36 +127,9 @@ Soft policy examples:
 **End state:** Resource deleted. Audit ties the approval and reason to the
 delete intent.
 
-### Composite
-
-**Scope:** V1 if Open Question 4 is per child · **Maps to:** UC #16 on a UC #2
-child.
-
-#### Child needs override
-
-Composite create (for example vm + database). One child soft denies. The other
-is allowed.
-
-Soft policy examples:
-
-- `database` child: soft deny create without `labels.owner` (blocked)
-- `vm` child: no matching soft deny (allowed)
-
-**Flow:**
-
-1. Orchestration expands the composite and runs placement per child as needed.
-2. Allowed children may proceed or wait per orchestration rules.
-3. Soft denied child (post-placement) enters `PendingOverride` for that child
-   only.
-4. Approver approves the override for the blocked child and records a reason.
-5. Composite stays pending until that child clears, then provisioning continues.
-
-**End state:** Children provision after the child override. No parent level
-approval in V1.
-
 ### Soft deny with thin exemption
 
-**Scope:** V1 · **Maps to:** UC #16 (auto-skip branch).
+**Scope:** Initial scope · **Maps to:** UC #16 (auto-skip branch).
 
 Known exception class: soft deny would fire, but an active thin exemption
 matches. No human step.
@@ -173,11 +148,11 @@ the next matching request uses the Soft deny human path above.
 
 ### Deferred
 
-**Scope:** Deferred · **Maps to:** not UC #16 as V1.
+**Scope:** Deferred · **Maps to:** not UC #16 as initial scope.
 
 - **Pre-provision gate:** Approve matching creates before provision even when
   policies allow. See enhancement Open Question 1.
 - **Dual approval:** Two approvers required for a destructive delete.
 - **Full standing grants:** Richer match, waiver lifecycle, and optional
-  “promote a one-shot grant into a lasting rule.” V1 stops at the thin exemption
-  scenario above.
+  “promote a one-shot grant into a lasting rule.” Initial scope stops at the
+  thin exemption scenario above.
