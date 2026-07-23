@@ -47,14 +47,15 @@ see-also:
 
 ## Summary
 
-The Placement Manager orchestrates resource requests within DCM core. It
-receives resolved application graphs from the Catalog Manager. It builds the
-dependency DAG, validates and enriches each resource through the Policy (which
-now selects an Agent). Then it delegates resource creation and deletion, in DAG
-order, to the SP Resource Manager, which routes through the Messaging System to
-an Agent. The Placement Manager also handles timeout logic for both queued
-requests (Agent reports SP is unhealthy) and pending requests (Agent never
-acknowledged the creation CloudEvent after retries).
+The Placement Manager orchestrates resource requests within DCM control-plane
+(CP). It receives resolved application graphs from the Catalog Manager. It
+builds the dependency DAG, validates and enriches each resource through the
+Policy (which now selects an Agent). Then it delegates resource creation and
+deletion, in DAG order, to the SP Resource Manager, which routes through the
+Messaging System to an environment agent. The Placement Manager also handles
+timeout logic for both queued requests (Agent reports SP is unhealthy) and
+pending requests (Agent never acknowledged the creation CloudEvent after
+retries).
 
 ## Motivation
 
@@ -62,7 +63,8 @@ acknowledged the creation CloudEvent after retries).
 
 - Define end-to-end flow for creating resources
 - Define end-to-end flow for deleting resources (deletion flow)
-- Define how Placement Manager interacts with other domains within DCM core
+- Define how Placement Manager interacts with other domains within DCM
+  control-plane (CP)
 - Define orchestration responsibilities such as DAG compilation, per-resource
   policy validation and DAG order provisioning driven by dependency readiness
 - Define queued-request timeout logic for agent-based routing
@@ -180,8 +182,8 @@ not exposed as a public Placement OpenAPI surface.
 | Method | Operation         | Description                                                           |
 | ------ | ----------------- | --------------------------------------------------------------------- |
 | POST   | `CreateResources` | Admit a run; create one or more resources (single- or multi-resource) |
-| GET    | `ListResources`   | List applications (each with nested `resources[]`)                    |
 | GET    | `GetResource`     | Get a single resource by `id`                                         |
+| GET    | `ListResources`   | List instances (each with nested `resources[]`)                       |
 | DELETE | `DeleteResources` | Delete one or more resources by id (single- or batch)                 |
 
 _Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
@@ -190,7 +192,7 @@ _Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
 `runId` appears in responses but is not sent on create or delete requests for
 now.
 
-_CreateResources_: Admit a run (single or multi-resource graph).
+**CreateResources**: Admit a run (single or multi-resource graph).
 
 Catalog calls Placement after catalog resolution. The request carries the
 `catalogItemInstanceId` and a resolved `resources[]` graph with one or more
@@ -293,7 +295,7 @@ Example of response payload (`202 Accepted`):
       "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
       "name": "ordersDb",
       "path": "resources/696511df-1fcb-4f66-8ad5-aeb828f383a0",
-      "agentName": "postgres-sp",
+      "agentName": "dev-na-agent",
       "approvalStatus": "approved",
       "status": "Pending",
       "dagLevel": 0,
@@ -310,7 +312,7 @@ Example of response payload (`202 Accepted`):
       "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
       "name": "app",
       "path": "resources/c66be104-eea3-4246-975c-e6cc9b32d74d",
-      "agentName": "container-sp",
+      "agentName": "dev-na-agent",
       "approvalStatus": "approved",
       "status": "Pending",
       "requiresResources": ["ordersDb"],
@@ -335,81 +337,6 @@ Example of response payload (`202 Accepted`):
 }
 ```
 
-**ListResources**: List admitted applications.
-
-Each `applications[]` entry is one catalog item instance
-(`catalogItemInstanceId`). Nested `resources[]` holds provisioned nodes for that
-instance (`id` per node).
-
-Example of response payload:
-
-```json
-{
-  "applications": [
-    {
-      "catalogItemInstanceId": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-      "runId": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b",
-      "resources": [
-        {
-          "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
-          "name": "ordersDb",
-          "path": "resources/696511df-1fcb-4f66-8ad5-aeb828f383a0",
-          "agentName": "postgres-sp",
-          "approvalStatus": "approved",
-          "status": "Running",
-          "dagLevel": 0,
-          "spec": {
-            "serviceType": "database",
-            "engine": "postgresql",
-            "version": "16",
-            "metadata": { "name": "orders-db" }
-          }
-        },
-        {
-          "id": "c66be104-eea3-4246-975c-e6cc9b32d74d",
-          "name": "app",
-          "path": "resources/c66be104-eea3-4246-975c-e6cc9b32d74d",
-          "agentName": "container-sp",
-          "approvalStatus": "approved",
-          "status": "Running",
-          "requiresResources": ["ordersDb"],
-          "dagLevel": 1,
-          "spec": {
-            "serviceType": "container",
-            "image": { "reference": "registry.example.com/orders-api:1.0" },
-            "metadata": { "name": "orders-api" }
-          }
-        }
-      ]
-    },
-    {
-      "catalogItemInstanceId": "f3645f8f-82c1-4efb-888f-318c0ac81a08",
-      "runId": "2d8a1c9e-4f6b-4a7d-8e3c-1b2a3c4d5e6f",
-      "resources": [
-        {
-          "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-          "name": "webserver",
-          "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-          "agentName": "kubevirt-sp",
-          "approvalStatus": "approved",
-          "status": "Running",
-          "dagLevel": 0,
-          "spec": {
-            "serviceType": "vm",
-            "vcpu": { "count": 2 },
-            "memory": { "size": "2GB" },
-            "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
-            "guestOS": { "type": "ubuntu-22.04" },
-            "metadata": { "name": "ubuntu-vm" }
-          }
-        }
-      ]
-    }
-  ],
-  "nextPageToken": ""
-}
-```
-
 **GetResource**: Get a single resource by id.
 
 Returns one provisioned resource by its `id`. The response includes
@@ -422,22 +349,41 @@ Example of response payload
 {
   "catalogItemInstanceId": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
   "runId": "2d8a1c9e-4f6b-4a7d-8e3c-1b2a3c4d5e6f",
-  "resources": {
-    "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-    "name": "webserver",
-    "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
-    "agentName": "kubevirt-sp",
-    "approvalStatus": "approved",
-    "dagLevel": 0,
-    "spec": {
-      "serviceType": "vm",
-      "vcpu": { "count": 4 },
-      "memory": { "size": "2GB" },
-      "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
-      "guestOS": { "type": "ubuntu-22.04" },
-      "metadata": { "name": "ubuntu-vm" }
+  "resources": [
+    {
+      "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "name": "webserver",
+      "path": "resources/08aa81d1-a0d2-4d5f-a4df-b80addf07781",
+      "agentName": "prod-eu-agent",
+      "approvalStatus": "approved",
+      "dagLevel": 0,
+      "spec": {
+        "serviceType": "vm",
+        "vcpu": { "count": 4 },
+        "memory": { "size": "2GB" },
+        "storage": { "disks": [{ "name": "boot", "capacity": "50GB" }] },
+        "guestOS": { "type": "ubuntu-22.04" },
+        "metadata": { "name": "ubuntu-vm" }
+      }
     }
-  }
+  ]
+}
+```
+
+**ListResources**: List admitted instances.
+
+Each `instances[]` entry is one resource instance and uses the same schema as
+the **GetResource** response.
+
+Example of response payload:
+
+```json
+{
+  "instances": [
+    {/* instance - same schema as GET response */},
+    {/* instance - same schema as GET response */}
+  ],
+  "nextPageToken": ""
 }
 ```
 
