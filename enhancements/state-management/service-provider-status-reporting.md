@@ -159,6 +159,14 @@ type StorageStatus struct {
 }
 ```
 
+```golang
+type NetworkStatus struct {
+  Id string  `json:"id"`
+  Status string `json:"status"`
+  Message string `json:"message"`
+}
+```
+
 **Example golang event**
 
 ```golang
@@ -237,6 +245,23 @@ provisioning and binding lifecycle. **Target Statuses:** `PROVISIONING`,
 
 See [k8s-storage-sp](../k8s-storage-sp/k8s-storage-sp.md) for the reference
 Kubernetes Storage SP status mapping.
+
+##### Network status
+
+For network services (e.g., Kubernetes Services), status reflects the readiness
+of network endpoints to route traffic. **Target Statuses:** `PENDING`, `READY`,
+`DELETED`.
+
+| DCM Generic Status | Kubernetes Service Equivalent                                                  |
+| :----------------- | :----------------------------------------------------------------------------- |
+| **PENDING**        | `.spec.type` = `LoadBalancer` AND `.status.loadBalancer.ingress[]` is empty    |
+| **READY**          | `.spec.type` = `LoadBalancer` AND `.status.loadBalancer.ingress[]` has entries |
+| **READY**          | `.spec.type` = `NodePort`                                                      |
+| **READY**          | `.spec.type` = `ClusterIP`                                                     |
+| **DELETED**        | Service resource not found                                                     |
+
+See [k8s-network-sp](../k8s-network-sp/k8s-network-sp.md) for the reference
+Kubernetes Network SP status mapping.
 
 ##### Cluster status
 
