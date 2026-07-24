@@ -9,7 +9,7 @@ reviewers:
   - "@jenniferubah"
   - "@flocati"
   - "@gabriel-farache"
-  - "@croadfel"
+  - "@croadfeldt"
 approvers:
   - TBD
 creation-date: 2026-07-22
@@ -29,378 +29,388 @@ see-also:
 These need team validation before implementation. Where a proposed approach is
 stated, it is a suggestion only, not a decision.
 
-1. **Primary model**  
-   Some requirements ask for approving requests before they are processed. The
-   Policy Engine and related design input favor automated allow or deny, with a
-   human step only when a soft policy blocks. Confirm or reject?
+The primary shape is proposed below (Rego + external ticketing). The in-DCM
+grant/deny alternative is documented under
+[Alternative 1](#alternative-1-dcm-native-pending-override-and-grantdeny-api).
+
+1. **How DCM and the ticket connect**  
+   Who opens the ticket, how DCM learns it was approved, and what “on time”
+   means?
 
    > [!NOTE] **Proposed approach**  
-   > Keep automation as the default. A human is involved only after a soft
-   > policy has already blocked the request; that person may grant or deny a
-   > timed override for that denial.  
-   > Out of initial scope: a separate “approve before process” gate that holds
-   > creates for human review even when policy did not deny them. That idea
-   > stays deferred.
+   > Soft outcome includes a stable `reason` and an **approval validity window**
+   > from policy (for example “until end of Q2”). **DCM opens** the ticket in
+   > the external ticketing system when it parks the request, stores the ticket
+   > id, and **monitors** ticket status. How DCM learns of changes depends on
+   > what the external ticketing system supports (for example outbound events
+   > when available, otherwise periodic status checks).  
+   > When the ticket is **approved inside the validity window**, DCM
+   > **re-evaluates**, then continues to provision only if evaluate allows.  
+   > When approval is **after the window**, or the ticket is denied/abandoned,
+   > the approval is **not valid**. DCM does not provision (reject or expire).
 
-2. **Approver identity**  
-   Who may approve in the initial scope (global admin only, roles from the
-   policy outcome, or a configurable list)?
-
-   > [!NOTE] **Proposed approach**  
-   > When the Policy Engine returns a soft deny, it also returns which roles may
-   > approve. The person who grants or denies must hold one of those roles and
-   > must not be the same person who submitted the request.
-
-3. **Operations in scope**  
-   Create only, or also update and delete when a soft policy blocks?
+2. **Operations in scope**  
+   Create only, or also update and delete when evaluation soft-denies?
 
    > [!NOTE] **Proposed approach**  
-   > Apply the same soft-deny override path to create, update, and delete
-   > whenever those operations already run through policy evaluation.
+   > Soft-deny / ticket path applies to create, update, and delete **only when
+   > policy soft-denies that operation**. It is not “every delete needs
+   > approval.” Owner delete (and other cases) can stay allow in Rego. Soft on
+   > rehydration is deferred (see Deferred items).
 
-4. **Composite requests (UC #2)**  
-   When a composite create (or other lifecycle op) soft-denies, should override
-   apply per child resource or once for the whole parent application?
-
-   > [!NOTE] **Proposed approach**  
-   > Per child. See
-   > [Composite requests (parent vs child override)](#composite-requests-parent-vs-child-override).
-
-5. **GitOps**  
-   GitOps already has a human step before apply. The GitOps controller submits
-   through the same catalog and placement path as the API, so a soft deny can
-   still park the request in `PendingOverride`. That creates a second human gate
-   after git review, and it is unclear who the requester and approver are when
-   the submitter is a controller identity, not a person. What should the initial
-   scope do?
-
-   - **Same override flow:** GitOps-submitted requests can enter
-     `PendingOverride` like any other client. Ops grant or deny via the override
-     API after the PR already merged.
-   - **Skip human override for GitOps:** Treat git review as enough. Soft deny
-     for GitOps-managed instances does not wait on `PendingOverride` (exact rule
-     TBD: auto-allow, fail soft deny as hard, or another policy).
-   - **Out of initial scope:** Do not special-case GitOps yet. Soft deny behaves
-     the same for every client, and a GitOps-specific rule waits until both
-     features are in use together.
-
-   No proposed approach yet.
-
-6. **Auth / RBAC**  
-   Is [authentication](../authentication/authentication.md) plus enough RBAC for
-   “approver is not the requester” required before the initial implementation?
-
-7. **Five override mechanisms**  
-   Are Override Policy, Exception Grant, Manual Override, Compensating Control,
-   and Dual Approval required? Confirm?
+3. **Composite requests (UC #2)**  
+   Soft deny per child or one parent-level ticket?
 
    > [!NOTE] **Proposed approach**  
-   > For the initial scope, ship one-shot human override per request (**Manual
-   > Override**) and a thin soft-deny exemption so a known exception class can
-   > auto-allow without a human (see Soft-deny exemption in Proposal). Leave
-   > full standing grants and the other three mechanisms for later.
+   > Per child. Policy evaluates each child. Each soft-denied child needs its
+   > own ticket (or policy allow) before that child proceeds. Parent status
+   > follows composite orchestration. See
+   > [Composite requests](#composite-requests).
 
-8. **Exemption match shape**  
-   How coarse may initial-scope matching be (policy id / reason code plus
-   optional namespace, team, or catalog type)?
+4. **GitOps**  
+   Soft deny after a merged PR still needs a ticket. Is that acceptable?
 
    > [!NOTE] **Proposed approach**  
-   > Match only on soft-deny reason or policy id, plus optional coarse scope
-   > such as namespace, team, or catalog type. Do not match on rich payload
-   > fields in the initial scope. That level of matching waits for full standing
-   > grants.
+   > Same policy path for GitOps and API. Git review does not replace a soft
+   > deny. Platform admins can encode known exceptions in Rego (or a standing
+   > ticket/change record) so soft deny does not fire. Do not skip policy for
+   > GitOps-managed instances.
+
+5. **Auth / ticket identity**  
+   When DCM opens a ticket, how is the DCM requester represented in the
+   ticketing system?
+
+   > [!NOTE] **Proposed approach**  
+   > Open the ticket with a **DCM service account** (reliable open/monitor
+   > without per-user sync). Always set required ticket fields from the
+   > authenticated DCM actor (for example requester id/email, request id) so
+   > approvers and audit still see who asked.  
+   > Opening the ticket **as the end user** (not only filling requester fields)
+   > stays optional later, if the org already maps DCM identities into the
+   > ticketing system.  
+   > Closing this question needs two things: a stable authenticated DCM actor
+   > from [authentication](../authentication/authentication.md), and an agreed
+   > mapping of which ticketing fields carry requester and request context.
+
+6. **Evaluate outcome shape**  
+   How is soft deny / approval-required represented next to today’s `APPROVED` /
+   `MODIFIED` / hard reject?
+
+   > [!NOTE] **Proposed approach**  
+   > Soft deny is an **explicit evaluate outcome** owned by the
+   > [policy-engine](../policy-engine/policy-engine.md) enhancement (OpenAPI +
+   > Rego contract). This request-approval enhancement consumes that outcome. It
+   > does not invent a side-channel soft reject. See
+   > [Required from the policy-engine enhancement](#required-from-the-policy-engine-enhancement).
 
 ## Summary
 
-This enhancement adds a governed human step when a **soft** policy blocks a
-service request. Automation stays the default: if policy allows the request, it
-provisions as today. If policy soft-denies, the request can wait for another
-person (not the requester) to grant or deny a timed override through the API
-(CLI and UI use the same API). Hard denials stay non-overridable. The initial
-scope also proposes a thin exemption so a known soft-deny class can auto-allow
-without asking a human every time. Full standing grants come later.
+This enhancement covers **UC #16** (policy override / approval when policy
+blocks a request) without building an in-DCM approval product.
 
-**Initial scope** means the first delivery of this enhancement: one-shot
-soft-deny override plus thin exemption. Later work is under Deferred and
-Non-Goals. Reviewer scenarios: [`use-cases.md`](./use-cases.md).
+**Initial scope** means: express approval needs as Rego policies in the Policy
+Engine. Run soft/hard outcomes on the **post-placement** payload. Use an
+external ticketing system (for example ServiceNow) as the human system of
+record. DCM parks the request, monitors the ticket, and on approve-on-time
+**re-evaluates** before provision. Known exceptions are encoded in policy (or a
+standing ticket record), not as a DCM exemption API. Hard denials stay
+non-overridable.
 
 ## Motivation
 
 SREs and platform admins sometimes need a governed exception when policy blocks
 a request that still has to go through for a business reason (for example a
-short capacity burst or a soft placement rule). Today DCM only has automated
-allow, deny, and mutate in the Policy Engine. There is no audited human path to
-unblock a soft denial, and no lifecycle for waiting on an approver. If DCM has
-no official override path, teams tend to provision outside DCM or loosen the
-policy so the soft case always passes. Repeating the same soft deny for an
-already decided exception class also trains rubber-stamping. This enhancement
-adds a human path and a minimal way to skip re-asking for a known class, while
-keeping automation as the default.
+short capacity burst or a soft sizing rule). DCM already has automated allow,
+deny, and mutate in the Policy Engine. Adding a second human-approval lifecycle
+inside DCM (`PendingOverride`, grant/deny APIs, exemption inventory, CLI/UI)
+duplicates what external ticketing tools already do for audit, SLA, and routing.
+
+If there is no official path at all, teams tend to provision outside DCM or
+loosen policy so the soft case always passes. The cheaper fix is: write clear
+approval-oriented Rego, return a soft outcome when a human is required, and let
+ServiceNow (or similar) own the human decision. DCM stays automation-first and
+policy-first.
 
 ### Goals
 
-- When a soft policy blocks a request and no thin exemption matches, park the
-  request in `PendingOverride` (name may change) instead of rejecting it at once
-- Let an authorized actor who is not the requester **grant** or **deny** a one
-  shot, timed override via API (CLI and UI use the same API)
-- On grant, resume placement and provisioning for that request. On deny or
-  timeout, end the request with a clear reason
-- Let an authorized admin create a **thin soft-deny exemption** so matching soft
-  denies auto-allow and never enter `PendingOverride`
-- Keep hard policy denials non overridable in the initial scope
-- Audit one-shot grant, deny, expiry, and exemption use with actor, rationale,
-  and scope
-- Document deferred approval ideas so the team can schedule them later
+- Depend on a Policy Engine **soft deny / approval-required** evaluate outcome
+  (defined in the policy-engine enhancement) on the post-placement payload
+- Let teams express “needs human approval” and known auto-allow exceptions as
+  Rego (and policy data), using the existing Policy Engine
+- Integrate with an external ticketing system as the human system of record for
+  soft outcomes. **DCM opens** the ticket when parking, monitors it, and on
+  valid approval **re-evaluates** before provision
+- Enforce an **approval validity window** from the soft outcome (for example
+  until end of Q2). Late approval does not count
+- Keep hard deny fail-fast with no ticket path
+- Keep CatalogItem validation early. Soft/hard approval outcomes after placement
+- Document what stays out of DCM so scope does not grow into a full approval
+  product
 
 ### Non-Goals
 
-- Replacing or redesigning the Policy Engine allow, deny, mutate, and agent
-  selection pipeline
-- A **pre-provision approval queue** where matching requests wait for a human
-  before provisioning starts (see Deferred)
-- Dual approval, sequential multi approver chains, or quorum (N of M)
-- **Full standing grants** in the initial scope (rich matchers, planned
-  exception workflows, auto-promoting a one-shot human grant into a reusable
-  rule, delegated issuer product flows). See thin exemption vs standing grants
-  below
-- The rest of the five mechanism catalog beyond Manual Override and the thin
-  exemption
-- Depending on unmerged UDLM Class hierarchy or related proposals
-- Integrating ServiceNow (or similar) so an external ticket is the official
-  approve/deny decision. DCM owns the override lifecycle
-- Shipping a library of Rego policies. This doc defines the override contract
-  and lifecycle only
+- A DCM-native pending override state with in-product grant/deny APIs and
+  approver UI as the system of record
+- Thin soft-deny exemption objects, standing grants, or waiver inventory inside
+  DCM
+- A pre-provision queue that parks requests for a human even when policy did not
+  soft-deny
+- Dual approval, sequential chains, or quorum inside DCM
+- Replacing or redesigning the Policy Engine allow / deny / mutate pipeline
+  beyond the soft-outcome contract
+- Shipping a library of production Rego policies (this doc defines the contract.
+  Sample Rego in use-cases is illustrative only)
+- Building ServiceNow (or any ticketing product) itself. Only the DCM↔ticket
+  open/monitor contract
+- Requiring the **client** to open the ticket (DCM opens it when parking)
+- Closing Open Question 5 without auth and ticketing field mapping design
+- Enforcing approver ≠ requester (or other SoD) inside DCM for this path
 
 ## Proposal
 
-Concrete reviewer scenarios (payloads, flows, initial scope vs deferred) live in
-[`use-cases.md`](./use-cases.md).
+Concrete scenarios live in [`use-cases.md`](./use-cases.md).
 
 ### Assumptions
 
-- Policy evaluation already runs on create (and later on other lifecycle ops)
-  through Placement Manager and Policy Engine
-- Soft and hard deny run on the **post-placement** payload (CatalogItem
-  validation stays early). See [`use-cases.md`](./use-cases.md)
-- Policies can mark denials as **soft** (overridable) or **hard** (not
-  overridable), or the initial scope adds that to the evaluate response
-- Authenticated actor identity is available on grant, deny, and exemption
-  management calls (see Open Question 6)
+- Policy evaluation already runs through Placement Manager and Policy Engine
+- Soft and hard outcomes run on the **post-placement** payload. CatalogItem
+  checks stay early
+- The **policy-engine enhancement** will define and ship the soft deny /
+  approval-required evaluate contract listed under
+  [Required from the policy-engine enhancement](#required-from-the-policy-engine-enhancement).
+  This enhancement is blocked on that contract for the ticket path
+- An external ticketing system (for example ServiceNow) is available where UC
+  #16 needs a human step. Deployments without that system keep hard deny and
+  must encode exceptions in Rego only. The soft/ticket path stays off
+- The external ticketing system is the human system of record. DCM does not
+  expose grant/deny as the approval UI. DCM **opens** the ticket when parking,
+  **monitors** it, and drives continue / expire
+- Soft outcome includes (or implies) an **approval validity window** from policy
+- Authenticated DCM identity exists for the requester so ticket fields can carry
+  requester context (see Open Question 5)
+- DCM does **not** enforce approver ≠ requester. Approver eligibility and
+  segregation of duties are owned by the external ticketing system (revisit only
+  if Alternative 1 returns)
 
-### Soft-deny exemption (thin object)
+### Required from the policy-engine enhancement
 
-> [!NOTE] This is a **proposed implementation choice**, not a closed decision.
-> The intent is to ship a small auto-skip for “we already decided this exception
-> class, stop asking every time,” and leave room for follow-up work that grows
-> into **full standing grants** without rewriting the human override path.
+This request-approval work **consumes** Policy Engine evaluate. It does not own
+the soft-outcome schema. The [policy-engine](../policy-engine/policy-engine.md)
+enhancement (or a follow-on edit to it) must define at least:
 
-**Initial-scope thin exemption (proposed):**
+| PE must define                                                                                                   | Why request-approval needs it                                                                                                                                   |
+| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Soft deny / approval-required as an evaluate outcome distinct from `APPROVED`, `MODIFIED`, and hard reject       | Placement Manager must park instead of provision or hard-fail                                                                                                   |
+| Stable machine-readable `reason` code (or equivalent) on soft outcome                                            | Ticket body, audit, dashboards, matching known exceptions in Rego data. Illustrative values like `vm.memory.soft_max` are reason codes, not payload field paths |
+| Approval **validity window** on soft outcome (for example `valid_until`, or a period PE resolves to a timestamp) | DCM rejects late ticket approvals                                                                                                                               |
+| How Rego signals soft vs hard (package/rule contract or documented reject fields)                                | Authors can write approval policies without ad-hoc PM logic                                                                                                     |
+| OpenAPI / evaluate response field names and backwards compatibility                                              | Clients and PM integrate against one contract                                                                                                                   |
+| Behaviour when multiple policies disagree (soft vs hard)                                                         | Hard must win or conflict must be explicit. No silent soft                                                                                                      |
 
-- A named, revocable object with optional `expires_at`
-- Match is coarse: soft-deny reason or policy id, plus optional scope
-  (namespace, team, or catalog type). See Open Question 8
-- When a soft deny would fire and an active exemption matches, DCM **allows**
-  and does not enter `PendingOverride`
-- Created and revoked by a policy or platform admin role (not the requester’s
-  one-shot approve path)
-- Each auto-allow records which exemption applied
+**Owned by this enhancement (not by policy-engine):**
 
-**Example:** Soft deny reason `vm.memory.soft_max` would normally park a large
-VM create in `PendingOverride`. A platform admin creates exemption `ex-burst-q3`
-for that reason, scoped to team `platform`, with `expires_at` at end of quarter.
-While it is active, matching creates for that team auto-allow. Audit records
-`ex-burst-q3`. After expiry (or revoke), the next matching create parks for a
-human again.
+- Opening, storing, and **monitoring** external tickets (**DCM opens** the
+  ticket when it parks a soft-denied request)
+- Re-evaluate / expire when approval is on time, late, denied, or abandoned
+- DCM waiting-request lifecycle and UX status for “awaiting external approval”
 
-**Order at the soft-deny gate:**
+**Delivery order:** land the PE soft-outcome contract (spec then implementation)
+before or with the DCM ticket-monitor path. Until PE exposes soft, treat soft as
+unavailable (hard-only or feature-flagged off).
 
-1. Soft deny candidate on the post-placement payload
-2. If a thin exemption matches → allow (no human)
-3. Else → `PendingOverride` → human grant or deny
+### Proposed solution
 
-**Why not full standing grants in the first implementation:**
+1. **Rego policies** decide allow, mutate, hard deny, or soft deny /
+   approval-required. Soft means “do not provision until a valid external
+   approval is detected. Hard means “reject, no ticket path.”
+2. **Policy Engine** returns that outcome after placement, including a stable
+   `reason` and validity bound (absolute time or period such as end of Q2).
+3. **DCM opens** a ticket in the external ticketing system (for example
+   ServiceNow) when it parks the request. Human grant/deny happens there. Audit
+   and routing live there.
+4. **DCM monitors** the ticket using the integration the ticketing system
+   supports (outbound events when available, otherwise periodic status checks).
+   On **approve within the validity window**, DCM **re-evaluates**, then
+   continues to provision only if evaluate allows. On **deny**, **abandon**, or
+   **approve too late**, DCM does not provision (expire / reject with reason).
+5. **Known exceptions** (“stop asking every time”) are Rego data or policy
+   updates, or standing ticket records. Not a DCM exemption CRUD API.
 
-- Less surface to build and review first: one-shot approve/deny for a parked
-  request, plus a simple create/revoke exemption. Full standing grants need a
-  richer inventory, matchers, and admin UX. Ship the human override path before
-  that larger product
-- Coarse match avoids designing a full waiver query language and inventory
-  product up front
-- Who may create, renew, and audit long-lived waivers is an org process question
-  (roles, review cadence, blast radius). Agreeing that process is separate from
-  agreeing that one person can approve one soft-denied request
-- Auto-promoting a one-shot human grant into a reusable rule needs match
-  inference and collision rules. That is easy to get wrong early
+```mermaid
+flowchart TD
+  A[Post-placement payload] --> B[Policy Engine / Rego]
+  B -->|allow or modified| C[Provision]
+  B -->|hard deny| D[Reject]
+  B -->|soft deny + validity window| E[Ticket + DCM monitors]
+  E -->|approved on time| F[DCM re-evaluates]
+  F -->|allow or modified| C
+  F -->|hard or soft again| D
+  E -->|denied, abandoned, or late| D
+```
 
-**Temporary limitations (solved later by standing grants):**
+### Soft vs hard outcome
 
-| Initial-scope thin exemption limit                | Standing grants later                                        |
-| ------------------------------------------------- | ------------------------------------------------------------ |
-| Coarse match only                                 | Rich match on payload fields and composed conditions         |
-| No planned-exception / Override Policy workflow   | First-class planned waiver lifecycle                         |
-| Human one-shot grant does not create an exemption | Optional capture of a human decision as a lasting rule       |
-| Simple create / revoke / optional expiry          | Renew, supersede, delegated issuers, richer audit product    |
-| Exemption and Manual Override are separate        | Unified exception inventory with clear skip vs no-skip rules |
+Soft and hard are **evaluate outcomes**, not two separate product policy types.
+Any Rego module may return hard reject or soft / approval-required.
 
-**Evolution:** Treat the thin exemption as a subset shape of a future standing
-grant (or migrate exemptions in a follow-on enhancement). The initial scope can
-ship without waiting for the full standing-grant design to be finished.
+| Outcome                       | Meaning                       | Next step                                                                         |
+| ----------------------------- | ----------------------------- | --------------------------------------------------------------------------------- |
+| Allow / modified              | Policy satisfied (or patched) | Provision                                                                         |
+| Soft deny / approval-required | Needs human decision          | Ticket + DCM monitors. Re-evaluate after approve-on-time. Provision only if allow |
+| Hard deny                     | Non-skippable                 | Reject at once                                                                    |
 
-### Composite requests (parent vs child override)
+**Example soft reason code:** `vm.memory.soft_max` (illustrative stable code
+from policy, not a payload field path and not a policy id) when memory is above
+a soft ceiling but placement still found an agent.
 
-A composite request (UC #2) is one parent application made of several child
-resources (for example a VM and a database). Soft deny can hit one child and not
-the others. That raises a design choice for this enhancement.
+**Example hard reason code:** guest OS not on the approved image list.
 
-**The problem:**
+### Stop repeating the same soft deny
 
-- Soft deny and hard deny evaluate per child after that child’s placement, not
-  on the parent as a single blob
-- If only one child soft-denies, should a human approve that child alone, or
-  approve the whole parent once?
-- Parent-only approval is simpler for the requester (“one button for the app”)
-  but hides which child failed, and can over-approve children that never needed
-  an override
-- Child-only approval matches how policy already runs, and keeps audit tied to
-  the real denial, but the parent composite must stay incomplete until every
-  blocked child is granted, denied, expired, or cancelled
-- Thin exemptions also apply per child soft deny, not at parent level
+If the same soft reason keeps needing approval, update Rego or policy data so
+matching requests allow without a ticket, or let policy read a standing
+ticket/change record. Prefer updating Rego when the same soft reason recurs. Do
+not rely on repeated tickets alone. Do not add a DCM exemption inventory or CRUD
+API for that.
 
-**Proposed approach (Open Question 4):**
+### Composite requests
 
-- Each soft-denied child gets its own `PendingOverride` (or thin-exemption
-  auto-allow) using the same rules as a standalone request
-- Children with no soft deny are not asked for override
-- The parent stays pending while any child is still in `PendingOverride`
-- On child grant, that child continues. On child deny or timeout, that child
-  ends as rejected or expired. What the parent shows when children disagree
-  (some provisioned, some failed) is owned by the composite orchestration
-  design, not by this override enhancement
-- A single parent-level approval gate that covers all children stays deferred
+A composite (UC #2) has several children. Soft/hard evaluate per child after
+that child’s placement. Exact timing in the composite pipeline is owned by
+composite orchestration (see Open Question 3).
 
-> [!NOTE] Confirm or reject in Open Question 4 before treating parent-level
-> approval as in scope.
+**Proposed approach:**
+
+- Soft-denied child → ticket path for that child
+- Allowed children are not held for a parent-level ticket
+- Children on the same DAG level may proceed independently (one soft-denied
+  child does not stop peer evaluation)
+- Whether later DAG levels wait for soft-denied children is owned by composite
+  orchestration, not by this enhancement (Open Question 3)
+- What the parent shows when children disagree is owned by composite
+  orchestration, not by this enhancement
 
 ### User Stories
 
-#### Story 1: Soft policy blocks, override granted
+#### Story 1: Soft deny, ticket approved on time
 
-As a platform engineer, when my VM create is blocked by a soft sizing or
-placement policy, I ask for an override and give a rationale. An authorized SRE
-(not me) grants a timed override. DCM resumes provisioning for that request
-only. The grant and later progress are auditable.
+As a platform engineer, my VM create soft-denies after placement for memory
+above the soft max. Policy says approval is valid until end of Q2. **DCM opens**
+a ServiceNow ticket, parks the request, and monitors the ticket. An approver
+approves in ServiceNow before end of Q2. DCM detects the approval,
+**re-evaluates**, and provisions if evaluate allows. Human decision is recorded
+in ServiceNow. DCM records ticket link, validity check, re-evaluate, and
+continue.
 
-#### Story 2: Soft policy blocks, override denied or expired
+#### Story 2: Soft deny, ticket denied, abandoned, or late
 
-As an SRE, I deny an override, or nobody acts before timeout. The request ends
-as denied or expired. The requester sees why. Nothing is provisioned.
+As an SRE, I deny the ticket, nobody acts, or someone approves **after** the
+validity window (for example after Q2). DCM does not provision. The requester
+sees the policy reason and why approval was invalid or missing.
 
-#### Story 3: Hard policy blocks
+#### Story 3: Hard deny
 
-As a user, when a hard compliance policy denies my request, DCM rejects it at
-once. There is no override API for that denial in the initial scope.
+As a user, hard compliance policy rejects my request. There is no ticket path. I
+must change the request or the policy.
 
-#### Story 4: Admin reviews pending overrides
+#### Story 4: Known exception in Rego
 
-As an SRE, I list pending overrides in CLI or UI, check requester, reason, and
-deadline, then grant or deny.
-
-#### Story 5: Known exception class skips the human
-
-As a platform admin, I create a thin exemption for soft deny reason
-`vm.memory.soft_max` in team `platform` until a given date. Later VM creates
-that would soft-deny for that reason in that team auto-allow. No
-`PendingOverride`. The audit trail names the exemption. When the exemption
-expires or is revoked, the next matching request parks for human override again.
+As a platform admin, I update Rego or policy data so the soft reason
+`vm.memory.soft_max` no longer soft-denies for an agreed scope (for example a
+burst window). Matching creates allow without a ticket until that data is
+removed or expires in policy.
 
 ### Implementation Details/Notes/Constraints
 
 #### Relationship to Policy Engine
 
 Today `POST .../policies:evaluateRequest` returns success (`APPROVED` or
-`MODIFIED`) or rejection. The initial scope extends the soft-deny path so
-Placement Manager can:
+`MODIFIED`) or hard rejection. Soft deny / approval-required is **not** defined
+here. See
+[Required from the policy-engine enhancement](#required-from-the-policy-engine-enhancement).
 
-1. After placement, evaluate soft or hard deny on the resolved payload
-2. On soft deny, check active thin exemptions. On match, allow and continue
-3. If no exemption matches, persist the intent as `PendingOverride` with a
-   deadline and return a client visible pending state
-4. On one-shot grant, continue the existing SP Resource Manager path
-5. On deny or timeout, mark the intent terminal and stop
+Once PE exposes soft, Placement Manager must:
 
-Field names belong in OpenAPI at implementation time. This enhancement requires
-these **outcome classes**: allow, hard deny, soft deny overridable (then
-exemption match or pending override).
+- Not provision on soft
+- Park the request, **open** a ticket in the external ticketing system, monitor
+  it
+- On approve-on-time → **re-evaluate**, then provision only if allow. On deny /
+  abandon / late → expire or reject
 
-#### Proposed API surface (conceptual)
-
-- List or get pending override requests (filter by status, requester, deadline)
-- Grant override by an authorized actor
-- Deny override by an authorized actor
-- Requester may cancel their pending override
-- Create, list, revoke thin soft-deny exemptions (admin)
-
-CLI and UI are clients of this API (epic acceptance criteria). Paths and field
-names belong in OpenAPI at implementation time. Illustrative bodies:
+Illustrative soft outcome **consumed** by this enhancement (field names from PE
+OpenAPI when defined):
 
 ```yaml
-# Grant override
-request_id: req-123
-rationale: Temporary capacity burst for launch week
-expires_at: "2026-09-30T00:00:00Z" # optional
-
-# Deny override
-request_id: req-123
-rationale: Soft max still applies; resize the VM
-
-# Create thin soft-deny exemption (admin)
-reason_or_policy_id: vm.memory.soft_max
-scope:
-  team: platform
-expires_at: "2026-09-30T00:00:00Z"
-rationale: Platform burst window Q3
+outcome: soft_deny # name from policy-engine OpenAPI
+reason: vm.memory.soft_max # stable reason code (illustrative)
+message: Memory above soft max. Approval required
+valid_until: "2026-06-30T23:59:59Z" # e.g. end of Q2
+ticket_hints:
+  category: capacity_exception
 ```
 
-#### Timeout
+#### Sample Rego (illustrative only)
 
-Every pending override has a deadline. On expiry, DCM cancels the request and
-records `Expired`. Default duration is configuration. Policies may suggest a
-shorter bound (details at implementation).
+Not production policy. Shows soft vs hard shape:
+
+```rego
+package dcm.approval.vm
+
+# Hard: unsupported guest image
+hard_deny if {
+  not input.spec.image in data.approved_images
+}
+
+# Soft: large memory needs human approval unless this reason is excepted
+soft_deny if {
+  input.spec.memory_gb > data.soft_max_memory_gb
+  not data.soft_deny_exceptions["vm.memory.soft_max"]
+}
+```
+
+How these map onto evaluate fields is owned by the policy-engine enhancement.
+This doc only shows intent.
+
+#### Ticketing integration (conceptual)
+
+- **Open:** **DCM creates** the ticket (service account) with soft `reason`,
+  request id, validity window, and required requester fields from the
+  authenticated DCM actor (see Open Question 5)
+- **Approve / deny:** Happens in the external ticketing system (human system of
+  record). DCM does not enforce who may approve
+- **Monitor:** DCM watches ticket status using what the ticketing system
+  supports (outbound events when available, otherwise periodic status checks)
+- **On approve:** If `now <= valid_until` (or within the policy window), DCM
+  **re-evaluates** the post-placement payload, then provisions only if evaluate
+  allows. If approval is late, treat as invalid (do not provision)
+- **On deny / abandon / window elapsed with no valid approve:** expire or reject
+- DCM does not implement ServiceNow workflows or an in-product grant/deny UI
 
 #### Deferred items
 
-Do **not** treat these as required for the initial scope unless the team expands
-Goals later:
+Do **not** treat these as required for the initial scope unless Goals expand:
 
-1. **Pre-provision approval queue**: park requests in `PendingApproval` when a
-   rule matches, before provisioning, even if no policy denied
-2. **Dual approval, sequential chains, or quorum**
-3. **Override Policy** artifacts (standing planned exceptions)
-4. **Full standing grants / Exception Grant**: richer matchers, planned waiver
-   lifecycle, optional capture of a human one-shot decision as a lasting rule.
-   The initial scope’s thin exemption is the intentional subset. See Soft-deny
-   exemption
-5. **Compensating Control** substitution flows
-6. **Parent only approval** for composite applications
-7. **GitOps specific** human gates (until OQ 5 is closed)
-8. Dependence on unmerged UDLM Class or profile floors as a prerequisite
-9. Policy-engine **mutate and re-validate until stable** loops, and cycle or
-   non-determinism detection at execution or admission time. Those belong in
-   policy-engine (or related) enhancements, not in this approval lifecycle
-
-Dropping deferred items later is expected, not a design failure.
+1. DCM-native `PendingOverride` and in-product grant/deny APIs
+2. DCM thin exemption / standing-grant inventory
+3. Pre-provision human queue without a soft deny
+4. Dual approval or quorum inside DCM
+5. GitOps-specific skip of soft deny
+6. Soft on **rehydration** when PE soft lands (inherit vs treat as hard). Not an
+   epic AC. Rehydration already calls the same evaluate API.
+7. Policy-engine mutate and re-validate loops until stable, and cycle detection
+   (policy-engine domain)
+8. Full five-mechanism catalog from external design input
 
 ### Risks and Mitigations
 
-| Risk                                                                            | Mitigation                                                                                                             |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Requirements are read as needing a full pre-provision and multi mechanism model | State the initial scope in Goals, Non-Goals, and Deferred items. Keep Open Question 1 open until validated             |
-| Soft vs hard is missing in the current Policy Engine                            | Add an explicit denial class in the evaluate outcome before enabling pending override                                  |
-| Self approval breaks separation of duties                                       | Reject grant when actor equals requester. Require an approver role match                                               |
-| Pending overrides pile up forever                                               | Mandatory timeout with auto cancel. List or alert near deadlines                                                       |
-| Thin exemptions become a silent bypass catalog                                  | Require rationale, expiry or review, and metrics on exemption hits vs human overrides                                  |
-| Auth or RBAC is not ready                                                       | Call out OQ 6. Gate the API behind a feature flag until identity exists                                                |
-| Scope creep from external maximal designs                                       | Goals, Non-Goals, and Deferred items define the initial scope. New mechanisms need a new enhancement or a Goals change |
+| Risk                                           | Mitigation                                                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Soft outcome missing in Policy Engine          | Block ticket path until PE soft contract lands. See Required from the policy-engine enhancement                           |
+| External ticketing unavailable or not deployed | Soft/ticket path off. Rego allow/hard-deny only until ticketing is configured                                             |
+| Ticket monitor or late-approval rules unclear  | Close Open Question 1. Confirm how DCM observes ticket updates for the chosen ticketing system. Late approval is invalid. |
+| Teams loosen Rego instead of using tickets     | Keep soft reasons visible. Review policies that soft-deny often                                                           |
+| Scope creeps back to in-DCM approval product   | Non-Goals, Deferred items, and Alternative 1. New surface needs a Goals change                                            |
+| Composite / DAG timing unclear                 | Open Question 3. Align with composite orchestration design                                                                |
 
 ## Design Details
 
@@ -411,20 +421,19 @@ stateDiagram-v2
     [*] --> Submitted: User creates/updates/deletes
     Submitted --> Placed: Placement Manager
     Placed --> Evaluating: Policy Engine (post-placement payload)
-    Evaluating --> Provisioning: Allow, modified, or soft deny with exemption
+    Evaluating --> Provisioning: Allow or modified
     Evaluating --> Rejected: Hard deny
-    Evaluating --> PendingOverride: Soft deny, no exemption
-    PendingOverride --> Provisioning: Override granted
-    PendingOverride --> Rejected: Override denied
-    PendingOverride --> Expired: Timeout
-    PendingOverride --> Cancelled: Requester cancels
+    Evaluating --> AwaitingExternalApproval: Soft deny / approval-required
+    AwaitingExternalApproval --> Provisioning: Ticket approved on time, re-evaluate allows
+    AwaitingExternalApproval --> Rejected: Denied, abandoned, late, or re-evaluate fails
     Provisioning --> [*]
     Rejected --> [*]
-    Expired --> [*]
-    Cancelled --> [*]
 ```
 
-### Soft deny override sequence
+`AwaitingExternalApproval` is DCM waiting while monitoring an external ticket.
+It is not an in-product grant/deny API. Name may change.
+
+### Soft deny and ticket sequence
 
 ```mermaid
 sequenceDiagram
@@ -432,116 +441,129 @@ sequenceDiagram
     participant CM as Catalog Manager
     participant PM as Placement Manager
     participant PE as Policy Engine
-    actor Approver
+    participant TicketSys as External ticketing system
 
     User->>CM: Create CatalogItemInstance
     CM->>PM: Create resource intent
     PM->>PM: Placement
     PM->>PE: evaluateRequest (post-placement payload)
-    PE-->>PM: soft deny (overridable, reason, approver roles)
-    alt Thin exemption matches
-        PM->>PM: Record exemption hit, continue
+    PE-->>PM: soft deny (reason, valid_until, ticket hints)
+    PM->>TicketSys: Open ticket
+    TicketSys-->>PM: ticket id
+    PM->>PM: Park request, store ticket id
+    PM-->>CM: Awaiting external approval
+    CM-->>User: Soft deny + reason + validity window
+    loop Monitor ticket
+        PM->>TicketSys: Get ticket status
+        TicketSys-->>PM: pending / approved / denied
+    end
+    alt Approved on time
+        PM->>PE: Re-evaluate (post-placement payload)
+        PE-->>PM: Allow or modified
         PM->>PM: Provision
-        PM-->>CM: Accepted
-        CM-->>User: Provisioning
-    else No exemption
-        PM->>PM: Persist intent, status PendingOverride, deadline
-        PM-->>CM: Accepted pending override
-        CM-->>User: Pending override (reason, deadline)
-        Approver->>PM: Grant override (rationale)
-        PM->>PM: Verify actor ≠ requester, role allowed, not expired
-        PM->>PM: Continue provision
-        PM-->>Approver: Override granted, provisioning
+    else Denied, abandoned, or approved late
+        PM->>PM: Reject or expire
+    else Approved on time but re-evaluate soft or hard
+        PM->>PM: New ticket path or reject (no silent provision)
     end
 ```
 
 ### Data model (conceptual)
 
-**Example:** pending override
+**Example:** soft evaluate outcome (field names from policy-engine OpenAPI)
 
 ```json
 {
-  "id": "ovr-...",
-  "resource_request_id": "...",
-  "status": "pending|granted|denied|expired|cancelled",
-  "denial_class": "soft",
-  "policy_reason": "...",
-  "eligible_approver_roles": ["platform-sre"],
-  "requester_actor_id": "...",
-  "approver_actor_id": null,
-  "rationale": null,
-  "created_at": "...",
-  "expires_at": "...",
-  "resolved_at": null
+  "outcome": "soft_deny",
+  "reason": "vm.memory.soft_max",
+  "message": "Memory above soft max. Approval required",
+  "valid_until": "2026-06-30T23:59:59Z",
+  "ticket_hints": {
+    "category": "capacity_exception"
+  }
 }
 ```
 
-**Example:** thin soft-deny exemption
+`reason` is a stable reason code from policy (illustrative value above), not a
+payload field path and not a policy id.
 
-```json
-{
-  "id": "ex-...",
-  "reason_or_policy_id": "vm.memory.soft_max",
-  "scope": {
-    "team": "platform"
-  },
-  "rationale": "Platform burst window Q3",
-  "created_by_actor_id": "...",
-  "created_at": "...",
-  "expires_at": "...",
-  "revoked_at": null
-}
+**Example:** waiting request marker (illustrative)
+
+```yaml
+resource_request_id: req-123
+ticket_id: CHG0012345
+valid_until: "2026-06-30T23:59:59Z"
+status: awaiting_external_approval
 ```
 
 ### Upgrade / Downgrade Strategy
 
-- **Upgrade:** New statuses, override APIs, and exemption APIs are additive.
-  Clients that treat any policy rejection as a hard error keep working if soft
-  deny pending is a distinct status they can ignore until they update.
-- **Downgrade / disable:** A feature flag or config turns soft deny pending and
-  exemptions off. Soft denials then behave as today (immediate rejection).
-  Inflight `PendingOverride` records should expire or cancel on disable.
-  Document the choice in release notes.
+- **Upgrade:** Soft outcome is additive. Clients that treat every non-success as
+  hard reject keep working until they handle soft deny.
+- **Downgrade / disable:** Feature flag or config turns soft outcome off. Soft
+  cases behave as hard reject (or allow only via Rego changes). Document in
+  release notes.
 
 ## Implementation History
 
-N/A — Draft still in review. Track progress in the PR and commit history
-instead.
+N/A . Draft in review. Track progress in the PR and commit history.
 
 ## Drawbacks
 
-- **A second path beside pure automation.** People may lean on overrides instead
-  of fixing policies. That raises operational load and weakens the signal from
-  governance. Acceptable if overrides are timed, audited, and metrics flag
-  policies that are overridden often.
-- **Thin exemptions can hide soft policy debt.** A coarse skip may stay forever
-  if nobody reviews expiry. Acceptable if exemptions require rationale, prefer
-  an end date, and standing grants later add a stronger inventory and review
-  model.
-- **Initial scope is narrower than a full pre-provision approval product.**
-  Teams that expect every matching create to wait for a human may call this
-  incomplete. Goals, Deferred items, and Open Question 1 make that disagreement
-  visible before coding.
+- **Two systems.** Operators must use DCM and the ticketing system. Resume must
+  be reliable or users get stuck after ticket approval. Acceptable if Open
+  Question 1 is closed and the integrator is thin.
+- **Weaker in-product UX.** No first-class DCM approver inbox. Acceptable if the
+  ticketing system is already the org’s approval tool.
+- **Environments without an external ticketing system** cannot use the soft path
+  unless everything is expressed as Rego allow/deny only.
 
 ## Alternatives
 
-### Alternative 1: Pre-provision approval queue as initial scope
+### Alternative 1: DCM-native pending override and grant/deny API
 
 #### Description
 
-Matching rules send selected requests to `PendingApproval` before provisioning,
-even when no policy denied. Humans approve to start work.
+Instead of Rego soft deny + external ticketing, DCM would own the human step:
+park soft-denied requests in DCM (`PendingOverride`), and let approvers grant or
+deny via DCM API/CLI/UI. Optional exemption objects could live in DCM as well.
 
 #### Pros
 
-- Matches requirements that want approve-before-processed
-- Familiar ServiceNow style request gate
+- Single product surface for requesters and approvers
+- No external ticketing dependency for UC #16
 
 #### Cons
 
-- Slower happy path. Fights automation first
-- Larger auth and UX surface before override semantics exist
-- Easy to confuse with Policy Engine `APPROVED` status naming
+- Builds an approval product (state, SoD, timeout, UI, exemptions)
+- Duplicates ticketing audit and routing where ServiceNow already exists
+- Larger product and review surface than Rego soft deny plus external ticketing
+
+#### Status
+
+Rejected for initial scope
+
+#### Rationale
+
+Operational and product cost of an in-DCM approval lifecycle outweighs the
+benefit when an external ticketing system can own the human step and Rego can
+own the decision. Revisit only if ticketing integration is blocked and UC #16
+still requires an in-product path.
+
+### Alternative 2: Pre-provision approval queue as initial scope
+
+#### Description
+
+Park matching creates for a human even when policy did not soft-deny.
+
+#### Pros
+
+- Matches “approve before processed” requirements literally
+
+#### Cons
+
+- Slower happy path. Fights automation-first
+- Still needs a human system of record (DCM or external ticketing)
 
 #### Status
 
@@ -549,83 +571,24 @@ Deferred
 
 #### Rationale
 
-Latency and scope outweigh the benefit for the initial scope. Soft deny override
-covers the governed exception path in UC #16. Revisit if Open Question 1’s
-proposed approach is rejected in review.
+Latency and scope outweigh the benefit. Soft deny + ticket covers governed
+exceptions. Revisit if product requirements insist on approve-before-process
+even when policy did not soft-deny.
 
-### Alternative 2: Full five mechanism catalog in the initial scope
-
-#### Description
-
-Ship Override Policy, Exception Grant, Manual Override, Compensating Control,
-and Dual Approval together as the epic’s “several approval policies.”
-
-#### Pros
-
-- Matches maximal external design input in one pass
-- Covers planned, pre authorized, and emergency paths
-
-#### Cons
-
-- High design and review cost. Unclear done criteria
-- Most mechanisms stay unused until org process matures
-- Blocks merge on decisions the initial scope does not need
-
-#### Status
-
-Deferred
-
-#### Rationale
-
-Breadth can wait. Manual Override plus a thin exemption covers the human loop
-and “stop re-asking” without the full catalog. Extra mechanisms should be follow
-on enhancements or later Goals edits.
-
-### Alternative 3: Full standing grants in the initial scope (no thin subset)
+### Alternative 3: Soft deny as hard reject only (no ticket path)
 
 #### Description
 
-Ship rich Exception Grant / standing grants as the primary soft-deny resolution.
-Human `PendingOverride` is only the rare fallback. Include rich matchers, waiver
-lifecycle, and optionally promote a human grant into a lasting rule.
+No soft outcome. Operators only change Rego or fail the request.
 
 #### Pros
 
-- Matches the “human-in-the-loop must stay rare” product direction strongly
-- Avoids a later migration from thin exemption to standing grant
+- Smallest change to Policy Engine
 
 #### Cons
 
-- Larger match, RBAC, and inventory surface before the one-shot path is proven
-- Org process for long-lived waivers is undecided
-- Auto-capture of human decisions needs inference rules the initial scope does
-  not have
-
-#### Status
-
-Deferred (evolution of the thin exemption)
-
-#### Rationale
-
-Operational and design cost of full standing grants outweighs shipping UC #16
-and a coarse auto-skip first. The thin exemption is the deliberate on-ramp.
-
-### Alternative 4: Automated Policy Engine only (no human path)
-
-#### Description
-
-Keep allow, deny, and mutate only. Operators change Rego or ask for policy
-updates when blocked.
-
-#### Pros
-
-- No new lifecycle or approval UX
-- Already designed in the policy engine enhancement
-
-#### Cons
-
-- No governed exception for soft blocks
-- Does not meet the human approval acceptance need for this capability
+- No governed human exception path for UC #16
+- Encourages bypass or permanent policy looseness
 
 #### Status
 
@@ -633,10 +596,11 @@ Rejected
 
 #### Rationale
 
-Epic acceptance needs a human approval path. Pure automation is necessary but
-not enough.
+UC #16 needs a human path. External tickets provide it without a DCM approval
+product.
 
 ## Infrastructure Needed
 
-N/A. No new repositories or CI systems. Implementation uses existing control
-plane APIs, CLI, and UI once auth and RBAC prerequisites are met.
+N/A for new DCM repositories. Needs Policy Engine soft-outcome support and a
+ticketing integration path (config, credentials, and monitor contract) in the
+deployments that enable this capability.
