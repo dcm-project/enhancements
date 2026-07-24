@@ -37,7 +37,7 @@ sequenceDiagram
   CM->>PM: CreateResources<br/>{catalogItemInstanceId, resources[]}
   activate PM
 
-  PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect cycles, assign dagLevel
+  PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect circular deps, assign dagLevel
   alt Compile or DAG error
       PM-->>CM: 4xx compile error
       deactivate PM
@@ -208,7 +208,7 @@ sequenceDiagram
     CM->>PM: CreateResources<br/>{catalogItemInstanceId, resources[]}
     activate PM
 
-    PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect cycles, assign dagLevel
+    PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect circular deps, assign dagLevel
     alt Compile or DAG error
         PM-->>CM: 4xx compile error
         deactivate PM

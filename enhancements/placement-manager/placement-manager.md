@@ -26,29 +26,29 @@ see-also:
 
 ## Terminology
 
-- **Cycle**: A circular dependency among resources (A depends on B and B depends
-  on A, directly or through other nodes). Cycles cannot be topologically sorted
-  or assigned `dagLevel` values, so Placement rejects them during DAG compile time
-  and fails the request.
+- **Circular dependency**: A dependency loop among resources (A depends on B and
+  B depends on A, directly or through other nodes). Circular dependencies cannot
+  be topologically sorted or assigned `dagLevel` values, so Placement rejects
+  them during DAG compile time and fails the request.
 
-- **DAG (Directed Acyclic graph)**: The dependency graph Placement compiles from
+- **DAG (Directed Acyclic Graph)**: The dependency graph Placement compiles from
   a resolved `resources[]` payload. Placement combines CEL `${resource.field}`
-  references in each spec with explicit `requiresResources` to form edges,
-  rejects cycles, and assigns each node a `dagLevel` via topological sort. The
-  graph orders provisioning and deletion.
+  references in each spec with explicit `requiresResources` to form edges. If
+  those edges form a circular dependency, Placement fails compile and returns
+  an error; otherwise it assigns each node a `dagLevel` via topological sort.
+  The graph orders provisioning and deletion.
 
-- **Run**: One Catalog `CreateResources` call from admission through
-  orchestration of all resources in that graph to terminal success or failure. A
-  run may contain a single resource or many related resources.
+- **Run**: A single request from Catalog to Placement. When Placement receives a
+  `run` request, it orchestrates all resources in the request graph until terminal
+  success or failure. A `run` has two parts, synchronous and asynchronous. The
+  synchronous part happens during initialization: store intent, compile the DAG,
+  evaluate policy per resource, persist validated resources, start provisioning
+  for `dagLevel 0`, and return `202 Accepted`. Later levels continue
+  asynchronously when dependencies are `Running`. A `run` may contain a single
+  resource or many related resources.
 
-- **Run admission**: The synchronous phase of a run when Placement accepts a
-  Catalog request: store intent, compile the DAG, evaluate policy for every
-  resource (all must pass before any create), persist validated resource, return
-  `202 Accepted`, and initiate provisioning for `dagLevel 0`. Later levels
-  continue asynchronously when dependencies are `Running`.
-
-- **Run id (`runId`)**: Unique identifier Placement assigns to one run
-  admission.
+- **Run id (`runId`)**: Unique identifier Placement assigns when it initializes
+  a `run`.
 
 ## Summary
 
@@ -134,12 +134,12 @@ flowchart TD
 - Receives resource creation and deletion requests from users
 - Provides REST API endpoints for _create_, _read_, _delete_ operations on
   catalog instances
-- Calls Placement Manager to admit a run and to delete resources in batch
+- Calls Placement Manager to execute a run and to delete resources in batch
 - Returns responses and error messages to users
 
 #### Policy Manager
 
-- Placement fetches `available_agents` once per run admission, then calls
+- Placement fetches `available_agents` once per run, then calls
   `POST /api/v1/engine/evaluate` once per resource in the graph with that shared
   list
 - Receives `APPROVED/MODIFIED` or `DENIED` per resource. All resources must pass
@@ -172,7 +172,7 @@ flowchart TD
 
 #### Database
 
-- Stores per-resource rows for each admitted node (`name`, `spec`, compiled
+- Stores per-resource rows for each node in a run (`name`, `spec`, compiled
   `requires_resources`, `dagLevel`, `agentName`, status, and related fields)
 - Stores validated request per resource and enables rehydration
 - Maintains records of all resources created through Placement Manager
@@ -186,18 +186,18 @@ not exposed as a public Placement OpenAPI surface.
 
 | Method | Operation         | Description                                                           |
 | ------ | ----------------- | --------------------------------------------------------------------- |
-| POST   | `CreateResources` | Admit a run; create one or more resources (single- or multi-resource) |
+| POST   | `CreateResources` | Initialize a run; create one or more resources (single- or multi-resource) |
 | GET    | `GetResource`     | Get a single resource by `id`                                         |
 | GET    | `ListResources`   | List instances (each with nested `resources[]`)                       |
 | DELETE | `DeleteResources` | Delete one or more resources by id (single- or batch)                 |
 
 _Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
 `resourceIds[]` and stored on the catalog item instance). Placement assigns a
-`runId` per run admission that groups resource rows within the resource table.
-`runId` appears in responses but is not sent on create or delete requests for
-now.
+`runId` when it initializes a run. That id groups resource rows within the
+resource table. `runId` appears in responses but is not sent on create or delete
+requests for now.
 
-**CreateResources**: Admit a run (single or multi-resource graph).
+**CreateResources**: Create a run (single or multi-resource graph).
 
 Catalog calls Placement after catalog resolution. The request carries the
 `catalogItemInstanceId` and a resolved `resources[]` graph with one or more
@@ -375,7 +375,7 @@ Example of response payload
 }
 ```
 
-**ListResources**: List admitted instances.
+**ListResources**: List instances.
 
 Each `instances[]` entry is one resource instance and uses the same schema as
 the **GetResource** response.
@@ -541,7 +541,7 @@ sequenceDiagram
     CM->>PM: CreateResources<br/>{catalogItemInstanceId, resources[]}
     activate PM
 
-    PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect cycles, assign dagLevel
+    PM->>PM: Build DAG (CEL + requiresResources)<br/>Detect circular deps, assign dagLevel
     alt Compile or DAG error
         PM-->>CM: 4xx compile error
         deactivate PM
@@ -806,7 +806,7 @@ After the highest **dagLevel** wave is initiated, deletion continues
 **asynchronously** — separate from the synchronous `202 Accepted` returned to
 Catalog.
 
-1. During admission, Placement calls SPRM delete for the highest `dagLevel`
+1. When starting reverse-DAG deletion, Placement calls SPRM delete for the highest `dagLevel`
    first. When every SPRM call in that batch returns `202`, Placement marks
    resources at lower `dagLevel` values as `PENDING_DELETION` (queued for
    delete) and returns `202 Accepted` to Catalog.
@@ -886,7 +886,7 @@ Catalog.
 | Step       | Action                                                                                            |
 | ---------- | ------------------------------------------------------------------------------------------------- |
 | Input      | Resolved `resources[]` from Catalog (names, spec, requiresResources)                              |
-| Compile    | Merge CEL + `requiresResources` into dependencies; cycle detection; assign `dagLevel` per row     |
+| Compile    | Merge CEL + `requiresResources` into dependencies; detect circular dependencies; assign `dagLevel` per row |
 | Persist    | `requires_resources` and `dagLevel` on each resource row                                          |
 | CEL phases | Plan-time (params, literals) before create; apply-time (dependency outputs) when deps are Running |
 
@@ -931,10 +931,10 @@ Catalog.
 - PM-level request priority/ordering (prioritize certain requests over others
   when re-evaluating)
 - Graph-level policy evaluation where a single Policy request over the full DAG
-  snapshot (for example `evaluateGraph`), so cross-resource rules run without
+  snapshot (for example `evaluateGraph`), so cross-resource rules execute without
   per-resource round-trips
 - On instance creation failure, Placement retains the intent record instead of
   deleting it. This preserves the original `resources[]` graph for a future
-  retry or scheduled re-admission path (for example when agents become available
-  again or a transient SPRM error clears) without requiring Catalog to resubmit
-  the full request.
+  retry or scheduled path to execute the run again (for example when agents
+  become available again or a transient SPRM error clears) without requiring
+  Catalog to resubmit the full request.
