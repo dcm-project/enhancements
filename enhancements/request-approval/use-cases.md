@@ -64,10 +64,11 @@ Soft outcome examples (illustrative Rego reasons):
 4. DCM parks the request, **opens** a ticket, and monitors status.
 5. Approver approves in the ticketing system while still inside the validity
    window.
-6. DCM detects approval, checks it is on time, continues provision.
+6. DCM detects approval, checks it is on time, **re-evaluates**, and provisions
+   only if evaluate allows.
 
-**End state:** Resource provisions. Late approval is not accepted (see other
-outcomes).
+**End state:** Resource provisions after approve-on-time and re-evaluate allow.
+Late approval is not accepted (see other outcomes).
 
 Other outcomes:
 
@@ -77,6 +78,8 @@ Other outcomes:
   provisioned.
 - **Approved late:** Ticket approved after `valid_until`. End state: not
   provisioned. Approval invalid.
+- **Re-evaluate soft or hard:** Approve-on-time but evaluate soft-denies again
+  or hard-denies. End state: new ticket path or reject (no silent provision).
 
 ### Hard deny
 
