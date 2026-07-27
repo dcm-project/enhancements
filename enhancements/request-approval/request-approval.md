@@ -38,12 +38,15 @@ grant/deny alternative is documented under
    means?
 
    > [!NOTE] **Proposed approach**  
-   > Soft outcome includes a stable `reason` and an **approval validity window**
-   > from policy (for example “until end of Q2”). **DCM opens** the ticket in
-   > the external ticketing system when it parks the request, stores the ticket
-   > id, and **monitors** ticket status. How DCM learns of changes depends on
-   > what the external ticketing system supports (for example outbound events
-   > when available, otherwise periodic status checks).  
+   > Soft outcome includes a machine-readable `reason` identifier and an
+   > **approval validity window**. Policy may say “until end of Q2”; the Policy
+   > Engine resolves that to an absolute timestamp (for example `valid_until`)
+   > for DCM to compare.  
+   > **DCM opens** the ticket in the external ticketing system when it parks the
+   > request, stores the ticket id, and **monitors** ticket status. How DCM
+   > learns of changes depends on what the external ticketing system supports
+   > (for example outbound events when available, otherwise periodic status
+   > checks).  
    > When the ticket is **approved inside the validity window**, DCM
    > **re-evaluates**, then continues to provision only if evaluate allows.  
    > When approval is **after the window**, or the ticket is denied/abandoned,
@@ -140,8 +143,9 @@ policy-first.
 - Integrate with an external ticketing system as the human system of record for
   soft outcomes. **DCM opens** the ticket when parking, monitors it, and on
   valid approval **re-evaluates** before provision
-- Enforce an **approval validity window** from the soft outcome (for example
-  until end of Q2). Late approval does not count
+- Enforce an **approval validity window** from the soft outcome (absolute
+  timestamp such as `valid_until`; “end of Q2” is policy intent the Policy
+  Engine resolves). Late approval does not count
 - Keep hard deny fail-fast with no ticket path
 - Keep CatalogItem validation early. Soft/hard approval outcomes after placement
 - Document what stays out of DCM so scope does not grow into a full approval
@@ -185,7 +189,9 @@ Concrete scenarios live in [`use-cases.md`](./use-cases.md).
 - The external ticketing system is the human system of record. DCM does not
   expose grant/deny as the approval UI. DCM **opens** the ticket when parking,
   **monitors** it, and drives continue / expire
-- Soft outcome includes (or implies) an **approval validity window** from policy
+- Soft outcome includes (or implies) an **approval validity window** as an
+  absolute timestamp DCM can compare (policy periods like “end of Q2” are
+  resolved by the Policy Engine)
 - Authenticated DCM identity exists for the requester so ticket fields can carry
   requester context (see Open Question 5)
 - DCM does **not** enforce approver ≠ requester. Approver eligibility and
@@ -198,14 +204,14 @@ This request-approval work **consumes** Policy Engine evaluate. It does not own
 the soft-outcome schema. The [policy-engine](../policy-engine/policy-engine.md)
 enhancement (or a follow-on edit to it) must define at least:
 
-| PE must define                                                                                                   | Why request-approval needs it                                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Soft deny / approval-required as an evaluate outcome distinct from `APPROVED`, `MODIFIED`, and hard reject       | Placement Manager must park instead of provision or hard-fail                                                                                                   |
-| Stable machine-readable `reason` code (or equivalent) on soft outcome                                            | Ticket body, audit, dashboards, matching known exceptions in Rego data. Illustrative values like `vm.memory.soft_max` are reason codes, not payload field paths |
-| Approval **validity window** on soft outcome (for example `valid_until`, or a period PE resolves to a timestamp) | DCM rejects late ticket approvals                                                                                                                               |
-| How Rego signals soft vs hard (package/rule contract or documented reject fields)                                | Authors can write approval policies without ad-hoc PM logic                                                                                                     |
-| OpenAPI / evaluate response field names and backwards compatibility                                              | Clients and PM integrate against one contract                                                                                                                   |
-| Behaviour when multiple policies disagree (soft vs hard)                                                         | Hard must win or conflict must be explicit. No silent soft                                                                                                      |
+| Policy Engine must define                                                                                                                                                | Why request-approval needs it                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Soft deny / approval-required as an evaluate outcome distinct from `APPROVED`, `MODIFIED`, and hard reject                                                               | Placement Manager must park instead of provision or hard-fail                                                                                                    |
+| Machine-readable `reason` identifier (or equivalent) on soft outcome                                                                                                     | Ticket body, audit, dashboards, matching known exceptions in Rego data. Example values like `vm.memory.soft_max` are reason identifiers, not payload field paths |
+| Approval **validity window** on soft outcome (absolute timestamp such as `valid_until`; periods like “end of Q2” are resolved by the Policy Engine before DCM sees them) | DCM rejects late ticket approvals                                                                                                                                |
+| How Rego signals soft vs hard (package/rule contract or documented reject fields)                                                                                        | Authors can write approval policies without ad-hoc PM logic                                                                                                      |
+| OpenAPI / evaluate response field names and backwards compatibility                                                                                                      | Clients and PM integrate against one contract                                                                                                                    |
+| Behaviour when multiple policies disagree (soft vs hard)                                                                                                                 | Hard must win or conflict must be explicit. No silent soft                                                                                                       |
 
 **Owned by this enhancement (not by policy-engine):**
 
@@ -214,17 +220,20 @@ enhancement (or a follow-on edit to it) must define at least:
 - Re-evaluate / expire when approval is on time, late, denied, or abandoned
 - DCM waiting-request lifecycle and UX status for “awaiting external approval”
 
-**Delivery order:** land the PE soft-outcome contract (spec then implementation)
-before or with the DCM ticket-monitor path. Until PE exposes soft, treat soft as
-unavailable (hard-only or feature-flagged off).
+**Delivery order:** land the Policy Engine soft-outcome contract (spec then
+implementation) before or with the DCM ticket-monitor path. Until the Policy
+Engine exposes soft, treat soft as unavailable (hard-only or feature-flagged
+off).
 
 ### Proposed solution
 
 1. **Rego policies** decide allow, mutate, hard deny, or soft deny /
    approval-required. Soft means “do not provision until a valid external
    approval is detected. Hard means “reject, no ticket path.”
-2. **Policy Engine** returns that outcome after placement, including a stable
-   `reason` and validity bound (absolute time or period such as end of Q2).
+2. **Policy Engine** returns that outcome after placement, including a
+   machine-readable `reason` identifier and a validity bound (absolute timestamp
+   such as `valid_until`; policy may express periods like “end of Q2”, which the
+   Policy Engine resolves to a timestamp).
 3. **DCM opens** a ticket in the external ticketing system (for example
    ServiceNow) when it parks the request. Human grant/deny happens there. Audit
    and routing live there.
@@ -259,8 +268,8 @@ Any Rego module may return hard reject or soft / approval-required.
 | Soft deny / approval-required | Needs human decision          | Ticket + DCM monitors. Re-evaluate after approve-on-time. Provision only if allow |
 | Hard deny                     | Non-skippable                 | Reject at once                                                                    |
 
-**Example soft reason code:** `vm.memory.soft_max` (illustrative stable code
-from policy, not a payload field path and not a policy id) when memory is above
+**Example soft reason code:** `vm.memory.soft_max` (example reason identifier
+from policy — not a payload field path and not a policy id) when memory is above
 a soft ceiling but placement still found an agent.
 
 **Example hard reason code:** guest OS not on the approved image list.
@@ -329,7 +338,7 @@ Today `POST .../policies:evaluateRequest` returns success (`APPROVED` or
 here. See
 [Required from the policy-engine enhancement](#required-from-the-policy-engine-enhancement).
 
-Once PE exposes soft, Placement Manager must:
+Once the Policy Engine exposes soft, Placement Manager must:
 
 - Not provision on soft
 - Park the request, **open** a ticket in the external ticketing system, monitor
@@ -337,12 +346,12 @@ Once PE exposes soft, Placement Manager must:
 - On approve-on-time → **re-evaluate**, then provision only if allow. On deny /
   abandon / late → expire or reject
 
-Illustrative soft outcome **consumed** by this enhancement (field names from PE
-OpenAPI when defined):
+Illustrative soft outcome **consumed** by this enhancement (field names from the
+Policy Engine OpenAPI when defined):
 
 ```yaml
 outcome: soft_deny # name from policy-engine OpenAPI
-reason: vm.memory.soft_max # stable reason code (illustrative)
+reason: vm.memory.soft_max # example reason identifier (not final OpenAPI)
 message: Memory above soft max. Approval required
 valid_until: "2026-06-30T23:59:59Z" # e.g. end of Q2
 ticket_hints:
@@ -395,8 +404,8 @@ Do **not** treat these as required for the initial scope unless Goals expand:
 3. Pre-provision human queue without a soft deny
 4. Dual approval or quorum inside DCM
 5. GitOps-specific skip of soft deny
-6. Soft on **rehydration** when PE soft lands (inherit vs treat as hard). Not an
-   epic AC. Rehydration already calls the same evaluate API.
+6. Soft on **rehydration** when Policy Engine soft lands (inherit vs treat as
+   hard). Not an epic AC. Rehydration already calls the same evaluate API.
 7. Policy-engine mutate and re-validate loops until stable, and cycle detection
    (policy-engine domain)
 8. Full five-mechanism catalog from external design input
@@ -405,7 +414,7 @@ Do **not** treat these as required for the initial scope unless Goals expand:
 
 | Risk                                           | Mitigation                                                                                                                |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Soft outcome missing in Policy Engine          | Block ticket path until PE soft contract lands. See Required from the policy-engine enhancement                           |
+| Soft outcome missing in Policy Engine          | Block ticket path until the Policy Engine soft contract lands. See Required from the policy-engine enhancement            |
 | External ticketing unavailable or not deployed | Soft/ticket path off. Rego allow/hard-deny only until ticketing is configured                                             |
 | Ticket monitor or late-approval rules unclear  | Close Open Question 1. Confirm how DCM observes ticket updates for the chosen ticketing system. Late approval is invalid. |
 | Teams loosen Rego instead of using tickets     | Keep soft reasons visible. Review policies that soft-deny often                                                           |
@@ -484,7 +493,7 @@ sequenceDiagram
 }
 ```
 
-`reason` is a stable reason code from policy (illustrative value above), not a
+`reason` is an example reason identifier from policy (value above), not a
 payload field path and not a policy id.
 
 **Example:** waiting request marker (illustrative)

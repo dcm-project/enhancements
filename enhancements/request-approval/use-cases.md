@@ -143,7 +143,8 @@ Policy data (or Rego) excepts a soft **reason code** so soft deny does not fire.
 
 Example: reason `vm.memory.soft_max` would soft-deny, but
 `data.soft_deny_exceptions["vm.memory.soft_max"]` is set for a burst window.
-(`vm.memory.soft_max` is an illustrative reason code, not a payload field path.)
+(`vm.memory.soft_max` is an example reason identifier, not a payload field
+path.)
 
 **Flow:**
 
@@ -163,5 +164,5 @@ removed, the next matching create soft-denies again.
   record.
 - **DCM exemption inventory:** Standing grants as DCM objects.
 - **Dual approval inside DCM.**
-- **Soft on rehydration:** Decide when PE soft lands (inherit vs treat as hard).
-  Not an epic AC. Rehydration already shares evaluate.
+- **Soft on rehydration:** Decide when Policy Engine soft lands (inherit vs
+  treat as hard). Not an epic AC. Rehydration already shares evaluate.
