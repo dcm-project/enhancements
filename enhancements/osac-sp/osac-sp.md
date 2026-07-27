@@ -704,15 +704,17 @@ state:
 }
 ```
 
-The top-level `id` and `status` fields are required — `control-plane` reads them
-directly off the response to populate the dispatched `ServiceTypeInstance`
-record
-([`CreateInstance`](https://github.com/dcm-project/control-plane/blob/main/internal/sp/service/resource_manager/service_type_instance.go)).
-`id` echoes the same value passed in as the request's `id` query parameter — it
-is not a newly generated identifier (see
-[Idempotent Creation](#idempotent-creation)). The remaining fields are
-OSAC-SP-specific and are returned as-is for callers that query the SP directly,
-but are not otherwise interpreted by `control-plane`.
+`control-plane` reads the top-level `id` and `status` fields directly off the
+response to populate the dispatched `ServiceTypeInstance` record
+([`createInstanceWithProvider`](https://github.com/dcm-project/control-plane/blob/main/internal/sp/service/resource_manager/service_type_instance.go)).
+It does not validate that either field is present — a response that omits them
+is decoded as empty strings and persisted as-is, with no error surfaced — so the
+SP must always populate both for the resulting record to be usable. `id` echoes
+the same value passed in as the request's `id` query parameter — it is not a
+newly generated identifier (see [Idempotent Creation](#idempotent-creation)).
+The remaining fields are OSAC-SP-specific and are returned as-is for callers
+that query the SP directly, but are not otherwise interpreted by
+`control-plane`.
 
 **Error Handling:**
 
@@ -1005,7 +1007,7 @@ In Phase 1, `control-plane`'s own `POST /service-type-instances?id=...` accepts
 a client-supplied `id` and rejects a second create for an `id` that already has
 a stored `ServiceTypeInstance` record with `409 Conflict` — this alone catches a
 retried request that arrives **after** the first request's database write
-completed. It does not catch every retry, though: `control- plane` calls the SP
+completed. It does not catch every retry, though: `control-plane` calls the SP
 and only writes its own record once the SP's response comes back successfully,
 so a retry that lands **between** the SP successfully creating the OSAC resource
 and `control-plane` persisting its record (e.g. `control-plane` crashing or
@@ -1299,6 +1301,10 @@ remains backward-compatible.
   active successor; the `id` query parameter's "DCM-issued" framing was softened
   to reflect that it is optional at the API level; and an unsupported
   `timestamp` field was removed from a status CloudEvent example.
+- 2026-07-27: Second accuracy pass: corrected the claim that a Provider
+  response's top-level `id`/`status` fields are schema-required —
+  `control-plane` does not validate their presence and silently persists empty
+  values if the SP omits them — and fixed a typo (`control- plane`).
 
 ## Drawbacks
 
