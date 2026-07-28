@@ -93,15 +93,18 @@ grant/deny alternative is documented under
 
    > [!NOTE] **Proposed approach**  
    > Open the ticket with a **DCM service account** (reliable open/monitor
-   > without per-user sync). Always set required ticket fields from the
-   > authenticated DCM actor (for example requester id/email, request id) so
-   > approvers and audit still see who asked.  
-   > Opening the ticket **as the end user** (not only filling requester fields)
+   > without per-user sync). Put authenticated DCM actor and request context
+   > (for example requester id/email, request id) in the **ticket description**
+   > (what DCM controls). Map into ticketing form fields only when the
+   > integration supports it. DCM does not own the ticketing system’s form
+   > templates or “required field” definitions.
+   > Opening the ticket **as the end user** (not only filling requester context)
    > stays optional later, if the org already maps DCM identities into the
-   > ticketing system.  
+   > ticketing system.
    > Closing this question needs two things: a stable authenticated DCM actor
    > from [authentication](../authentication/authentication.md), and an agreed
-   > mapping of which ticketing fields carry requester and request context.
+   > mapping of which ticketing fields (if any) carry requester and request
+   > context beyond the description.
 
 6. **Evaluate outcome shape**  
    How is soft deny / approval-required represented next to today’s `APPROVED` /
@@ -210,8 +213,8 @@ Concrete scenarios live in [`use-cases.md`](./use-cases.md).
 - Soft outcome includes (or implies) an **approval validity window** as an
   absolute timestamp DCM can compare. DCM does not interpret “end of Q2”. The
   Policy Engine resolves periods before DCM sees them
-- Authenticated DCM identity exists for the requester so ticket fields can carry
-  requester context (see Open Question 5)
+- Authenticated DCM identity exists for the requester so ticket description (and
+  optional mapped fields) can carry requester context (see Open Question 5)
 - DCM does **not** enforce approver ≠ requester. Approver eligibility and
   segregation of duties are owned by the external ticketing system (revisit only
   if Alternative 1 returns)
