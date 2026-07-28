@@ -71,9 +71,9 @@ grant/deny alternative is documented under
    Soft deny per child or one parent-level ticket?
 
    > [!NOTE] **Proposed approach**  
-   > Per child. Policy evaluates each child. Each soft-denied child needs its
-   > own ticket (or policy allow) before that child proceeds. Parent status
-   > follows composite orchestration. See
+   > Per child. Policy evaluates each child. Each child that soft-denies (needs
+   > approval) gets its own ticket opened and monitored (or policy allow) before
+   > that child proceeds. Parent status follows composite orchestration. See
    > [Composite requests](#composite-requests).
 
 4. **GitOps**  
@@ -306,8 +306,9 @@ composite orchestration (see Open Question 3).
 
 **Proposed approach:**
 
-- Soft-denied child → ticket path for that child
-- Allowed children are not held for a parent-level ticket
+- Child soft-denies → DCM opens and monitors a ticket for that child
+- Allowed children are not blocked waiting for a parent-level ticket for a
+  soft-denied sibling
 - Children on the same DAG level may proceed independently (one soft-denied
   child does not stop peer evaluation)
 - Whether later DAG levels wait for soft-denied children is owned by composite
