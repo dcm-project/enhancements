@@ -3,7 +3,6 @@ title: request-approval
 authors:
   - "@gciavarrini"
 reviewers:
-  - "@ygalblum"
   - "@machacekondra"
   - "@pkliczewski"
   - "@jenniferubah"
