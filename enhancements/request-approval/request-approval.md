@@ -81,9 +81,10 @@ grant/deny alternative is documented under
 
    > [!NOTE] **Proposed approach**  
    > Same policy path for GitOps and API. Git review does not replace a soft
-   > deny. Platform admins can encode known exceptions in Rego (or a standing
-   > ticket/change record) so soft deny does not fire. Do not skip policy for
-   > GitOps-managed instances.
+   > deny. Standing cases that should not open a ticket are **allow** in Rego or
+   > policy data (or a standing ticket/change record policy can read). Soft deny
+   > remains for one-off human approval. Do not skip policy for GitOps-managed
+   > instances.
 
 5. **Auth / ticket identity**  
    When DCM opens a ticket, how is the DCM requester represented in the
@@ -280,12 +281,14 @@ flowchart TD
 ### Soft vs hard outcome
 
 Soft and hard are **evaluate outcomes**, not two separate product policy types.
-Any Rego module may return hard reject or soft / approval-required.
+Any Rego module may return hard reject or soft / approval-required. Standing
+exceptions in Rego or policy data yield **allow** (no ticket). Soft deny is for
+a one-off human approval this time.
 
 | Outcome                       | Meaning                       | Next step                                                                                             |
 | ----------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Allow / modified              | Policy satisfied (or patched) | Provision                                                                                             |
-| Soft deny / approval-required | Needs human decision          | `PendingApproval` + ticket + DCM monitors. Re-evaluate after approve-on-time. Provision only if allow |
+| Soft deny / approval-required | Needs human decision now      | `PendingApproval` + ticket + DCM monitors. Re-evaluate after approve-on-time. Provision only if allow |
 | Hard deny                     | Non-skippable                 | Reject at once                                                                                        |
 
 **Example soft reason code:** `vm.memory.soft_max` (example reason identifier
