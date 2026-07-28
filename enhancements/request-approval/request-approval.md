@@ -138,8 +138,8 @@ duplicates what external ticketing tools already do for audit, SLA, and routing.
 If there is no official path at all, teams tend to provision outside DCM or
 loosen policy so the soft case always passes. The cheaper fix is: write clear
 approval-oriented Rego, return a soft outcome when a human is required, and let
-ServiceNow (or similar) own the human decision. DCM stays automation-first and
-policy-first.
+ServiceNow (or similar) manage how the human decision is taken. A human makes
+the decision there. DCM stays automation-first and policy-first.
 
 ### Goals
 
