@@ -224,7 +224,8 @@ enhancement (or a follow-on edit to it) must define at least:
 | Policy Engine must define                                                                                                                                                | Why request-approval needs it                                                                                                                                    |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Soft deny / approval-required as an evaluate outcome distinct from `APPROVED`, `MODIFIED`, and hard reject                                                               | Placement Manager must park instead of provision or hard-fail                                                                                                    |
-| Machine-readable `reason` identifier (or equivalent) on soft outcome                                                                                                     | Ticket body, audit, dashboards, matching known exceptions in Rego data. Example values like `vm.memory.soft_max` are reason identifiers, not payload field paths |
+| Machine-readable `reason` identifier (or equivalent) on soft outcome                                                                                                     | Classification, audit, matching standing exceptions in Rego data. Not the full human brief. Example: `vm.memory.soft_max` is a reason identifier, not a field path |
+| Human-useful ticket context on soft outcome (`message` and/or `ticket_hints` with requested value and threshold, or equivalent)                                          | DCM copies that into the ticket body. Schema owned by PE. DCM does not invent thresholds by re-reading Rego                                                      |
 | Approval **validity window** on soft outcome (absolute timestamp such as `valid_until`; periods like “end of Q2” are resolved by the Policy Engine before DCM sees them) | DCM rejects late ticket approvals                                                                                                                                |
 | How Rego signals soft vs hard (package/rule contract or documented reject fields)                                                                                        | Authors can write approval policies without ad-hoc PM logic                                                                                                      |
 | OpenAPI / evaluate response field names and backwards compatibility                                                                                                      | Clients and PM integrate against one contract                                                                                                                    |
@@ -375,10 +376,12 @@ Policy Engine OpenAPI when defined):
 ```yaml
 outcome: soft_deny # name from policy-engine OpenAPI
 reason: vm.memory.soft_max # example reason identifier (not final OpenAPI)
-message: Memory above soft max. Approval required
-valid_until: "2026-06-30T23:59:59Z" # e.g. end of Q2
+message: Memory 96GB requested. Soft max is 64GB. Approval required
+valid_until: "2026-06-30T23:59:59Z"
 ticket_hints:
   category: capacity_exception
+  requested: "96GB"
+  threshold: "64GB"
 ```
 
 #### Sample Rego (illustrative only)
@@ -406,8 +409,8 @@ This doc only shows intent.
 #### Ticketing integration (conceptual)
 
 - **Open:** **DCM creates** the ticket (service account) with soft `reason`,
-  request id, validity window, and required requester fields from the
-  authenticated DCM actor (see Open Question 5)
+  request id, validity window, soft-outcome `message` / `ticket_hints`, and
+  requester context from the authenticated DCM actor (see Open Question 5)
 - **Approve / deny:** Happens in the external ticketing system (human system of
   record). DCM does not enforce who may approve
 - **Monitor:** DCM watches ticket status using what the ticketing system
@@ -512,10 +515,12 @@ sequenceDiagram
 {
   "outcome": "soft_deny",
   "reason": "vm.memory.soft_max",
-  "message": "Memory above soft max. Approval required",
+  "message": "Memory 96GB requested. Soft max is 64GB. Approval required",
   "valid_until": "2026-06-30T23:59:59Z",
   "ticket_hints": {
-    "category": "capacity_exception"
+    "category": "capacity_exception",
+    "requested": "96GB",
+    "threshold": "64GB"
   }
 }
 ```
