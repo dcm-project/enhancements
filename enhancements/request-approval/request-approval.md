@@ -227,7 +227,8 @@ enhancement (or a follow-on edit to it) must define at least:
 
 - Opening, storing, and **monitoring** external tickets (**DCM opens** the
   ticket when it parks a soft-denied request)
-- Re-evaluate / expire when approval is on time, late, denied, or abandoned
+- Re-evaluate when approved on time. Reject or expire when late, denied, or
+  abandoned
 - DCM waiting-request lifecycle and user-visible status `PendingApproval`.
   Placement Manager sets it when parking. Detailed wire-up lands in a subsequent
   placement-manager or API change
