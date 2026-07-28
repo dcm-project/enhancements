@@ -62,10 +62,11 @@ grant/deny alternative is documented under
    Create only, or also update and delete when evaluation soft-denies?
 
    > [!NOTE] **Proposed approach**  
-   > Soft-deny / ticket path applies to create, update, and delete **only when
-   > policy soft-denies that operation**. It is not “every delete needs
-   > approval.” Owner delete (and other cases) can stay allow in Rego. Soft on
-   > rehydration is deferred (see Deferred items).
+   > Soft deny with an external ticket applies to create, update, and delete
+   > **only when policy soft-denies that operation**. It does not replace
+   > today's delete when Rego allows. It is not “every delete needs approval.”
+   > Owner delete (and other cases) can stay allow in Rego. Soft on rehydration
+   > is deferred (see Deferred items).
 
 3. **Composite requests (UC #2)**  
    Soft deny per child or one parent-level ticket?

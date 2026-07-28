@@ -107,10 +107,12 @@ Hard outcome examples:
 
 ### Soft deny on delete
 
-**Scope:** Initial scope · **Maps to:** UC #16 (same ticket path as create).
+**Scope:** Initial scope · **Maps to:** UC #16 (same soft + ticket flow as
+create).
 
-Soft/ticket on delete only when **policy soft-denies that delete**. Not every
-delete needs approval. Owner delete can stay allow in Rego.
+Soft deny with an external ticket on delete only when **policy soft-denies that
+delete**. Not every delete needs approval. Owner delete can stay allow in Rego.
+This does not replace today’s delete when policy allows.
 
 #### Ticket approved on time
 
