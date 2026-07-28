@@ -298,14 +298,6 @@ a soft ceiling but placement still found an agent.
 
 **Example hard reason code:** guest OS not on the approved image list.
 
-### Stop repeating the same soft deny
-
-If the same soft reason keeps needing approval, update Rego or policy data so
-matching requests allow without a ticket, or let policy read a standing
-ticket/change record. Prefer updating Rego when the same soft reason recurs. Do
-not rely on repeated tickets alone. Do not add a DCM exemption inventory or CRUD
-API for that.
-
 ### Composite requests
 
 A composite (UC #2) has several children. Soft/hard evaluate per child after
