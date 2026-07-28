@@ -121,10 +121,10 @@ resolved, enriched with policies, and orchestrated across providers.
 **Initial scope** means: express approval needs as Rego policies in the Policy
 Engine. Run soft/hard outcomes on the **post-placement** payload. Use an
 external ticketing system (for example ServiceNow) as the human system of
-record. DCM parks the request, monitors the ticket, and on approve-on-time
-**re-evaluates** before provision. Known exceptions are encoded in policy (or a
-standing ticket record), not as a DCM exemption API. Hard denials stay
-non-overridable.
+record. DCM parks the request in `PendingApproval`, monitors the ticket, and
+on approve-on-time **re-evaluates** before provision. Known exceptions are
+encoded in policy (or a standing ticket record), not as a DCM exemption API.
+Hard denials stay non-overridable.
 
 ## Motivation
 
@@ -225,7 +225,9 @@ enhancement (or a follow-on edit to it) must define at least:
 - Opening, storing, and **monitoring** external tickets (**DCM opens** the
   ticket when it parks a soft-denied request)
 - Re-evaluate / expire when approval is on time, late, denied, or abandoned
-- DCM waiting-request lifecycle and UX status for “awaiting external approval”
+- DCM waiting-request lifecycle and user-visible status `PendingApproval`.
+  Placement Manager sets it when parking. Detailed wire-up lands in a subsequent
+  placement-manager or API change
 
 **Delivery order:** land the Policy Engine soft-outcome contract (spec then
 implementation) before or with the DCM ticket-monitor path. Until the Policy
@@ -241,9 +243,10 @@ off).
    machine-readable `reason` identifier and a validity bound (absolute timestamp
    such as `valid_until`; policy may express periods like “end of Q2”, which the
    Policy Engine resolves to a timestamp).
-3. **DCM opens** a ticket in the external ticketing system (for example
-   ServiceNow) when it parks the request. Human grant/deny happens there. Audit
-   and routing live there.
+3. **Placement Manager** sets status `PendingApproval`, and **DCM opens** a
+   ticket in the external ticketing system (for example ServiceNow) when it
+   parks the request. Human grant/deny happens there. Audit and routing live
+   there.
 4. **DCM monitors** the ticket using the integration the ticketing system
    supports (outbound events when available, otherwise periodic status checks).
    On **approve within the validity window**, DCM **re-evaluates**, then
@@ -257,7 +260,7 @@ flowchart TD
   A[Post-placement payload] --> B[Policy Engine / Rego]
   B -->|allow or modified| C[Provision]
   B -->|hard deny| D[Reject]
-  B -->|soft deny + validity window| E[Ticket + DCM monitors]
+  B -->|soft deny + validity window| E[PendingApproval + ticket + DCM monitors]
   E -->|approved on time| F[DCM re-evaluates]
   F -->|allow or modified| C
   F -->|hard or soft again| D
@@ -269,11 +272,11 @@ flowchart TD
 Soft and hard are **evaluate outcomes**, not two separate product policy types.
 Any Rego module may return hard reject or soft / approval-required.
 
-| Outcome                       | Meaning                       | Next step                                                                         |
-| ----------------------------- | ----------------------------- | --------------------------------------------------------------------------------- |
-| Allow / modified              | Policy satisfied (or patched) | Provision                                                                         |
-| Soft deny / approval-required | Needs human decision          | Ticket + DCM monitors. Re-evaluate after approve-on-time. Provision only if allow |
-| Hard deny                     | Non-skippable                 | Reject at once                                                                    |
+| Outcome                       | Meaning                       | Next step                                                                                             |
+| ----------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Allow / modified              | Policy satisfied (or patched) | Provision                                                                                             |
+| Soft deny / approval-required | Needs human decision          | `PendingApproval` + ticket + DCM monitors. Re-evaluate after approve-on-time. Provision only if allow |
+| Hard deny                     | Non-skippable                 | Reject at once                                                                                        |
 
 **Example soft reason code:** `vm.memory.soft_max` (example reason identifier
 from policy — not a payload field path and not a policy id) when memory is above
@@ -311,12 +314,12 @@ composite orchestration (see Open Question 3).
 #### Story 1: Soft deny, ticket approved on time
 
 As a platform engineer, my VM create soft-denies after placement for memory
-above the soft max. Policy says approval is valid until end of Q2. **DCM opens**
-a ServiceNow ticket, parks the request, and monitors the ticket. An approver
-approves in ServiceNow before end of Q2. DCM detects the approval,
-**re-evaluates**, and provisions if evaluate allows. Human decision is recorded
-in ServiceNow. DCM records ticket link, validity check, re-evaluate, and
-continue.
+above the soft max. Policy says approval is valid until end of Q2. Placement
+Manager sets `PendingApproval`. **DCM opens** a ServiceNow ticket, parks the
+request, and monitors the ticket. An approver approves in ServiceNow before end
+of Q2. DCM detects the approval, **re-evaluates**, and provisions if evaluate
+allows. Human decision is recorded in ServiceNow. DCM records ticket link,
+validity check, re-evaluate, and continue.
 
 #### Story 2: Soft deny, ticket denied, abandoned, or late
 
@@ -348,8 +351,8 @@ here. See
 Once the Policy Engine exposes soft, Placement Manager must:
 
 - Not provision on soft
-- Park the request, **open** a ticket in the external ticketing system, monitor
-  it
+- Set `PendingApproval`, park the request, **open** a ticket in the external
+  ticketing system, and monitor it
 - On approve-on-time → **re-evaluate**, then provision only if allow. On deny /
   abandon / late → expire or reject
 
@@ -439,15 +442,19 @@ stateDiagram-v2
     Placed --> Evaluating: Policy Engine (post-placement payload)
     Evaluating --> Provisioning: Allow or modified
     Evaluating --> Rejected: Hard deny
-    Evaluating --> AwaitingExternalApproval: Soft deny / approval-required
-    AwaitingExternalApproval --> Provisioning: Ticket approved on time, re-evaluate allows
-    AwaitingExternalApproval --> Rejected: Denied, abandoned, late, or re-evaluate fails
+    Evaluating --> PendingApproval: Soft deny / approval-required
+    PendingApproval --> Provisioning: Ticket approved on time, re-evaluate allows
+    PendingApproval --> Rejected: Denied, abandoned, late, or re-evaluate fails
     Provisioning --> [*]
     Rejected --> [*]
 ```
 
-`AwaitingExternalApproval` is DCM waiting while monitoring an external ticket.
-It is not an in-product grant/deny API. Name may change.
+`PendingApproval` is the user-visible wait status. DCM is parked while
+Placement Manager monitors an external ticket. It is not an in-product
+grant/deny API. Placement Manager sets this status when parking and opening the
+ticket. API and wire-up details land in a subsequent
+[placement-manager](../placement-manager/placement-manager.md) (or related)
+change.
 
 ### Soft deny and ticket sequence
 
@@ -466,8 +473,8 @@ sequenceDiagram
     PE-->>PM: soft deny (reason, valid_until, ticket hints)
     PM->>TicketSys: Open ticket
     TicketSys-->>PM: ticket id
-    PM->>PM: Park request, store ticket id
-    PM-->>CM: Awaiting external approval
+    PM->>PM: Set PendingApproval, park, store ticket id
+    PM-->>CM: PendingApproval
     CM-->>User: Soft deny + reason + validity window
     loop Monitor ticket
         PM->>TicketSys: Get ticket status
@@ -509,13 +516,13 @@ payload field path and not a policy id.
 resource_request_id: req-123
 ticket_id: CHG0012345
 valid_until: "2026-06-30T23:59:59Z"
-status: awaiting_external_approval
+status: PendingApproval
 ```
 
 ### Upgrade / Downgrade Strategy
 
 - **Upgrade:** Soft outcome is additive. Clients that treat every non-success as
-  hard reject keep working until they handle soft deny.
+  hard reject keep working until they handle soft deny and `PendingApproval`.
 - **Downgrade / disable:** Feature flag or config turns soft outcome off. Soft
   cases behave as hard reject (or allow only via Rego changes). Document in
   release notes.

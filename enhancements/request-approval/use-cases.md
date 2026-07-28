@@ -12,7 +12,7 @@ step in an external ticketing system. See the enhancement Summary for what
 ## Diagrams
 
 Lifecycle: soft/hard outcomes after placement. Soft path waits on external
-approval.
+approval (`PendingApproval`).
 
 Sequence detail:
 [Soft deny and ticket sequence](./request-approval.md#soft-deny-and-ticket-sequence).
@@ -24,9 +24,9 @@ stateDiagram-v2
     Placed --> Evaluating: Policy Engine
     Evaluating --> Provisioning: Allow or modified
     Evaluating --> Rejected: Hard deny
-    Evaluating --> AwaitingExternalApproval: Soft deny / approval-required
-    AwaitingExternalApproval --> Provisioning: Approved on time, re-evaluate allows
-    AwaitingExternalApproval --> Rejected: Denied, abandoned, late, or re-evaluate fails
+    Evaluating --> PendingApproval: Soft deny / approval-required
+    PendingApproval --> Provisioning: Approved on time, re-evaluate allows
+    PendingApproval --> Rejected: Denied, abandoned, late, or re-evaluate fails
     Provisioning --> [*]
     Rejected --> [*]
 ```
@@ -43,9 +43,10 @@ CatalogItem checks still run earlier as today.
 #### Ticket approved on time
 
 Evaluation soft-denies a create. Policy sets a validity window (for example
-until end of Q2). **DCM opens** a ticket, parks, and monitors. Human approves in
-the ticketing system before the window ends. DCM detects approve-on-time,
-**re-evaluates**, and provisions only if evaluate allows.
+until end of Q2). Placement Manager sets `PendingApproval`. **DCM opens** a
+ticket, parks, and monitors. Human approves in the ticketing system before the
+window ends. DCM detects approve-on-time, **re-evaluates**, and provisions only
+if evaluate allows.
 
 Soft outcome examples (illustrative Rego reasons):
 
@@ -61,7 +62,8 @@ Soft outcome examples (illustrative Rego reasons):
 2. Placement Manager runs placement (agents and post-placement payload).
 3. Policy Engine returns soft deny with `reason` and `valid_until` (or
    equivalent).
-4. DCM parks the request, **opens** a ticket, and monitors status.
+4. Placement Manager sets `PendingApproval`. DCM parks the request, **opens** a
+   ticket, and monitors status.
 5. Approver approves in the ticketing system while still inside the validity
    window.
 6. DCM detects approval, checks it is on time, **re-evaluates**, and provisions
@@ -112,10 +114,10 @@ delete needs approval. Owner delete can stay allow in Rego.
 
 #### Ticket approved on time
 
-Soft deny on delete. **DCM opens** a ticket, parks, and monitors. Approver
-approves in the ticketing system inside the validity window. DCM detects
-approve-on-time, **re-evaluates**, and the delete proceeds only if evaluate
-allows.
+Soft deny on delete. Placement Manager sets `PendingApproval`. **DCM opens**
+a ticket, parks, and monitors. Approver approves in the ticketing system inside
+the validity window. DCM detects approve-on-time, **re-evaluates**, and the
+delete proceeds only if evaluate allows.
 
 Soft outcome examples:
 
@@ -132,8 +134,9 @@ late approval: delete does not proceed.
 
 **Scope:** Initial scope · **Maps to:** UC #16 (same ticket path as create).
 
-Same flow as create: soft deny after placement → DCM opens ticket → monitor →
-re-evaluate → apply update only if approved on time and evaluate allows.
+Same flow as create: soft deny after placement → `PendingApproval` → DCM opens
+ticket → monitor → re-evaluate → apply update only if approved on time and
+evaluate allows.
 
 ### Known exception in Rego
 
