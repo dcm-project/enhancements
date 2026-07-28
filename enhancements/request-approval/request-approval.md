@@ -107,8 +107,16 @@ grant/deny alternative is documented under
 
 ## Summary
 
-This enhancement covers **UC #16** (policy override / approval when policy
-blocks a request) without building an in-DCM approval product.
+This enhancement covers **UC #16: Policy override approval workflow** — a
+time-bounded override of a soft-enforcement governance policy; override
+eligibility evaluated per-policy, routed to an authorized approver, scoped to
+the matched request; hard-enforcement policies unoverridable; audit-linked —
+without building an in-DCM approval product.
+
+Where composites matter, this work also sits next to **UC #2: Architectural
+pattern (for example likec4) to composite-request** — a solution architecture in
+a code-first DSL decomposes into individual resource requests with dependencies
+resolved, enriched with policies, and orchestrated across providers.
 
 **Initial scope** means: express approval needs as Rego policies in the Policy
 Engine. Run soft/hard outcomes on the **post-placement** payload. Use an
