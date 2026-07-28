@@ -89,3 +89,9 @@ words:
   - CAPI
   - igavra
   - Patroni
+  - dagLevel
+  - evaluateGraph
+  - graphwide
+  - OnResourceRunning
+  - OnResourceDeleted
+  - rehydration
