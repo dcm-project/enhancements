@@ -154,6 +154,7 @@ the decision there. DCM stays automation-first and policy-first.
   timestamp such as `valid_until`; “end of Q2” is policy intent the Policy
   Engine resolves). Late approval does not count
 - Keep hard deny fail-fast with no ticket path
+- When ticketing is not configured, treat a soft evaluate outcome as hard deny
 - Keep CatalogItem validation early. Soft/hard approval outcomes after placement
 - Document what stays out of DCM so scope does not grow into a full approval
   product
@@ -191,8 +192,9 @@ Concrete scenarios live in [`use-cases.md`](./use-cases.md).
   [Required from the policy-engine enhancement](#required-from-the-policy-engine-enhancement).
   This enhancement is blocked on that contract for the ticket path
 - An external ticketing system (for example ServiceNow) is available where UC
-  #16 needs a human step. Deployments without that system keep hard deny and
-  must encode exceptions in Rego only. The soft/ticket path stays off
+  #16 needs a human step. If ticketing is not configured and evaluate returns
+  soft deny, DCM treats that as hard deny. Standing exceptions stay as allow in
+  Rego or policy data only, not a DCM exemption API
 - The external ticketing system is the human system of record. DCM does not
   expose grant/deny as the approval UI. DCM **opens** the ticket when parking,
   **monitors** it, and drives continue / expire
@@ -425,7 +427,7 @@ Do **not** treat these as required for the initial scope unless Goals expand:
 | Risk                                           | Mitigation                                                                                                                |
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Soft outcome missing in Policy Engine          | Block ticket path until the Policy Engine soft contract lands. See Required from the policy-engine enhancement            |
-| External ticketing unavailable or not deployed | Soft/ticket path off. Rego allow/hard-deny only until ticketing is configured                                             |
+| External ticketing unavailable or not deployed | Soft evaluate outcomes treated as hard deny until ticketing is configured                                                 |
 | Ticket monitor or late-approval rules unclear  | Close Open Question 1. Confirm how DCM observes ticket updates for the chosen ticketing system. Late approval is invalid. |
 | Teams loosen Rego instead of using tickets     | Keep soft reasons visible. Review policies that soft-deny often                                                           |
 | Scope creeps back to in-DCM approval product   | Non-Goals, Deferred items, and Alternative 1. New surface needs a Goals change                                            |
