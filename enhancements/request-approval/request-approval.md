@@ -48,9 +48,15 @@ grant/deny alternative is documented under
    > (for example outbound events when available, otherwise periodic status
    > checks).  
    > When the ticket is **approved inside the validity window**, DCM
-   > **re-evaluates**, then continues to provision only if evaluate allows.  
-   > When approval is **after the window**, or the ticket is denied/abandoned,
-   > the approval is **not valid**. DCM does not provision (reject or expire).
+   > **re-evaluates** the post-placement payload (full evaluate, not resume of
+   > one rule), then provisions only if evaluate allows. Ticket approve does not
+   > mean automatic provision. Soft or hard again is possible.
+   > When approval is **after the window**, the ticket is **denied**, or the
+   > ticket is **abandoned** (closed or cancelled without approve, or an
+   > equivalent non-approve terminal), the approval is **not valid**. DCM does
+   > not provision (reject or expire).
+   > When `valid_until` is reached while still waiting, DCM rejects or expires
+   > and **stops monitoring** the ticket.
 
 2. **Operations in scope**  
    Create only, or also update and delete when evaluation soft-denies?
