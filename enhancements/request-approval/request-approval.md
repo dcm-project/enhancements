@@ -38,9 +38,10 @@ grant/deny alternative is documented under
 
    > [!NOTE] **Proposed approach**  
    > Soft outcome includes a machine-readable `reason` identifier and an
-   > **approval validity window**. Policy may say “until end of Q2”; the Policy
-   > Engine resolves that to an absolute timestamp (for example `valid_until`)
-   > for DCM to compare.  
+   > **approval validity window** as an absolute timestamp DCM can compare (for
+   > example `valid_until`). How policy authors express periods such as “until
+   > end of Q2” is inside the Policy Engine. DCM only consumes the resolved
+   > timestamp.
    > **DCM opens** the ticket in the external ticketing system when it parks the
    > request, stores the ticket id, and **monitors** ticket status. How DCM
    > learns of changes depends on what the external ticketing system supports
@@ -199,8 +200,8 @@ Concrete scenarios live in [`use-cases.md`](./use-cases.md).
   expose grant/deny as the approval UI. DCM **opens** the ticket when parking,
   **monitors** it, and drives continue / expire
 - Soft outcome includes (or implies) an **approval validity window** as an
-  absolute timestamp DCM can compare (policy periods like “end of Q2” are
-  resolved by the Policy Engine)
+  absolute timestamp DCM can compare. DCM does not interpret “end of Q2”. The
+  Policy Engine resolves periods before DCM sees them
 - Authenticated DCM identity exists for the requester so ticket fields can carry
   requester context (see Open Question 5)
 - DCM does **not** enforce approver ≠ requester. Approver eligibility and
