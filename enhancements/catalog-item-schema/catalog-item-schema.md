@@ -20,6 +20,7 @@ creation-date: 2025-12-05
 see-also:
   - "/enhancements/service-type-definitions/service-type-definitions.md"
   - "/enhancements/declarative-api/declarative-api.md"
+  - "/enhancements/placement-manager/placement-manager.md"
 replaces:
   - TBD
 superseded-by:
@@ -477,9 +478,14 @@ For the complete validation vocabulary, see the
 2. Catalog resolution: For each blueprint resource, load ServiceType template,
    validate, merge catalog defaults and user overrides, assemble the effective
    resource graph. Unresolved CEL remains in the spec for placement.
-3. Placement: Catalog sends the full graph to placement. Placement builds the
-   DAG from `requires_resources` and CEL edges, evaluate policy per node,
-   provision per DAG level via SPRM.
+3. Placement: Catalog calls Placement (`CreateRun`) with
+   `catalog_item_instance_id` and the resolved `resources[]` graph. Placement
+   builds the DAG from `requires_resources` and CEL edges, evaluates policy per
+   node, and provisions per DAG level via SPRM. On `202 Accepted`, Placement
+   returns the `run_id` and Catalog persists the `run_id`.
+4. Catalog Instance Deletion: When the user deletes the CatalogItemInstance,
+   Catalog calls Placement `DeleteRun` with the stored `run_id`. Placement looks
+   up all resources for that run and tears them down in reverse DAG order.
 
 See [Declarative API](/enhancements/declarative-api/declarative-api.md) for CEL
 two-phase evaluation, DAG levels, and status-driven progression.

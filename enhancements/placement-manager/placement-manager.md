@@ -41,7 +41,7 @@ see-also:
   Later levels continue asynchronously when dependencies are `Running`. A `run`
   may contain a single resource or many related resources.
 
-- **Run id (`runId`)**: Unique identifier Placement assigns when it initializes
+- **Run id (`run_id`)**: Unique identifier Placement assigns when it initializes
   a `run`.
 
 ## Summary
@@ -128,7 +128,7 @@ flowchart TD
 - Receives resource creation and deletion requests from users
 - Provides REST API endpoints for _create_, _read_, _delete_ operations on
   catalog instances
-- Calls Placement Manager to execute a run and to delete resources in batch
+- Calls Placement Manager to execute (`CreateRun`) and delete `DeleteRun` a run
 - Returns responses and error messages to users
 
 #### Policy Manager
@@ -178,23 +178,21 @@ not exposed as a public Placement OpenAPI surface.
 
 #### Operations overview
 
-| Method | Operation         | Description                                                                |
-| ------ | ----------------- | -------------------------------------------------------------------------- |
-| POST   | `CreateResources` | Initialize a run; create one or more resources (single- or multi-resource) |
-| GET    | `GetResource`     | Get a single resource by `id`                                              |
-| GET    | `ListResources`   | List instances (each with nested `resources[]`)                            |
-| DELETE | `DeleteResources` | Delete one or more resources by id (single- or batch)                      |
+| Method | Operation   | Description                                |
+| ------ | ----------- | ------------------------------------------ |
+| POST   | `CreateRun` | Create a run                               |
+| GET    | `GetRun`    | Get a run by `run_id`                      |
+| GET    | `ListRun`   | List runs (each with nested `resources[]`) |
+| DELETE | `DeleteRun` | Delete a run by `run_id`                   |
 
-_Identifiers_: Each provisioned node has a resource `id` (returned to Catalog as
-`resourceIds[]` and stored on the catalog item instance). Placement assigns a
-`runId` when it initializes a run. That id groups resource rows within the
-resource table. `runId` appears in responses but is not sent on create or delete
-requests for now.
+_Identifiers_: Placement assigns a `run_id` when it initializes a run. That id
+groups resource rows within the resource table and is returned to Catalog. Each
+provisioned node still has a resource `id` for Placement/SPRM correlation.
 
-**CreateResources**: Create a run (single or multi-resource graph).
+**CreateRun**: Create a run (single or multi-resource graph).
 
 Catalog calls Placement after catalog resolution. The request carries the
-`catalogItemInstanceId` and a resolved `resources[]` graph with one or more
+`catalog_item_instance_id` and a resolved `resources[]` graph with one or more
 nodes (names, specs, and declared dependencies). A single-node graph is valid
 for single-resource catalog items. Multiple nodes form a multi-resource run.
 Placement builds the DAG, runs policy once per resource, persists the run, and
@@ -288,7 +286,7 @@ Example of response payload (`202 Accepted`):
 ```json
 {
   "catalog_item_instance_id": "4baa35eb-e70d-4d37-867d-0f4efa21d05c",
-  "runId": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b",
+  "run_id": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b",
   "resources": [
     {
       "id": "696511df-1fcb-4f66-8ad5-aeb828f383a0",
@@ -336,18 +334,17 @@ Example of response payload (`202 Accepted`):
 }
 ```
 
-**GetResource**: Get a single resource by id.
+**GetRun**: Get a run by `run_id`.
 
-Returns one provisioned resource by its `id`. The response includes
-`catalogItemInstanceId` and a nested `resources` object with the resource row
-(`id`, `dag_level`, `spec`, and related fields).
+Returns one run including `catalog_item_instance_id`, `run_id`, and nested
+`resources[]` (`id`, `dag_level`, `spec`, and related fields).
 
 Example of response payload
 
 ```json
 {
   "catalog_item_instance_id": "d6ebf344-bfd1-44c9-bc25-97f9fb856f22",
-  "runId": "2d8a1c9e-4f6b-4a7d-8e3c-1b2a3c4d5e6f",
+  "run_id": "2d8a1c9e-4f6b-4a7d-8e3c-1b2a3c4d5e6f",
   "resources": [
     {
       "id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
@@ -369,41 +366,36 @@ Example of response payload
 }
 ```
 
-**ListResources**: List instances.
+**ListRun**: List runs.
 
-Each `instances[]` entry is one resource instance and uses the same schema as
-the **GetResource** response.
+Each `runs[]` entry is one run and uses the same schema as the **GetRun**
+response.
 
 Example of response payload:
 
 ```json
 {
-  "instances": [
-    {/* instance - same schema as GET response */},
-    {/* instance - same schema as GET response */}
+  "runs": [
+    {/* run - same schema as GET response */},
+    {/* run - same schema as GET response */}
   ],
-  "nextPageToken": ""
+  "next_page_token": ""
 }
 ```
 
-**DeleteResources**: Delete one or more resources (single or batch).
+**DeleteRun**: Delete a run by `run_id`.
 
-Accepts `resource_ids[]` with one or more provisioned resource ids. A single id
-removes one resource. Multiple ids remove a batch (for example when deleting a
-catalog item instance or canceling a run). Placement marks all requested
-resources `PENDING_DELETION`, then deletes in **reverse DAG order**: it calls
-SPRM delete for every resource at the highest `dag_level` first, and continues
-with remaining resources only after prior ones reach `DELETED` (see
+Accepts `run_id`. Placement looks up all resources for that run, marks them
+`PENDING_DELETION`, then deletes in **reverse DAG order**: it calls SPRM delete
+for every resource at the highest `dag_level` first, and continues with
+remaining resources only after prior ones reach `DELETED` (see
 [Status-driven reverse-DAG deletion](#status-driven-reverse-dag-deletion)).
 
 Request Example:
 
 ```json
 {
-  "resource_ids": [
-    "696511df-1fcb-4f66-8ad5-aeb828f383a0",
-    "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
-  ]
+  "run_id": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b"
 }
 ```
 
@@ -411,10 +403,7 @@ Example of response payload
 
 ```json
 {
-  "resource_ids": [
-    "696511df-1fcb-4f66-8ad5-aeb828f383a0",
-    "08aa81d1-a0d2-4d5f-a4df-b80addf07781"
-  ]
+  "run_id": "7c4e8f2a-1b3d-4e5f-9a6b-0c1d2e3f4a5b"
 }
 ```
 
@@ -435,7 +424,7 @@ sequenceDiagram
   participant PE as Policy
   participant SPRM as SP Resource Manager
 
-  CM->>PM: CreateResources<br/>{catalog_item_instance_id, resources[]}
+  CM->>PM: CreateRun<br/>{catalog_item_instance_id, resources[]}
   activate PM
 
   PM->>PM: Build DAG (CEL + requires_resources)<br/>Detect circular deps, assign dag_level
@@ -521,7 +510,7 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- Catalog calls `CreateResources` with `catalog_item_instance_id` and a resolved
+- Catalog calls `CreateRun` with `catalog_item_instance_id` and a resolved
   `resources[]` graph, either single or multi-resource
 - Placement receives and processes the request
 
@@ -583,7 +572,7 @@ sequenceDiagram
   call returns **202** while another returns **503** (or another error):
   - Placement stops initiating any further creates for that run (including
     remaining level-0 nodes that are not yet sent to SPRM).
-  - Resources that already received **202** are torn down via `DeleteResources`.
+  - Resources that already received **202** are torn down via `DeleteRun`.
   - Dependents at higher dag_level values are not started.
   - Placement returns an error to Catalog Manager. The intent record is retained
     (see [Future Improvements](#future-improvements)).
@@ -655,20 +644,19 @@ After level 0, provisioning continues asynchronously.
 5. If Policy or SPRM return an error for any `dag_level` 1+, Placement applies
    the same failure rules as level 0: it stops processing for that run, tear
    down already provisioned resources in the graph (typically reverse DAG order
-   via `DeleteResources`), and retain the intent record (see
+   via `DeleteRun`), and retain the intent record (see
    [Future Improvements](#future-improvements)).
 6. Repeat steps 3 to 4 while resources are still provisioning.
 7. When all resources reach terminal success, the process is complete.
 8. When any resource reports a terminal failure, Placement initiates rollback
    and cleanup: provisioning halts, tears down already provisioned resources in
-   the graph (typically reverse DAG order via `DeleteResources`). Placement
-   still retains the records in Control Plane DB (See
+   the graph (typically reverse DAG order via `DeleteRun`). Placement still
+   retains the records in Control Plane DB (See
    [Future Improvements](#future-improvements)).
 
 ### Service Deletion Flow
 
-The following sequence diagram illustrates deleting one or more resources via
-`DeleteResources`.
+The following sequence diagram illustrates deleting a run via `DeleteRun`.
 
 ```mermaid
 sequenceDiagram
@@ -678,13 +666,13 @@ sequenceDiagram
     participant DB as Control Plane DB
     participant SPRM as SP Resource Manager
 
-    CM->>PM: DeleteResources<br/>{resource_ids[]}
+    CM->>PM: DeleteRun<br/>{run_id}
     activate PM
 
-    PM->>DB: Lookup resources for resource_ids[]
+    PM->>DB: Lookup resources for run_id
     PM->>PM: Sort by reverse DAG order<br/>(dependents before dependencies)
 
-    PM->>DB: Mark all requested resources<br/>PENDING_DELETION
+    PM->>DB: Mark all run resources<br/>PENDING_DELETION
 
     loop each resource at max dag_level
         PM->>DB: Get agent_name, service_type, instance_id
@@ -702,7 +690,7 @@ sequenceDiagram
         deactivate SPRM
     end
 
-    PM-->>CM: 202 Accepted<br/>{resource_ids[]}
+    PM-->>CM: 202 Accepted<br/>{run_id}
     deactivate PM
 
     Note over SPRM,PM: Remaining resources (async, after prior DELETED)
@@ -738,20 +726,18 @@ sequenceDiagram
 
 1. **Request Reception**
 
-- Catalog Manager sends a DELETE request to Placement Manager with one or more
-  ids in `resource_ids[]`
+- Catalog Manager sends a `DeleteRun` request to Placement Manager with `run_id`
 
 2. **Resource lookup and reverse-DAG ordering**
 
-- Placement Manager looks up the resource records for the requested
-  `resource_ids[]`, including `agent_name`, `service_type`, `instance_id`, and
-  `dag_level`
+- Placement Manager looks up all resource records for that `run_id`, including
+  `agent_name`, `service_type`, `instance_id`, and `dag_level`
 - Placement sorts the resources in reverse DAG order (dependents before
   dependencies)
 
 3. **Update resource status**
 
-- Placement marks all requested resources status to `PENDING_DELETION`
+- Placement marks all resources in the run to `PENDING_DELETION`
 
 4. **Delegation to SP Resource Manager**
 
@@ -761,10 +747,10 @@ sequenceDiagram
 - SPRM always responds synchronously with one of:
   - **SPRM returns error**: Placement returns an error to Catalog and leaves all
     resource status as `PENDING_DELETION` so deletion can be retried
-  - **SPRM returns 202 Accepted**: Placement marks those resources as`DELETING`
-    and returns `202 Accepted` with `resourceIds[]` to Catalog. Lower level
-    resources stay `PENDING_DELETION` until the deletion run continues in
-    reverse DAG order (see
+  - **SPRM returns 202 Accepted**: Placement marks those resources as `DELETING`
+    and returns `202 Accepted` with `run_id` to Catalog. Lower level resources
+    stay `PENDING_DELETION` until the deletion run continues in reverse DAG
+    order (see
     [Status-driven reverse-DAG deletion](#status-driven-reverse-dag-deletion))
 - **SPRM notifies QUEUED (asynchronous)**: After returning 202, SPRM may
   asynchronously notify PM of a `QUEUED` status if the Agent reports the SP for
