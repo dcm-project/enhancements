@@ -19,7 +19,7 @@ Sequence detail:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Submitted: User creates/updates/deletes
+    [*] --> Submitted: User creates/deletes
     Submitted --> Placed: Placement Manager
     Placed --> Evaluating: Policy Engine
     Evaluating --> Provisioning: Allow or modified
@@ -134,7 +134,7 @@ late approval: delete does not proceed.
 
 ### Soft deny on update
 
-**Scope:** Initial scope · **Maps to:** UC #16 (same ticket path as create).
+**Scope:** Deferred · **Maps to:** UC #16 (same ticket path as create).
 
 Same flow as create: soft deny after placement → `PendingApproval` → DCM opens
 ticket → monitor → re-evaluate → apply update only if approved on time and

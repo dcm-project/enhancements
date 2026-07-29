@@ -62,11 +62,11 @@ grant/deny alternative is documented under
    Create only, or also update and delete when evaluation soft-denies?
 
    > [!NOTE] **Proposed approach**  
-   > Soft deny with an external ticket applies to create, update, and delete
-   > **only when policy soft-denies that operation**. It does not replace
-   > today's delete when Rego allows. It is not “every delete needs approval.”
-   > Owner delete (and other cases) can stay allow in Rego. Soft on rehydration
-   > is deferred (see Deferred items).
+   > Soft deny with an external ticket applies to **create and delete** only
+   > when policy soft-denies that operation. It does not replace today's delete
+   > when Rego allows. It is not “every delete needs approval.” Owner delete
+   > (and other cases) can stay allow in Rego. Soft on rehydration is deferred
+   > (see Deferred items).
 
 3. **Composite requests (UC #2)**  
    Soft deny per child or one parent-level ticket?
@@ -429,9 +429,10 @@ Do **not** treat these as required for the initial scope unless Goals expand:
 5. GitOps-specific skip of soft deny
 6. Soft on **rehydration** when Policy Engine soft lands (inherit vs treat as
    hard). Not an epic AC. Rehydration already calls the same evaluate API.
-7. Policy-engine mutate and re-validate loops until stable, and cycle detection
+7. Soft deny + ticket path on **update**
+8. Policy-engine mutate and re-validate loops until stable, and cycle detection
    (policy-engine domain)
-8. Full five-mechanism catalog from external design input
+9. Full five-mechanism catalog from external design input
 
 ### Risks and Mitigations
 
@@ -450,7 +451,7 @@ Do **not** treat these as required for the initial scope unless Goals expand:
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Submitted: User creates/updates/deletes
+    [*] --> Submitted: User creates/deletes
     Submitted --> Placed: Placement Manager
     Placed --> Evaluating: Policy Engine (post-placement payload)
     Evaluating --> Provisioning: Allow or modified
