@@ -108,7 +108,7 @@ grant/deny alternative is documented under
 
 6. **Evaluate outcome shape**  
    How is soft deny / approval-required represented next to today’s `APPROVED` /
-   `MODIFIED` / hard reject?
+   `MODIFIED` / `DENIED`?
 
    > [!NOTE] **Proposed approach**  
    > Soft deny is an **explicit evaluate outcome** owned by the
