@@ -73,6 +73,13 @@ without duplicating OSAC's existing orchestration logic.
   placement selects the registered SP `provider_name` (Phase 1) or the
   environment agent (Phase 2), not a hub within OSAC.
 - OSAC internal components (operator, AAP playbooks, networking controllers).
+- Bearer-token authentication between `control-plane` and the SP —
+  `AUTH_DISABLED=true` is a documented transitional gap (see the
+  [authentication enhancement](../authentication/authentication.md)); the ticket
+  that would have closed it (FLPATH-4196) was closed as Won't Do in favor of the
+  Phase 2 agent epic (FLPATH-4622, currently blocked). Tracked as a risk, not
+  solved by this enhancement — see
+  [Risks and Mitigations](#risks-and-mitigations).
 - Per-DCM-tenant isolation within OSAC — the OSAC SP authenticates as a single
   service account assigned to one OSAC Organization, so v1 is single-tenant from
   OSAC's perspective: every DCM tenant's clusters and VMs land in the same OSAC
@@ -201,43 +208,20 @@ sequenceDiagram
 
     Note over User,FS: Per-request flow, today
     User->>CP: Authenticated request
-    CP->>CP: Resolve ActorID/TenantID; catalog, placement, and policy<br/>resolve provider_name in-process (same monolith)
+    CP->>CP: Resolve ActorID/TenantID
+    Note over CP: Policy selects provider_name;<br/>placement dispatches to the SP resource manager (same monolith)
     CP->>SP: Route to OSAC SP (no token)
     SP->>FS: Create (gRPC), bearer = SP's own JWT
     Note over SP,FS: metadata.tenant = SP's assigned Organization<br/>(same value for every DCM tenant)
     FS-->>SP: 201 Created
 ```
 
-`control-plane` added in-app JWT bearer validation
-([`internal/auth`](https://github.com/dcm-project/control-plane/blob/main/internal/auth),
-merged via
-[control-plane#24](https://github.com/dcm-project/control-plane/pull/24)) as
-part of the [authentication enhancement](../authentication/authentication.md),
-and its `provider`/`resource_manager` OpenAPI specs now declare
-`security: [bearerAuth: []]` with no path-level override — so every SP-facing
-route requires a bearer token in principle, the same as every other route on the
-monolith. In practice this middleware is a no-op today: `AUTH_DISABLED` defaults
-to `true`
-([`internal/app/config.go`](https://github.com/dcm-project/control-plane/blob/main/internal/app/config.go))
-specifically because service providers, including the OSAC SP, do not forward
-authentication headers — the authentication enhancement documents this as a
-transitional mitigation and states that `AUTH_DISABLED` "must not be used in
-production deployments."
-
-**This is an open gap, not a scheduled one.** The ticket that was meant to close
-it — [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196), SP
-authentication against `control-plane`'s own JWT middleware — was closed ("Will
-be handled in the agents epic as the architecture has changed"), as was its
-enhancement-doc story
-[FLPATH-4455](https://redhat.atlassian.net/browse/FLPATH-4455) (resolution:
-Won't Do). The successor,
-[FLPATH-4622](https://redhat.atlassian.net/browse/FLPATH-4622) ("Implement Auth
-mechanism to the agent"), has not started and is blocked on
-[FLPATH-4486](https://redhat.atlassian.net/browse/FLPATH-4486) (the environment
-agent implementation — Phase 2). No bearer token reaches the SP through either
-path today, and, unlike the rest of this section, there is currently no active,
-unblocked work item that closes this gap on the `control-plane` side — resolving
-it may require the Phase 2 migration itself. See
+`control-plane` declares `security: [bearerAuth: []]` on every SP-facing route
+as of [control-plane#24](https://github.com/dcm-project/control-plane/pull/24),
+but enforcement is disabled by default (`AUTH_DISABLED=true` in
+[`internal/app/config.go`](https://github.com/dcm-project/control-plane/blob/main/internal/app/config.go))
+because SPs, including OSAC SP, don't forward auth headers yet. This is a known
+gap, not a Phase 1 deliverable — see [Non-Goals](#non-goals) and
 [Risks and Mitigations](#risks-and-mitigations).
 
 The SP is never handed a DCM token to begin with — it mints its own, independent
@@ -276,20 +260,21 @@ Per-DCM-tenant isolation is out of scope for this version (see
 
 OSAC supports multiple infrastructure hubs managed by a single fulfillment
 service. Hub selection is an internal OSAC placement decision handled by the
-fulfillment service, opaque to DCM. In Phase 1, this resolution happens
-in-process within the `control-plane` monolith: the catalog/placement domain
-resolves the target `provider_name` (`osac-sp-cluster` or `osac-sp-vm`) at
-request time and hands it directly to the SP resource-manager domain in the same
-binary — there is no network call between "DCM" and "`control-plane`"; they are
-the same deployable (see the
-[control-plane monolith enhancement](../control-plane-monolith/control-plane-monolith.md),
-which documents catalog → placement → policy → service-provider as in-process).
-The resource manager then looks up the registered `Provider` by that name and
-dispatches directly to its endpoint — see
-[Registration Flow](#registration-flow) and [API Endpoints](#api-endpoints). In
-Phase 2, placement operates at the agent level instead — selecting the
-environment agent that contains this SP — per the
-[environment agent enhancement](../environment-agent/environment-agent.md).
+fulfillment service, opaque to DCM.
+
+- **Phase 1 (control-plane):** resolution happens in-process within the
+  `control-plane` monolith — policy selects the target `provider_name`
+  (`osac-sp-cluster` or `osac-sp-vm`) and placement dispatches directly to the
+  SP resource manager in the same binary. There is no network call between "DCM"
+  and "`control-plane`"; they are the same deployable (see the
+  [control-plane monolith enhancement](../control-plane-monolith/control-plane-monolith.md)).
+  The resource manager looks up the registered `Provider` by that name and
+  dispatches to its endpoint — see [Registration Flow](#registration-flow) and
+  [API Endpoints](#api-endpoints).
+- **Phase 2 (environment agent, deferred):** placement operates at the agent
+  level instead — selecting the environment agent that contains this SP — per
+  the
+  [environment agent enhancement](../environment-agent/environment-agent.md).
 
 ### Catalog Independence
 
@@ -320,6 +305,8 @@ coordinating with the OSAC operator on the hub cluster.
 - Clusters are provisioned using Hosted Control Planes via ACM on the hub
   cluster.
 
+**Phase 1 (control-plane):**
+
 ```mermaid
 sequenceDiagram
     participant CP as control-plane
@@ -327,7 +314,7 @@ sequenceDiagram
     participant FS as OSAC Fulfillment Service
     participant OP as OSAC Operator
 
-    Note over CP: catalog/placement resolve provider_name in-process,<br/>then dispatch to the SP resource-manager domain (same monolith)
+    Note over CP: Policy selects provider_name;<br/>placement dispatches to the SP resource manager (same monolith)
     CP->>SP: Route to OSAC SP (by provider_name)
     SP->>FS: osac.public.v1.Clusters/Create (gRPC)
     FS->>FS: Create Cluster resource
@@ -335,6 +322,29 @@ sequenceDiagram
     OP->>FS: Update cluster status
     SP->>FS: osac.public.v1.Clusters/List (poll)
     SP->>CP: Publish status event (CloudEvents, via NATS JetStream)
+```
+
+**Phase 2 (environment agent, deferred):**
+
+```mermaid
+sequenceDiagram
+    participant DCM as DCM Control Plane
+    participant MS as Messaging System
+    participant AG as Environment Agent
+    participant SP as OSAC SP
+    participant FS as OSAC Fulfillment Service
+    participant OP as OSAC Operator
+
+    DCM->>MS: Publish creation request to agent topic
+    MS->>AG: Deliver creation request
+    AG->>SP: Route to OSAC SP (by service type)
+    SP->>FS: osac.public.v1.Clusters/Create (gRPC)
+    FS->>FS: Create Cluster resource
+    OP->>OP: Reconcile ClusterOrder
+    OP->>FS: Update cluster status
+    SP->>FS: osac.public.v1.Clusters/List (poll)
+    SP->>MS: Publish status event (CloudEvents)
+    MS->>DCM: Deliver status update
 ```
 
 #### Registration with control-plane (Phase 1)
@@ -365,11 +375,18 @@ Its conflict rule is `name`/`id`-based only — a request fails with
 `id` already exists under a different `name`
 ([`RegisterOrUpdateProvider`](https://github.com/dcm-project/control-plane/blob/main/internal/sp/service/provider/provider.go)).
 The "OSAC SP may lose the `vm` slot to `kubevirt-sp`" contention scenario from
-the environment agent model (Phase 2) therefore does not apply in Phase 1:
-multiple providers may register the same `service_type` simultaneously, and
-routing for a given request is resolved by whichever `provider_name` the caller
-(DCM's catalog/placement layer) specifies — see
-[Multi-Hub Topology](#multi-hub-topology).
+the environment agent model (Phase 2, below) therefore does not apply in Phase
+1: multiple providers may register the same `service_type` simultaneously, and
+routing for a given request is resolved by whichever `provider_name` policy
+selects at request time — see [Multi-Hub Topology](#multi-hub-topology).
+
+**On the SP side**, a `409` here is non-retryable and treated identically to any
+other 4xx: the SP logs it at ERROR level and permanently stops retrying that
+registration (`cluster` and `vm` register and fail independently) — unlike Phase
+2, it does not retry into the conflict, because there is no slot to eventually
+acquire
+([`runLoop`](https://github.com/dcm-project/osac-service-provider/blob/feat/milestone-1-scaffold/internal/registration/registration.go)).
+The SP process keeps running and serving requests regardless.
 
 **No lease renewal:** unlike the environment agent model, `control-plane` does
 not require periodic re-registration to keep a provider's slot. Once registered,
@@ -378,13 +395,52 @@ the OSAC SP's liveness is tracked by `control-plane`'s own health poller (see
 Registration therefore runs once at startup, retried with exponential backoff on
 failure, without blocking server startup.
 
+#### Registration with environment agent (Phase 2, deferred)
+
+Once the environment agent is available, the OSAC SP registers with it instead,
+via `POST /api/v1/providers`, following the contract defined in the
+[environment agent enhancement](../environment-agent/environment-agent.md#sp-registration-to-agent).
+
+```mermaid
+sequenceDiagram
+    participant SP as OSAC SP
+    participant AG as Environment Agent
+    participant DCM as DCM Control Plane
+
+    Note over SP: Startup complete
+    SP->>AG: POST /api/v1/providers (service_type: cluster)
+    AG-->>SP: 201 Created (lease TTL)
+    SP->>AG: POST /api/v1/providers (service_type: vm)
+    AG-->>SP: 201 Created (lease TTL)
+    AG->>DCM: Register agent (service_types: [cluster, vm])
+    DCM-->>AG: 200 OK
+
+    loop Lease renewal
+        SP->>AG: POST /api/v1/providers (re-register)
+        AG-->>SP: 200 OK (lease renewed)
+    end
+```
+
+Unlike Phase 1, the agent enforces **one SP per service type** — the first SP to
+register for `cluster` or `vm` claims it, and any other SP registering for the
+same type is rejected with `409 Conflict`
+([Service Type Uniqueness](../environment-agent/environment-agent.md#service-type-uniqueness)).
+This matters for `vm` specifically, since OSAC SP is not necessarily the only SP
+capable of serving it (e.g., `kubevirt-sp` also registers `vm`). Here, a `409`
+on `vm` is **not** fatal: the OSAC SP logs the conflict, `cluster` registration
+proceeds independently, and the `vm` registration attempt is retried on the same
+cadence as lease renewal — so OSAC SP automatically acquires the `vm` slot later
+if the incumbent's lease expires, without an OSAC SP restart. The environment
+agent persists registrations to local storage, so a restart does not itself
+cause the OSAC SP to lose a slot as long as it keeps renewing its lease.
+
 #### SP Health Check
 
 OSAC SP exposes a `GET /health` endpoint. In Phase 1, `control-plane` actively
-polls this endpoint on a per-provider interval and updates the provider's stored
-health status; the SP does not push health updates itself. The response payload
-and the three-state model (Ready, Unhealthy, Unavailable) are unchanged from the
-environment agent model — see
+polls it and updates the provider's stored health status; in Phase 2, the
+environment agent polls the same endpoint instead. The response payload and
+three-state model (Ready, Unhealthy, Unavailable) are identical in both phases —
+only the poller changes. See
 [SP Health Check](../service-provider-health-check/service-provider-health-check.md).
 `control-plane` derives `Unavailable` itself (consecutive-failure count with
 backoff) when the endpoint is unreachable or unparsable; the SP only ever needs
@@ -392,8 +448,7 @@ to report `healthy` or `unhealthy` in its payload.
 
 #### Status Reporting
 
-Status updates are published to the messaging system using CloudEvents format,
-carried over NATS JetStream, and consumed directly by `control-plane`. Per the
+Status updates are published using CloudEvents format. Per the
 [SP Status Reporting](../state-management/service-provider-status-reporting.md)
 enhancement:
 
@@ -401,9 +456,11 @@ enhancement:
 - **Type:** `dcm.status.cluster` or `dcm.status.vm`
 - **Source:** `dcm/providers/{provider_name}`
 
-This is unchanged in shape from the environment agent model (Phase 2) — only the
-consumer differs: `control-plane` subscribes to the status subject directly
-rather than the environment agent forwarding events on DCM's behalf.
+This is unchanged in shape between phases — only the transport and consumer
+differ.
+
+**Phase 1 (control-plane):** carried over NATS JetStream and consumed directly
+by `control-plane`.
 
 ```mermaid
 sequenceDiagram
@@ -419,6 +476,28 @@ sequenceDiagram
         alt Status changed
             SP->>MS: Publish CloudEvents status update
             MS->>CP: Deliver status event
+            SP->>SP: Update local cache
+        end
+    end
+```
+
+**Phase 2 (environment agent, deferred):** carried over the messaging system,
+with the environment agent forwarding events to DCM on the SP's behalf.
+
+```mermaid
+sequenceDiagram
+    participant FS as OSAC Fulfillment Service
+    participant SP as OSAC SP
+    participant MS as Messaging System
+    participant DCM as DCM Control Plane
+
+    loop Every 30s (configurable)
+        SP->>FS: Clusters/List + ComputeInstances/List (CEL filter)
+        FS-->>SP: Current resource states
+        SP->>SP: Compare against local cache
+        alt Status changed
+            SP->>MS: Publish CloudEvents status update
+            MS->>DCM: Deliver status event
             SP->>SP: Update local cache
         end
     end
@@ -476,9 +555,8 @@ single OSAC SP process registers as two distinct named providers:
 `control-plane` stores these as independent `Provider` records; there is no
 downstream agent registration step to chain off of. `Provider.metadata` allows
 arbitrary additional properties, so capability advertisement (below) is carried
-there, letting DCM's catalog/placement layer read it when resolving a
-`provider_name` for a given request (see
-[Multi-Hub Topology](#multi-hub-topology)).
+there, letting DCM's policy domain read it when selecting a `provider_name` for
+a given request (see [Multi-Hub Topology](#multi-hub-topology)).
 
 #### Capability Advertisement
 
@@ -673,12 +751,11 @@ The `id` query parameter is optional at the `control-plane` API level —
 ([`resource_manager` schema](https://github.com/dcm-project/control-plane/blob/main/api/sp/v1alpha1/resource_manager/openapi.yaml))
 — but is forwarded unchanged to this endpoint from whatever value the
 corresponding `ServiceTypeInstance` was created with (see
-[API Endpoints](#api-endpoints)). Whether DCM's own catalog/placement domain
-always supplies a stable, pre-generated value in practice — which the
-idempotency argument below depends on — has not been independently verified;
-treat it as an assumption pending confirmation from the catalog/placement
-maintainers. See [Idempotent Creation](#idempotent-creation) for how the SP uses
-it.
+[API Endpoints](#api-endpoints)). Whether DCM's own placement domain always
+supplies a stable, pre-generated value in practice — which the idempotency
+argument below depends on — has not been independently verified; treat it as an
+assumption pending confirmation from the placement maintainers. See
+[Idempotent Creation](#idempotent-creation) for how the SP uses it.
 
 **Response:** Returns `201 Created` with the cluster resource in its initial
 state:
@@ -1175,16 +1252,17 @@ version to the appropriate OSAC `release_image` in
 
 ### Risks and Mitigations
 
-| Risk                                                                                                                                                                                                                                                                                                     | Mitigation                                                                                                                                                                                                                                                  |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OSAC fulfillment service unavailable                                                                                                                                                                                                                                                                     | Health check detects connectivity loss; `control-plane` marks SP unhealthy; DCM routes to alternative providers                                                                                                                                             |
-| Status polling introduces latency                                                                                                                                                                                                                                                                        | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback                                                                                                                                                     |
-| ID mapping data loss causes orphaned resources                                                                                                                                                                                                                                                           | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership                                                                                                                                                      |
-| OSAC platform version upgrades change the gRPC API                                                                                                                                                                                                                                                       | Pin to a specific OSAC API version; version negotiation on startup                                                                                                                                                                                          |
-| OIDC token expiry causes transient auth failures                                                                                                                                                                                                                                                         | Token refresh before expiry; 401 triggers immediate refresh and retry                                                                                                                                                                                       |
-| DCM catalog size tiers don't line up with available OSAC templates                                                                                                                                                                                                                                       | Catalog admins provision one OSAC template per size tier in advance; `422` error when no matching template exists                                                                                                                                           |
-| Default network provisioning fails or is slow on a tenant's first VM request                                                                                                                                                                                                                             | Pre-provision default subnets for known tenants at SP startup; surface provisioning failure as `502` on VM create with retry                                                                                                                                |
-| SP authentication against `control-plane` has no active, unblocked implementation path — Phase 1 depends indefinitely on `AUTH_DISABLED=true`, which the [authentication enhancement](../authentication/authentication.md) states must not be used in production (see [Authentication](#authentication)) | Treat this as a Phase 1 production blocker rather than a cosmetic gap; track resolution against [FLPATH-4622](https://redhat.atlassian.net/browse/FLPATH-4622) and re-evaluate the [Phase 2 migration criteria](#phased-delivery) if it remains unaddressed |
+| Risk                                                                                                                                                                                                                                                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OSAC fulfillment service unavailable                                                                                                                                                                                                                                                                     | Health check detects connectivity loss; `control-plane` marks SP unhealthy; DCM routes to alternative providers                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Status polling introduces latency                                                                                                                                                                                                                                                                        | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ID mapping data loss causes orphaned resources                                                                                                                                                                                                                                                           | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| OSAC platform version upgrades change the gRPC API                                                                                                                                                                                                                                                       | Pin to a specific OSAC API version; version negotiation on startup                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| OIDC token expiry causes transient auth failures                                                                                                                                                                                                                                                         | Token refresh before expiry; 401 triggers immediate refresh and retry                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| DCM catalog size tiers don't line up with available OSAC templates                                                                                                                                                                                                                                       | Catalog admins provision one OSAC template per size tier in advance; `422` error when no matching template exists                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Default network provisioning fails or is slow on a tenant's first VM request                                                                                                                                                                                                                             | Pre-provision default subnets for known tenants at SP startup; surface provisioning failure as `502` on VM create with retry                                                                                                                                                                                                                                                                                                                                                                                            |
+| SP authentication against `control-plane` has no active, unblocked implementation path — Phase 1 depends indefinitely on `AUTH_DISABLED=true`, which the [authentication enhancement](../authentication/authentication.md) states must not be used in production (see [Authentication](#authentication)) | Treat this as a Phase 1 production blocker rather than a cosmetic gap; track resolution against [FLPATH-4622](https://redhat.atlassian.net/browse/FLPATH-4622) and re-evaluate the [Phase 2 migration criteria](#phased-delivery) if it remains unaddressed                                                                                                                                                                                                                                                             |
+| Policy resolves `provider_name` per request independently; nothing pins a `vm` request to the same provider that fulfilled a related `cluster` request, so DCM could route a cluster to OSAC SP and a co-located VM to a different provider despite user intent to keep them in one environment          | Pre-existing DCM-wide placement gap, not introduced by this enhancement — the environment agent model (Phase 2) has the identical limitation and defers a fix to "SP-Based Advertisement for Policy Selection" ([environment agent enhancement](../environment-agent/environment-agent.md#sp-based-advertisement-for-policy-selection), listed as a Future Enhancement). Mitigated today by keeping OSAC-specific catalog items uniquely resolvable via `provider_hints.osac.*` so no other registered provider matches |
 
 ## Design Details
 
@@ -1305,6 +1383,17 @@ remains backward-compatible.
   response's top-level `id`/`status` fields are schema-required —
   `control-plane` does not validate their presence and silently persists empty
   values if the SP omits them — and fixed a typo (`control- plane`).
+- 2026-07-30: Addressed
+  [PR #96](https://github.com/dcm-project/enhancements/pull/96) review feedback:
+  restored Phase 2 (environment agent) content alongside Phase 1 in
+  Registration, the OSAC Fulfillment Service Integration diagram, and Status
+  Reporting, rather than replacing it; fixed a Mermaid rendering error and
+  corrected "catalog/placement" attribution to policy (selects `provider_name`)
+  vs. placement (dispatches) after code verification; answered how the SP reacts
+  to a `409` on registration; trimmed the Authentication section's ticket-trail
+  detail into a new Non-Goals entry; and added a Risk entry for the
+  pre-existing, cross-phase gap in policy's ability to co-locate related
+  resources on the same provider.
 
 ## Drawbacks
 
