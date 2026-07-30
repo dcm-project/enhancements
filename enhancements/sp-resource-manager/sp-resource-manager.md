@@ -13,6 +13,8 @@ reviewers:
 creation-date: 2026-01-02
 see-also:
   - "/enhancements/environment-agent/environment-agent.md"
+  - "/enhancements/placement-manager/placement-manager.md"
+  - "/enhancements/sp-resource-status-reader/sp-resource-status-reader.md"
 ---
 
 # Service Provider Resource Manager
@@ -35,13 +37,14 @@ control for instance lifecycle operations within DCM core.
 ### Goals
 
 - Define CRUD endpoints for creating and managing service type instance.
+- Define the asynchronous status consumer flow.
 
 ### Non-Goals
 
 - Define flow for registering/de-registering providers (covered in
   [Registration Flow documentation](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md))
-- Define status reporting mechanism for SPs (covered in Status reporting
-  documentation)
+- Define how Service Providers publish status events (covered in
+  [Service Provider Status Reporting](../state-management/service-provider-status-reporting.md))
 - Define health check status reporting for SPS (covered in SP Provider health
   check)
 - Define authentication and authorization.
@@ -79,7 +82,12 @@ control for instance lifecycle operations within DCM core.
 - **Publishing**: SPRM publishes creation and deletion request CloudEvents to
   the agent's main topic (`{agent_topic_name}`), and cancel CloudEvents to the
   agent's cancel topic (`{agent_topic_name}.cancel`)
-- **Consuming**: SPRM consumes response CloudEvents from `dcm.agents.responses`
+- **Consuming (agent responses)**: SPRM consumes response CloudEvents from
+  `dcm.agents.responses` (creation/deletion acknowledged, queued, error)
+- **Consuming (provider status)**: SPRM's status consumer subscribes to provider
+  status subjects and updates instance status. See
+  [Status Consumer Flow](#status-consumer-flow) and
+  [SP Resource Status Reader](../sp-resource-status-reader/sp-resource-status-reader.md)
 
 ### API Endpoints
 
@@ -372,6 +380,10 @@ acknowledges the request, confirming that an SP has begun processing it.
 | `FAILED`       | Agent or SP reported an error                                |
 | `DELETED`      | Resource deleted                                             |
 
+`RUNNING` and `DELETED` are the statuses that drive Placement orchestration DAG
+progression after the [Status Consumer Flow](#status-consumer-flow) updates the
+database.
+
 ### Asynchronous Response Processing
 
 The SP Resource Manager consumes response CloudEvents from the
@@ -496,6 +508,95 @@ strategies depending on the underlying platform.
 - **503 Service Unavailable**: Agent is Unavailable (missed heartbeats) or
   Congested (consumer lag threshold exceeded)
 - **500 Internal Server Error**: Unexpected error in SP Resource Manager
+
+### Status Consumer Flow
+
+After SPRM accepts a creation (or deletion) request and returns `202`, instance
+progresses continues asynchronously. Service Providers publish status
+CloudEvents to the message bus whenever resource state changes (for example
+`PENDING` to `RUNNING`). SPRM runs a background status consumer that:
+
+1. Consumes status events from the message bus
+2. Updates the matching service-type instance row in the control-plane database
+3. When the new status is `RUNNING`, notifies Placement in-process
+   (`OnResourceRunning`) so Placement can advance DAG orchestration
+
+Subscription subjects, CloudEvent parsing, and idempotent DB updates are
+detailed in
+[SP Resource Status Reader](../sp-resource-status-reader/sp-resource-status-reader.md).
+This section defines how that consumer closes the loop with Placement.
+
+#### Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SP as Service Provider
+    participant MS as Messaging System
+    participant SC as SPRM<br/>(Status Consumer)
+    participant DB as Control Plane DB
+    participant PM as Placement Manager
+
+    Note over SP: Instance state changes<br/>(e.g. PENDING → RUNNING)
+
+    SP->>MS: PUBLISH status CloudEvent<br/>subject: dcm.{service_type}<br/>data: {id, status, outputs}
+    MS->>SC: Deliver status event
+
+    SC->>SC: Parse CloudEvent<br/>Extract id, status, <br/>(optional spec outputs)
+
+    alt Invalid or unknown instance
+        SC->>SC: Log warning, discard
+    else Valid status event
+        SC->>DB: Update instance record<br/> status, outputs (optional), <br/>status_message
+        DB-->>SC: OK
+
+        alt status is RUNNING
+            SC->>PM: OnResourceRunning (in-process)<br/>{id, outputs}
+            Note over PM: Continue DAG progression and bind<br/> CEL with outputs
+        else status is DELETED
+            SC->>PM: OnResourceDeleted (in-process)<br/>{id}
+            Note over PM: Continue reverse-DAG deletion
+        else status is FAILED
+          SC->>PM: OnResourceFailed (in-process)<br/>{id}
+          Note over PM: Halt DAG and start rollback
+        else Other status<br/>(PENDING, QUEUED)
+            Note over SC: No need to notify Placement
+        end
+    end
+```
+
+#### Flow Description
+
+1. **Consume CloudEvent**
+
+- The status consumer receives provider status CloudEvents from the messaging
+  system.
+- Parse the CloudEvent, resolve `instance_id`, `service_type`, `status` and
+  optional outputs.
+
+2. **Update Instance Record**
+
+- Persist the new status and outputs status message when present. Unknown `id`
+  values are logged and ignored.
+
+3. **Check for `RUNNING` state**
+
+- If the updated status is `RUNNING` and required outputs are available, SPRM
+  notifies Placement in-process via `OnResourceRunning`.
+- Placement uses the available outputs for CEL binding and continue the next DAG
+  level when dependencies are satisfied (see
+  [Placement Manager — Status-driven DAG progression](../placement-manager/placement-manager.md#status-driven-dag-progression)).
+
+4. **Check for `DELETED` state**
+
+- When status is `DELETED`, SPRM notifies Placement via `OnResourceDeleted` so
+  reverse-DAG deletion can continue (see
+  [Placement Manager — Status-driven reverse-DAG deletion](../placement-manager/placement-manager.md#status-driven-reverse-dag-deletion)).
+
+5. **Check for `FAILED` state**
+
+- When status is `FAILED`, SPRM notifies Placement via `OnResourceFailed` so DAG
+  progression stop and start rollback (tear down already provision resources)
 
 ### Future Improvements
 
