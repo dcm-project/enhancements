@@ -558,7 +558,7 @@ sequenceDiagram
             Note over PM: Continue reverse-DAG deletion
         else status is FAILED
           SC->>PM: OnResourceFailed (in-process)<br/>{id}
-          Note over PM: Halt DAG and start rollback
+          Note over PM: Create path only: halt DAG<br/>and start rollback
         else Other status<br/>(PENDING, QUEUED)
             Note over SC: No need to notify Placement
         end
@@ -595,8 +595,14 @@ sequenceDiagram
 
 5. **Check for `FAILED` state**
 
-- When status is `FAILED`, SPRM notifies Placement via `OnResourceFailed` so DAG
-  progression stop and start rollback (tear down already provision resources)
+- When status is `FAILED`, SPRM notifies Placement via `OnResourceFailed`.
+- **Create path:** Placement stops DAG progression and starts rollback (tear
+  down already provisioned resources). See
+  [Placement Manager — Status-driven DAG progression](../placement-manager/placement-manager.md#status-driven-dag-progression).
+- **Delete path:** There is no rollback. Placement does not recreate resources
+  that already reached `DELETED` state. The remaining resources in the DAG stay
+  `PENDING_DELETION` or `DELETING` for retry. See
+  [Placement Manager — Service Deletion Flow](../placement-manager/placement-manager.md#service-deletion-flow).
 
 ### Future Improvements
 
