@@ -20,6 +20,7 @@ creation-date: 2025-12-05
 see-also:
   - "/enhancements/service-type-definitions/service-type-definitions.md"
   - "/enhancements/declarative-api/declarative-api.md"
+  - "/enhancements/cross-provider-outputs/cross-provider-outputs.md"
   - "/enhancements/placement-manager/placement-manager.md"
 replaces:
   - TBD
@@ -375,8 +376,9 @@ resolves them in a second phase after dependency outputs exist (see
 [Declarative API](/enhancements/declarative-api/declarative-api.md)). Placement
 also infers DAG edges from CEL references alongside `requires_resources`.
 
-Defining standard outputs on service types (for example `connection_string`,
-`host`, `port`) is follow-up work.
+Output declarations on catalog resources and CEL reference validation are
+defined in
+[Cross-Provider Outputs](/enhancements/cross-provider-outputs/cross-provider-outputs.md).
 
 ###### Example: Placement payload (effective graph after catalog resolution)
 
