@@ -1014,17 +1014,29 @@ picks up the timestamp, issues the Kubernetes delete, and clears its finalizer
 in the **same pass** — without waiting for confirmation the CR is actually gone.
 Once no finalizers remain, the DAO archives the record and `Get`/`List` start
 returning `404`. In practice this means the cluster can disappear from OSAC's
-API before the underlying Hosted Control Plane teardown finishes. `ClusterState`
-has no `DELETING` value (only `PROGRESSING`, `READY`, `FAILED`) — the SP has no
-intermediate status to report — so it polls silently and, like `acm-cluster-sp`,
-publishes `DELETED` and removes the entry from its local mapping store as soon
-as it observes the `404`.
+API before the underlying Hosted Control Plane teardown finishes.
 
-This is a known gap being actively worked on OSAC's side, not just a stale SP
-assumption: [OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) tracks
-that the cluster feedback controller's `handleDelete` is a literal TODO, and
-[OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391) tracks adding
-`DELETING`/`DELETE_FAILED` states to `Cluster` (both targeted for OSAC v0.2).
+**Correction (verified 2026-07-31 against a newer OSAC commit than this
+section's citations elsewhere use):** `ClusterState` now defines
+`CLUSTER_STATE_DELETING` and `CLUSTER_STATE_DELETE_FAILED`
+([`cluster_type.proto`](https://github.com/osac-project/fulfillment-service/blob/73ae26e8cb0a476d4b035b18776603f60a361ed9/proto/public/osac/public/v1/cluster_type.proto#L237-L253) —
+340 commits ahead of this doc's `98c6b686` pin used elsewhere, dated
+2026-07-27; `osac-service-provider`'s own Milestone 2 proto vendoring is
+pinned to this same later commit). [OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391)
+(adding these values) therefore appears resolved upstream. **However,
+[OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) is still open** —
+the cluster feedback controller's
+[`syncPhase`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go#L262-L272)
+has a literal `// TODO: There is no equivalent phase.` for
+`ClusterOrderPhaseDeleting`, and
+[`handleDelete`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go#L347-L350)
+itself is `// TODO.` with an empty body — so nothing in OSAC's reconciler
+path actually *sets* either new enum value yet, even though the proto now
+defines them. Net effect on the SP's design below is **unchanged**: there is
+still no signal to drive an intermediate deleting status today, so the SP
+polls silently and, like `acm-cluster-sp`, publishes `DELETED` and removes
+the entry from its local mapping store as soon as it observes the `404`.
+
 VMs don't have this gap today: the
 [`computeinstance` reconciler's `delete()`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/controllers/computeinstance/computeinstance_reconciler_function.go#L291-L325)
 waits for the underlying Kubernetes object to be confirmed gone before clearing
