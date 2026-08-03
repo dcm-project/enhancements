@@ -24,10 +24,13 @@ resolution notes in [Node Sizing](#node-sizing) and [VM Sizing](#vm-sizing).
 ## Summary
 
 The OSAC Service Provider (OSAC SP) is an external Service Provider that
-integrates the Open Sovereign AI Cloud (OSAC) platform with DCM through the
-environment agent model. It provisions OpenShift clusters and VMs by translating
-agent-routed requests into OSAC fulfillment service gRPC API calls, and reports
-status changes back via the messaging system.
+integrates the Open Sovereign AI Cloud (OSAC) platform with DCM. It provisions
+OpenShift clusters and VMs by translating DCM-routed requests into OSAC
+fulfillment service gRPC API calls, and reports status changes back via the
+messaging system. Delivery is two-phase: Phase 1 registers with and dispatches
+through `control-plane`'s Service Provider API; Phase 2 migrates to the
+environment agent model once it reaches sufficient maturity. See
+[Phased Delivery](#phased-delivery) for the rationale and migration criteria.
 
 ## Motivation
 
@@ -42,7 +45,11 @@ without duplicating OSAC's existing orchestration logic.
 
 - Define the lifecycle of an SP using OSAC to provision OpenShift clusters and
   VMs.
-- Define the registration flow with the environment agent.
+- Define a two-phase registration/dispatch delivery: Phase 1 registers with and
+  dispatches through `control-plane`'s Service Provider API
+  (`api/sp/v1alpha1/provider`, `api/sp/v1alpha1/resource_manager`); Phase 2
+  migrates to the environment agent once it reaches sufficient maturity (see
+  [Phased Delivery](#phased-delivery)).
 - Define `CREATE`, `READ`, and `DELETE` endpoints for managing clusters and VMs
   provisioned via OSAC.
 - Define status reporting mechanism for DCM requests via CloudEvents.
@@ -63,8 +70,16 @@ without duplicating OSAC's existing orchestration logic.
 - Define `UPDATE` endpoint — blocked on the same DCM SP API dependency as day 2
   operations above.
 - Multi-hub placement logic — OSAC handles hub selection internally; DCM
-  placement selects the environment agent, not the SP.
+  placement selects the registered SP `provider_name` (Phase 1) or the
+  environment agent (Phase 2), not a hub within OSAC.
 - OSAC internal components (operator, AAP playbooks, networking controllers).
+- Bearer-token authentication between `control-plane` and the SP —
+  `AUTH_DISABLED=true` is a documented transitional gap (see the
+  [authentication enhancement](../authentication/authentication.md)); the ticket
+  that would have closed it (FLPATH-4196) was closed as Won't Do in favor of the
+  Phase 2 agent epic (FLPATH-4622, currently blocked). Tracked as a risk, not
+  solved by this enhancement — see
+  [Risks and Mitigations](#risks-and-mitigations).
 - Per-DCM-tenant isolation within OSAC — the OSAC SP authenticates as a single
   service account assigned to one OSAC Organization, so v1 is single-tenant from
   OSAC's perspective: every DCM tenant's clusters and VMs land in the same OSAC
@@ -75,6 +90,45 @@ without duplicating OSAC's existing orchestration logic.
   [Authentication](#authentication) for details.
 
 ## Proposal
+
+### Phased Delivery
+
+This enhancement was originally reviewed and merged against the environment
+agent model (see [Implementation History](#implementation-history)). At
+implementation time, the environment agent's provider-registration handler was
+still generated-stub-only (no `internal/handlers`/`internal/service`
+implementation, no tagged release), while `control-plane`'s equivalent SP
+registration and dispatch path
+([`api/sp/v1alpha1/provider`](https://github.com/dcm-project/control-plane/blob/6c16c0654018cd779a7c3ad8739427644732c41b/api/sp/v1alpha1/provider/openapi.yaml),
+[`api/sp/v1alpha1/resource_manager`](https://github.com/dcm-project/control-plane/blob/6c16c0654018cd779a7c3ad8739427644732c41b/api/sp/v1alpha1/resource_manager/openapi.yaml))
+was already complete and wired end-to-end against a real store. Delivery is
+therefore split into two phases:
+
+- **Phase 1 (first release):** the OSAC SP registers with and dispatches through
+  `control-plane`'s SP API instead of the environment agent. This is the model
+  documented throughout the rest of this proposal.
+- **Phase 2 (future):** migrate registration and dispatch to the environment
+  agent once it reaches a defined maturity bar: a merged, non-stub
+  implementation of its provider-registration and dispatch handlers, plus at
+  least one tagged release. Until that bar is met, Phase 2 remains unscheduled
+  rather than time-boxed, since forcing a date onto an unimplemented dependency
+  would just produce a missed deadline.
+
+`control-plane`'s dispatch model differs from the environment agent's in ways
+that go beyond which service the SP registers with:
+
+| Concern                | Environment agent (Phase 2)                                       | `control-plane` (Phase 1)                                                                                     |
+| ---------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Registration           | `POST /api/v1/providers`, per-service-type lease with renewal     | `POST /api/v1alpha1/providers`, idempotent on `name`/`id`, no lease — see [SP Health Check](#sp-health-check) |
+| Routing to this SP     | First SP to register a service type claims it (`409` on conflict) | Caller specifies `provider_name` explicitly per request; no service-type exclusivity                          |
+| Create/Delete dispatch | Routed via messaging topic, `resource_id` in the CloudEvent body  | Direct synchronous REST, resource ID passed as an `id` query parameter                                        |
+| Status reporting       | CloudEvents via the agent's messaging topic                       | CloudEvents via NATS JetStream, consumed directly by `control-plane`                                          |
+| Health monitoring      | Agent polls `GET /health`                                         | `control-plane` polls `GET /health` (same contract, different poller)                                         |
+
+The sections below describe the Phase 1 (`control-plane`) contract. Where a
+mechanism is unchanged between the two targets (e.g. the `/health` payload
+shape, the OSAC-side idempotent-create handling), this is called out explicitly
+rather than duplicated.
 
 ### User Stories
 
@@ -111,12 +165,16 @@ infrastructure resources are released.
   [authorization policy](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/auth/policies/authz.rego)
   grants `Clusters/Create`, `ComputeInstances/Create`, and all other CRUD
   methods to any authenticated client — no elevated permissions are required.
-- An environment agent is deployed and reachable for SP registration.
-- The DCM messaging system is reachable for publishing status updates.
+- `control-plane` is deployed and reachable for SP registration and instance
+  dispatch (Phase 1); an environment agent deployment is not required until
+  Phase 2.
+- The DCM messaging system (NATS JetStream) is reachable for publishing status
+  updates, and `control-plane`'s status consumer is subscribed to the subject
+  the OSAC SP publishes on.
 - At least one infrastructure hub is registered with the OSAC fulfillment
   service and has capacity to provision clusters.
-- Network policies allow OSAC SP to communicate with both the environment agent
-  and the OSAC fulfillment service.
+- Network policies allow OSAC SP to communicate with both `control-plane`
+  (Phase 1) and the OSAC fulfillment service.
 
 ### Authentication
 
@@ -139,8 +197,7 @@ credentials flow:
 ```mermaid
 sequenceDiagram
     participant User
-    participant DCM as DCM Control Plane
-    participant AG as Environment Agent
+    participant CP as control-plane
     participant SP as OSAC SP
     participant KC as OSAC Keycloak
     participant FS as OSAC Fulfillment Service
@@ -150,14 +207,22 @@ sequenceDiagram
     KC-->>SP: JWT (organization claim = SP's assigned Organization)
 
     Note over User,FS: Per-request flow, today
-    User->>DCM: Authenticated request
-    DCM->>DCM: Resolve ActorID/TenantID (DCM-internal only)
-    DCM->>AG: Publish creation request (no token)
-    AG->>SP: Route to OSAC SP (no token)
+    User->>CP: Authenticated request
+    CP->>CP: Resolve ActorID/TenantID
+    Note over CP: Policy selects provider_name;<br/>placement dispatches to the SP resource manager (same monolith)
+    CP->>SP: Route to OSAC SP (no token)
     SP->>FS: Create (gRPC), bearer = SP's own JWT
     Note over SP,FS: metadata.tenant = SP's assigned Organization<br/>(same value for every DCM tenant)
     FS-->>SP: 201 Created
 ```
+
+`control-plane` declares `security: [bearerAuth: []]` on every SP-facing route
+as of [control-plane#24](https://github.com/dcm-project/control-plane/pull/24),
+but enforcement is disabled by default (`AUTH_DISABLED=true` in
+[`internal/app/config.go`](https://github.com/dcm-project/control-plane/blob/main/internal/app/config.go))
+because SPs, including OSAC SP, don't forward auth headers yet. This is a known
+gap, not a Phase 1 deliverable — see [Non-Goals](#non-goals) and
+[Risks and Mitigations](#risks-and-mitigations).
 
 The SP is never handed a DCM token to begin with — it mints its own, independent
 of whatever request triggered the call — so there is no way for DCM's own tenant
@@ -195,9 +260,21 @@ Per-DCM-tenant isolation is out of scope for this version (see
 
 OSAC supports multiple infrastructure hubs managed by a single fulfillment
 service. Hub selection is an internal OSAC placement decision handled by the
-fulfillment service, opaque to both the agent and DCM. DCM's placement operates
-at the agent level — selecting the environment agent that contains this SP — per
-the [environment agent enhancement](../environment-agent/environment-agent.md).
+fulfillment service, opaque to DCM.
+
+- **Phase 1 (control-plane):** resolution happens in-process within the
+  `control-plane` monolith — policy selects the target `provider_name`
+  (`osac-sp-cluster` or `osac-sp-vm`) and placement dispatches directly to the
+  SP resource manager in the same binary. There is no network call between "DCM"
+  and "`control-plane`"; they are the same deployable (see the
+  [control-plane monolith enhancement](../control-plane-monolith/control-plane-monolith.md)).
+  The resource manager looks up the registered `Provider` by that name and
+  dispatches to its endpoint — see [Registration Flow](#registration-flow) and
+  [API Endpoints](#api-endpoints).
+- **Phase 2 (environment agent, deferred):** placement operates at the agent
+  level instead — selecting the environment agent that contains this SP — per
+  the
+  [environment agent enhancement](../environment-agent/environment-agent.md).
 
 ### Catalog Independence
 
@@ -228,6 +305,27 @@ coordinating with the OSAC operator on the hub cluster.
 - Clusters are provisioned using Hosted Control Planes via ACM on the hub
   cluster.
 
+**Phase 1 (control-plane):**
+
+```mermaid
+sequenceDiagram
+    participant CP as control-plane
+    participant SP as OSAC SP
+    participant FS as OSAC Fulfillment Service
+    participant OP as OSAC Operator
+
+    Note over CP: Policy selects provider_name;<br/>placement dispatches to the SP resource manager (same monolith)
+    CP->>SP: Route to OSAC SP (by provider_name)
+    SP->>FS: osac.public.v1.Clusters/Create (gRPC)
+    FS->>FS: Create Cluster resource
+    OP->>OP: Reconcile ClusterOrder
+    OP->>FS: Update cluster status
+    SP->>FS: osac.public.v1.Clusters/List (poll)
+    SP->>CP: Publish status event (CloudEvents, via NATS JetStream)
+```
+
+**Phase 2 (environment agent, deferred):**
+
 ```mermaid
 sequenceDiagram
     participant DCM as DCM Control Plane
@@ -249,14 +347,59 @@ sequenceDiagram
     MS->>DCM: Deliver status update
 ```
 
-#### Environment Agent Registration
+#### Registration with control-plane (Phase 1)
 
-The OSAC SP is an **external SP** that registers with the environment agent via
-`POST /api/v1/providers`, following the contract defined in the
-[environment agent enhancement](../environment-agent/environment-agent.md#sp-registration-to-agent).
+The OSAC SP is an **external SP** that registers with `control-plane` via
+`POST /api/v1alpha1/providers`
+([Provider API](https://github.com/dcm-project/control-plane/blob/main/api/sp/v1alpha1/provider/openapi.yaml)).
 Registration is per service type — the OSAC SP registers twice (once for
-`cluster`, once for `vm`), per the
-[SP registration flow](../sp-registration-flow/sp-registration-flow.md).
+`cluster`, once for `vm`), reusing the two-name pattern from the
+[SP registration flow](../sp-registration-flow/sp-registration-flow.md); see
+[Registration Flow](#registration-flow) for the exact payloads.
+
+```mermaid
+sequenceDiagram
+    participant SP as OSAC SP
+    participant CP as control-plane
+
+    Note over SP: Startup complete
+    SP->>CP: POST /api/v1alpha1/providers (name: osac-sp-cluster, service_type: cluster)
+    CP-->>SP: 201 Created
+    SP->>CP: POST /api/v1alpha1/providers (name: osac-sp-vm, service_type: vm)
+    CP-->>SP: 201 Created
+```
+
+**Registration conflicts:** `control-plane` has no per-service-type exclusivity.
+Its conflict rule is `name`/`id`-based only — a request fails with
+`409 Conflict` only if `name` already exists under a different provider `id`, or
+`id` already exists under a different `name`
+([`RegisterOrUpdateProvider`](https://github.com/dcm-project/control-plane/blob/main/internal/sp/service/provider/provider.go)).
+The "OSAC SP may lose the `vm` slot to `kubevirt-sp`" contention scenario from
+the environment agent model (Phase 2, below) therefore does not apply in Phase
+1: multiple providers may register the same `service_type` simultaneously, and
+routing for a given request is resolved by whichever `provider_name` policy
+selects at request time — see [Multi-Hub Topology](#multi-hub-topology).
+
+**On the SP side**, a `409` here is non-retryable and treated identically to any
+other 4xx: the SP logs it at ERROR level and permanently stops retrying that
+registration (`cluster` and `vm` register and fail independently) — unlike Phase
+2, it does not retry into the conflict, because there is no slot to eventually
+acquire
+([`runLoop`](https://github.com/dcm-project/osac-service-provider/blob/feat/milestone-1-scaffold/internal/registration/registration.go)).
+The SP process keeps running and serving requests regardless.
+
+**No lease renewal:** unlike the environment agent model, `control-plane` does
+not require periodic re-registration to keep a provider's slot. Once registered,
+the OSAC SP's liveness is tracked by `control-plane`'s own health poller (see
+[SP Health Check](#sp-health-check)), not by the SP renewing a lease.
+Registration therefore runs once at startup, retried with exponential backoff on
+failure, without blocking server startup.
+
+#### Registration with environment agent (Phase 2, deferred)
+
+Once the environment agent is available, the OSAC SP registers with it instead,
+via `POST /api/v1/providers`, following the contract defined in the
+[environment agent enhancement](../environment-agent/environment-agent.md#sp-registration-to-agent).
 
 ```mermaid
 sequenceDiagram
@@ -278,51 +421,68 @@ sequenceDiagram
     end
 ```
 
-**Registration conflicts:** the agent enforces one SP per service type — the
-first SP to register for `cluster` or `vm` claims it, and any other SP
-registering for the same type is rejected with `409 Conflict`
+Unlike Phase 1, the agent enforces **one SP per service type** — the first SP to
+register for `cluster` or `vm` claims it, and any other SP registering for the
+same type is rejected with `409 Conflict`
 ([Service Type Uniqueness](../environment-agent/environment-agent.md#service-type-uniqueness)).
 This matters for `vm` specifically, since OSAC SP is not necessarily the only SP
-capable of serving it (e.g., `kubevirt-sp` also registers `vm`). If the OSAC
-SP's `vm` registration is rejected because another SP already holds the slot,
-the OSAC SP logs the conflict and does **not** treat it as fatal to the whole
-process — `cluster` registration proceeds independently. The `vm` registration
-attempt is retried on the same periodic cadence as lease renewal (see diagram
-above), so OSAC SP automatically acquires the `vm` slot later if the incumbent
-SP's lease ever expires, without requiring an OSAC SP restart. Until it holds
-the slot, the agent simply never routes `vm` requests to OSAC SP in that
-environment — there is no separate unhealthy/degraded status to report for a
-registration it was never granted. Running multiple SPs for the same service
-type concurrently (e.g., failover or capacity-based routing between OSAC SP and
-`kubevirt-sp`) is out of scope until the agent supports it
-([Multiple SPs per Service Type](../environment-agent/environment-agent.md#multiple-sps-per-service-type-consolidation)).
-
-**Registration on agent restart:** the environment agent persists SP
-registrations to local storage, so an already-registered SP retains its service
-type slot across an agent restart — the slot is freed only if the SP fails to
-renew its lease before expiry, not simply because another SP registers first
-([SP Registration to Agent](../environment-agent/environment-agent.md#sp-registration-to-agent)).
-This means an agent restart does not, by itself, cause the OSAC SP to lose a
-service type slot to a competing SP as long as it keeps renewing its lease
-normally.
+capable of serving it (e.g., `kubevirt-sp` also registers `vm`). Here, a `409`
+on `vm` is **not** fatal: the OSAC SP logs the conflict, `cluster` registration
+proceeds independently, and the `vm` registration attempt is retried on the same
+cadence as lease renewal — so OSAC SP automatically acquires the `vm` slot later
+if the incumbent's lease expires, without an OSAC SP restart. The environment
+agent persists registrations to local storage, so a restart does not itself
+cause the OSAC SP to lose a slot as long as it keeps renewing its lease.
 
 #### SP Health Check
 
-OSAC SP exposes a `GET /health` endpoint that the environment agent polls to
-monitor SP health using the three-state model (Ready, Unhealthy, Unavailable).
-See
+OSAC SP exposes a `GET /health` endpoint. In Phase 1, `control-plane` actively
+polls it and updates the provider's stored health status; in Phase 2, the
+environment agent polls the same endpoint instead. The response payload and
+three-state model (Ready, Unhealthy, Unavailable) are identical in both phases —
+only the poller changes. See
 [SP Health Check](../service-provider-health-check/service-provider-health-check.md).
+`control-plane` derives `Unavailable` itself (consecutive-failure count with
+backoff) when the endpoint is unreachable or unparsable; the SP only ever needs
+to report `healthy` or `unhealthy` in its payload.
 
 #### Status Reporting
 
-Status updates are published to the messaging system using CloudEvents format.
-Per the
+Status updates are published using CloudEvents format. Per the
 [SP Status Reporting](../state-management/service-provider-status-reporting.md)
 enhancement:
 
 - **Subject:** `dcm.cluster` or `dcm.vm`
 - **Type:** `dcm.status.cluster` or `dcm.status.vm`
 - **Source:** `dcm/providers/{provider_name}`
+
+This is unchanged in shape between phases — only the transport and consumer
+differ.
+
+**Phase 1 (control-plane):** carried over NATS JetStream and consumed directly
+by `control-plane`.
+
+```mermaid
+sequenceDiagram
+    participant FS as OSAC Fulfillment Service
+    participant SP as OSAC SP
+    participant MS as Messaging System (NATS JetStream)
+    participant CP as control-plane
+
+    loop Every 30s (configurable)
+        SP->>FS: Clusters/List + ComputeInstances/List (CEL filter)
+        FS-->>SP: Current resource states
+        SP->>SP: Compare against local cache
+        alt Status changed
+            SP->>MS: Publish CloudEvents status update
+            MS->>CP: Deliver status event
+            SP->>SP: Update local cache
+        end
+    end
+```
+
+**Phase 2 (environment agent, deferred):** carried over the messaging system,
+with the environment agent forwarding events to DCM on the SP's behalf.
 
 ```mermaid
 sequenceDiagram
@@ -361,15 +521,14 @@ OSAC fulfillment service.
 
 ### Registration Flow
 
-The OSAC SP registers with the environment agent on startup. Since registration
-is per service type, the SP makes two registration calls. The two calls use
-**different `name` values** — the agent's registration endpoint is idempotent on
-`name` alone (not `name`+`service_type`), so registering both service types
-under the same name would make the second call an _update_ of the first,
-overwriting the `cluster` registration's `service_type` instead of adding a
-second one (see
-[SP Registration Flow](../sp-registration-flow/sp-registration-flow.md#update-service-provider-capabilities-flow)).
-The single OSAC SP process registers as two distinct named providers:
+The OSAC SP registers with `control-plane` on startup (Phase 1). Since
+registration is per service type, the SP makes two registration calls to
+`POST /api/v1alpha1/providers`. The two calls use **different `name` values** —
+`control-plane`'s registration endpoint is idempotent on `name` (and optionally
+a client-supplied `id` query parameter), so registering both service types under
+the same name would make the second call an _update_ of the first, overwriting
+the `cluster` registration's `service_type` instead of adding a second one. The
+single OSAC SP process registers as two distinct named providers:
 
 **Cluster registration:**
 
@@ -377,7 +536,8 @@ The single OSAC SP process registers as two distinct named providers:
 {
   "name": "osac-sp-cluster",
   "service_type": "cluster",
-  "endpoint": "https://osac-sp.example.com/api/v1alpha1/clusters"
+  "endpoint": "https://osac-sp.example.com/api/v1alpha1/clusters",
+  "schema_version": "v1alpha1"
 }
 ```
 
@@ -387,13 +547,16 @@ The single OSAC SP process registers as two distinct named providers:
 {
   "name": "osac-sp-vm",
   "service_type": "vm",
-  "endpoint": "https://osac-sp.example.com/api/v1alpha1/vms"
+  "endpoint": "https://osac-sp.example.com/api/v1alpha1/vms",
+  "schema_version": "v1alpha1"
 }
 ```
 
-The agent then includes these service types in its registration with DCM. The
-agent advertises capabilities (Kubernetes versions, platforms) based on what the
-SP reports.
+`control-plane` stores these as independent `Provider` records; there is no
+downstream agent registration step to chain off of. `Provider.metadata` allows
+arbitrary additional properties, so capability advertisement (below) is carried
+there, letting DCM's policy domain read it when selecting a `provider_name` for
+a given request (see [Multi-Hub Topology](#multi-hub-topology)).
 
 #### Capability Advertisement
 
@@ -415,21 +578,23 @@ from OSAC.
 
 #### Registration Process
 
-The OSAC SP follows the external SP registration process defined in the
-[environment agent enhancement](../environment-agent/environment-agent.md#external-sp-registration):
-
 - API server starts and initializes HTTP listener.
 - After the server is ready, registration runs in a background goroutine.
-- Registration requests are sent to the agent (`POST /api/v1/providers`) — one
-  per service type.
-- External SPs periodically re-register to maintain their lease with the agent.
+- Registration requests are sent to `control-plane`
+  (`POST /api/v1alpha1/providers`) — one per service type.
+- Registration is one-shot per service type, not a renewed lease (see
+  [No lease renewal](#registration-with-control-plane-phase-1)) —
+  `control-plane`'s own health poller tracks liveness after that.
 - Registration failures are retried with exponential backoff and logged but do
   not block server startup.
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the environment agent, which routes requests
-from the messaging topic to the appropriate SP based on service type.
+The CRUD endpoints are consumed by `control-plane`'s SP resource-management API
+([`api/sp/v1alpha1/resource_manager`](https://github.com/dcm-project/control-plane/blob/main/api/sp/v1alpha1/resource_manager/openapi.yaml)),
+which dispatches a create/delete request directly to the `endpoint` of whichever
+`Provider` the caller named — see
+[Registration with control-plane](#registration-with-control-plane-phase-1).
 
 #### Cluster Endpoints
 
@@ -470,18 +635,22 @@ The POST endpoint follows the contract defined in the
 The OSAC SP translates the DCM cluster request into an
 `osac.public.v1.Clusters/Create` gRPC call, mapping DCM fields to OSAC's
 [`ClusterSpec`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/cluster_type.proto).
+In Phase 1, `control-plane` forwards the request as
+`POST {endpoint}?id={resource_id}` with the DCM `ClusterSpec` nested under a
+top-level `spec` key (see [API Endpoints](#api-endpoints)); `resource_id` itself
+travels as the `id` query parameter, not a body field.
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                 | OSAC Field               | Notes                                                                                                                  |
-| ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| resource_id               | id                       | DCM-issued identifier from the creation request, set as `Cluster.id` — see [Idempotent Creation](#idempotent-creation) |
-| version                   | spec.release_image       | SP translates K8s version to OCP image                                                                                 |
-| nodes.control_plane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                                                                             |
-| nodes.worker.count        | spec.node_sets[key].size | Number of worker nodes for template's key                                                                              |
-| nodes.worker.cpu/memory   | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing)                                                         |
-| metadata.name             | metadata.name            | Cluster name (DNS label format)                                                                                        |
-| provider_hints.osac       | (see below)              | OSAC-specific parameters                                                                                               |
+| DCM Field                      | OSAC Field               | Notes                                                                                        |
+| ------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------- |
+| `id` query parameter           | id                       | DCM-issued identifier, set as `Cluster.id` — see [Idempotent Creation](#idempotent-creation) |
+| spec.version                   | spec.release_image       | SP translates K8s version to OCP image                                                       |
+| spec.nodes.control_plane.count | (managed by HCP)         | Hosted Control Planes manage CP internally                                                   |
+| spec.nodes.worker.count        | spec.node_sets[key].size | Number of worker nodes for template's key                                                    |
+| spec.nodes.worker.cpu/memory   | (informational only)     | `host_type` is template-fixed; see [Node Sizing](#node-sizing)                               |
+| spec.metadata.name             | metadata.name            | Cluster name (DNS label format)                                                              |
+| spec.provider_hints.osac       | (see below)              | OSAC-specific parameters                                                                     |
 
 ##### Node Sizing
 
@@ -546,39 +715,46 @@ keep both catalogs aligned.
 | ssh_key       | string | No       | SSH public key for node access                 |
 | release_image | string | No       | Specific OCP release image (overrides version) |
 
-**Example Request Payload:**
+**Example Request:**
+`POST /api/v1alpha1/clusters?id=a1b2c3d4-e5f6-7890-abcd-ef1234567890`
 
 ```json
 {
-  "resource_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "version": "1.29",
-  "nodes": {
-    "control_plane": {
-      "count": 3
+  "spec": {
+    "version": "1.29",
+    "nodes": {
+      "control_plane": {
+        "count": 3
+      },
+      "worker": {
+        "count": 3,
+        "cpu": 8,
+        "memory": "32GB",
+        "storage": "250GB"
+      }
     },
-    "worker": {
-      "count": 3,
-      "cpu": 8,
-      "memory": "32GB",
-      "storage": "250GB"
+    "metadata": {
+      "name": "sovereign-ai-cluster-01"
+    },
+    "provider_hints": {
+      "osac": {
+        "template_id": "default-hcp",
+        "base_domain": "moc.example.com"
+      }
     }
-  },
-  "metadata": {
-    "name": "sovereign-ai-cluster-01"
-  },
-  "provider_hints": {
-    "osac": {
-      "template_id": "default-hcp",
-      "base_domain": "moc.example.com"
-    }
-  },
-  "service_type": "cluster"
+  }
 }
 ```
 
-`resource_id` is generated by the environment agent's control-plane side (see
-[Creation Request](../environment-agent/environment-agent.md#cloudevent-message-definitions))
-and forwarded unchanged through the agent to this endpoint. See
+The `id` query parameter is optional at the `control-plane` API level —
+`control-plane` generates one itself if the caller omits it
+([`resource_manager` schema](https://github.com/dcm-project/control-plane/blob/main/api/sp/v1alpha1/resource_manager/openapi.yaml))
+— but is forwarded unchanged to this endpoint from whatever value the
+corresponding `ServiceTypeInstance` was created with (see
+[API Endpoints](#api-endpoints)). Whether DCM's own placement domain always
+supplies a stable, pre-generated value in practice — which the idempotency
+argument below depends on — has not been independently verified; treat it as an
+assumption pending confirmation from the placement maintainers. See
 [Idempotent Creation](#idempotent-creation) for how the SP uses it.
 
 **Response:** Returns `201 Created` with the cluster resource in its initial
@@ -586,7 +762,7 @@ state:
 
 ```json
 {
-  "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "name": "sovereign-ai-cluster-01",
   "status": "PROGRESSING",
   "platform": "baremetal",
@@ -605,18 +781,27 @@ state:
 }
 ```
 
-`request_id` in the response is the same value as `resource_id` in the request —
-it is not a newly generated identifier (see
-[Idempotent Creation](#idempotent-creation)).
+`control-plane` reads the top-level `id` and `status` fields directly off the
+response to populate the dispatched `ServiceTypeInstance` record
+([`createInstanceWithProvider`](https://github.com/dcm-project/control-plane/blob/main/internal/sp/service/resource_manager/service_type_instance.go)).
+It does not validate that either field is present — a response that omits them
+is decoded as empty strings and persisted as-is, with no error surfaced — so the
+SP must always populate both for the resulting record to be usable. `id` echoes
+the same value passed in as the request's `id` query parameter — it is not a
+newly generated identifier (see [Idempotent Creation](#idempotent-creation)).
+The remaining fields are OSAC-SP-specific and are returned as-is for callers
+that query the SP directly, but are not otherwise interpreted by
+`control-plane`.
 
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
 - **401 Unauthorized**: OIDC token expired or invalid (SP-to-OSAC auth failure)
 - **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
-- **409 Conflict**: A cluster with the same `resource_id` or `metadata.name`
-  already exists — see [Idempotent Creation](#idempotent-creation) for how a
-  `resource_id` conflict is handled
+- **409 Conflict**: A cluster with the same `id` (from the query parameter) or
+  `metadata.name` already exists — see
+  [Idempotent Creation](#idempotent-creation) for how an `id` conflict is
+  handled
 - **422 Unprocessable Entity**: No suitable host_type for requested resources
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -632,23 +817,27 @@ The OSAC SP translates the DCM VM request into a
 `osac.public.v1.ComputeInstances/Create` gRPC call, mapping DCM fields to OSAC's
 [`ComputeInstanceSpec`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/compute_instance_type.proto).
 
+In Phase 1, `control-plane` forwards the request as `POST {endpoint}?id={id}`
+with the DCM `VMSpec` nested under a top-level `spec` key, the same envelope
+used for cluster creation (see
+[POST /api/v1alpha1/clusters](#post-apiv1alpha1clusters)).
+
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                       | OSAC Field              | Notes                                                                                                                          |
-| ------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| resource_id                     | id                      | DCM-issued identifier from the creation request, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
-| vcpu.count                      | spec.cores              | Only when `provider_hints.osac.instance_type` is unset — see below                                                             |
-| memory.size                     | spec.memory_gib         | Convert to GiB integer; only when `instance_type` is unset                                                                     |
-| storage.disks[boot].capacity    | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                                          |
-| storage.disks[*]                | spec.additional_disks   | Additional disks                                                                                                               |
-| guest_os.type                   | spec.image              | Mapped to image source_ref                                                                                                     |
-| access.ssh_public_key           | spec.ssh_key            | SSH public key                                                                                                                 |
-| metadata.name                   | metadata.name           | Instance name (DNS label)                                                                                                      |
-| provider_hints.osac.template_id | spec.template           | OSAC template reference                                                                                                        |
+| DCM Field                            | OSAC Field              | Notes                                                                                                |
+| ------------------------------------ | ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `id` query parameter                 | id                      | DCM-issued identifier, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
+| spec.vcpu.count                      | spec.cores              | Only when `spec.provider_hints.osac.instance_type` is unset — see below                              |
+| spec.memory.size                     | spec.memory_gib         | Convert to GiB integer; only when `instance_type` is unset                                           |
+| spec.storage.disks[boot].capacity    | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                |
+| spec.storage.disks[*]                | spec.additional_disks   | Additional disks                                                                                     |
+| spec.guest_os.type                   | spec.image              | Mapped to image source_ref                                                                           |
+| spec.access.ssh_public_key           | spec.ssh_key            | SSH public key                                                                                       |
+| spec.metadata.name                   | metadata.name           | Instance name (DNS label)                                                                            |
+| spec.provider_hints.osac.template_id | spec.template           | OSAC template reference                                                                              |
 
-As with cluster creation, `resource_id` is generated by the environment agent's
-control-plane side and forwarded unchanged through the agent to this endpoint —
-see [Idempotent Creation](#idempotent-creation).
+As with cluster creation, the `id` query parameter is DCM-issued and forwarded
+unchanged by `control-plane` — see [Idempotent Creation](#idempotent-creation).
 
 **Provider Hints (osac) for VMs:**
 
@@ -695,7 +884,7 @@ fields is set.
 
 ```json
 {
-  "request_id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+  "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
   "name": "ai-worker-01",
   "status": "PROVISIONING",
   "metadata": {
@@ -705,17 +894,20 @@ fields is set.
 }
 ```
 
-`request_id` in the response is the same value as `resource_id` in the request —
-see [Idempotent Creation](#idempotent-creation).
+The top-level `id` echoes the `id` query parameter from the request; `status` is
+read directly by `control-plane` (see
+[POST /api/v1alpha1/clusters](#post-apiv1alpha1clusters)). See
+[Idempotent Creation](#idempotent-creation).
 
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
 - **401 Unauthorized**: OIDC token expired or invalid
 - **403 Forbidden**: Insufficient permissions in OSAC's Keycloak realm
-- **409 Conflict**: A VM with the same `resource_id` or `metadata.name` already
-  exists — see [Idempotent Creation](#idempotent-creation) for how a
-  `resource_id` conflict is handled
+- **409 Conflict**: A VM with the same `id` (from the query parameter) or
+  `metadata.name` already exists — see
+  [Idempotent Creation](#idempotent-creation) for how an `id` conflict is
+  handled
 - **422 Unprocessable Entity**: Unsupported configuration
 - **500 Internal Server Error**: Unexpected error during resource creation
 - **502 Bad Gateway**: OSAC fulfillment service is unreachable
@@ -743,7 +935,7 @@ results to resources it manages.
 {
   "results": [
     {
-      "request_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
       "name": "sovereign-ai-cluster-01",
       "status": "ACTIVE",
       "platform": "baremetal",
@@ -822,17 +1014,30 @@ picks up the timestamp, issues the Kubernetes delete, and clears its finalizer
 in the **same pass** — without waiting for confirmation the CR is actually gone.
 Once no finalizers remain, the DAO archives the record and `Get`/`List` start
 returning `404`. In practice this means the cluster can disappear from OSAC's
-API before the underlying Hosted Control Plane teardown finishes. `ClusterState`
-has no `DELETING` value (only `PROGRESSING`, `READY`, `FAILED`) — the SP has no
-intermediate status to report — so it polls silently and, like `acm-cluster-sp`,
-publishes `DELETED` and removes the entry from its local mapping store as soon
-as it observes the `404`.
+API before the underlying Hosted Control Plane teardown finishes.
 
-This is a known gap being actively worked on OSAC's side, not just a stale SP
-assumption: [OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) tracks
-that the cluster feedback controller's `handleDelete` is a literal TODO, and
-[OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391) tracks adding
-`DELETING`/`DELETE_FAILED` states to `Cluster` (both targeted for OSAC v0.2).
+**Correction (verified 2026-07-31 against a newer OSAC commit than this
+section's citations elsewhere use):** `ClusterState` now defines
+`CLUSTER_STATE_DELETING` and `CLUSTER_STATE_DELETE_FAILED`
+([`cluster_type.proto`](https://github.com/osac-project/fulfillment-service/blob/73ae26e8cb0a476d4b035b18776603f60a361ed9/proto/public/osac/public/v1/cluster_type.proto#L237-L253)
+— 340 commits ahead of this doc's `98c6b686` pin used elsewhere, dated
+2026-07-27; `osac-service-provider`'s own Milestone 2 proto vendoring is pinned
+to this same later commit).
+[OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391) (adding these values)
+therefore appears resolved upstream. **However,
+[OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) is still open** — the
+cluster feedback controller's
+[`syncPhase`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go#L262-L272)
+has a literal `// TODO: There is no equivalent phase.` for
+`ClusterOrderPhaseDeleting`, and
+[`handleDelete`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go#L347-L350)
+itself is `// TODO.` with an empty body — so nothing in OSAC's reconciler path
+actually _sets_ either new enum value yet, even though the proto now defines
+them. Net effect on the SP's design below is **unchanged**: there is still no
+signal to drive an intermediate deleting status today, so the SP polls silently
+and, like `acm-cluster-sp`, publishes `DELETED` and removes the entry from its
+local mapping store as soon as it observes the `404`.
+
 VMs don't have this gap today: the
 [`computeinstance` reconciler's `delete()`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/controllers/computeinstance/computeinstance_reconciler_function.go#L291-L325)
 waits for the underlying Kubernetes object to be confirmed gone before clearing
@@ -842,17 +1047,17 @@ the API says "gone" while the infrastructure is still being cleaned up).
 
 ```mermaid
 sequenceDiagram
-    participant AG as Environment Agent
+    participant CP as control-plane
     participant SP as OSAC SP
     participant FS as OSAC Fulfillment Service
     participant OP as OSAC Operator
 
-    AG->>SP: DELETE /api/v1alpha1/clusters/{cluster_id}
+    CP->>SP: DELETE /api/v1alpha1/clusters/{cluster_id}
     SP->>SP: Look up OSAC ID from mapping store
     SP->>FS: osac.public.v1.Clusters/Delete (gRPC)
     FS->>FS: Set deletion_timestamp (record still returned by Get/List)
     FS-->>SP: OK
-    SP-->>AG: 204 No Content
+    SP-->>CP: 204 No Content
     OP->>OP: Issue K8s delete, clear finalizer (does not wait for teardown)
     FS->>FS: No finalizers left -> archive record (now 404)
     Note over SP: Next poll observes 404
@@ -888,13 +1093,19 @@ The health check verifies:
 
 #### Idempotent Creation
 
-Per the
-[environment agent's message definitions](../environment-agent/environment-agent.md#cloudevent-message-definitions),
-the `dcm.request.create` event DCM publishes already carries a DCM-generated
-`resource_id`, specifically so that a duplicate delivery — e.g. after a
-[split-brain agent failover](../environment-agent/environment-agent.md#risks-and-mitigations)
-— can be recognized as a retry instead of creating a second resource. The agent
-forwards this `resource_id` unchanged in the `POST` body to the SP.
+In Phase 1, `control-plane`'s own `POST /service-type-instances?id=...` accepts
+a client-supplied `id` and rejects a second create for an `id` that already has
+a stored `ServiceTypeInstance` record with `409 Conflict` — this alone catches a
+retried request that arrives **after** the first request's database write
+completed. It does not catch every retry, though: `control-plane` calls the SP
+and only writes its own record once the SP's response comes back successfully,
+so a retry that lands **between** the SP successfully creating the OSAC resource
+and `control-plane` persisting its record (e.g. `control-plane` crashing or
+timing out mid-request) still reaches the SP a second time with the same `id`.
+The OSAC SP therefore still needs its own idempotent-create handling, exactly as
+it would under the environment agent model (Phase 2) — the only change is that
+the `id` now arrives as a query parameter on a direct `POST`, not as a
+`resource_id` field inside a CloudEvent-delivered body.
 
 OSAC's fulfillment service already supports this pattern natively: its generic
 create path
@@ -933,42 +1144,38 @@ if errors.As(err, &alreadyExistsErr) {
 }
 ```
 
-The OSAC SP sets `resource_id` as `Cluster.id`/`ComputeInstance.id` on every
-`Create` call instead of leaving it empty. On a retried request with the same
-`resource_id`, OSAC's `AlreadyExists` response is treated as success: the SP
+The OSAC SP sets the `id` query parameter as `Cluster.id`/`ComputeInstance.id`
+on every `Create` call instead of leaving it empty. On a retried request with
+the same `id`, OSAC's `AlreadyExists` response is treated as success: the SP
 fetches the existing object by `id` and returns it as if the create had just
-succeeded, rather than surfacing an error to DCM.
+succeeded, rather than surfacing an error to `control-plane`.
 
 ```mermaid
 sequenceDiagram
-    participant DCM as DCM Control Plane
-    participant AG as Environment Agent
+    participant CP as control-plane
     participant SP as OSAC SP
     participant FS as OSAC Fulfillment Service
 
-    Note over DCM,AG: Normal path
-    DCM->>AG: PUBLISH dcm.request.create<br/>{resource_id, service_type, spec}
-    AG->>SP: POST /api/v1alpha1/clusters<br/>{resource_id, ...spec}
-    SP->>FS: Clusters/Create<br/>(Cluster.id = resource_id)
+    Note over CP: Normal path
+    CP->>SP: POST /api/v1alpha1/clusters?id=...<br/>{spec: {...}}
+    SP->>FS: Clusters/Create<br/>(Cluster.id = id)
     FS-->>SP: 201 Created
-    SP-->>AG: 201 Created {request_id: resource_id}
-    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resource_id, status: PROVISIONING}
+    SP-->>CP: 201 Created {id, status: PROGRESSING}
 
-    Note over DCM,AG: Retry path — same resource_id,<br/>e.g. after agent failover mid-flight
-    DCM->>AG: PUBLISH dcm.request.create<br/>{resource_id, service_type, spec}
-    AG->>SP: POST /api/v1alpha1/clusters<br/>{resource_id, ...spec}
-    SP->>FS: Clusters/Create<br/>(Cluster.id = resource_id)
+    Note over CP: Retry path — same id,<br/>e.g. control-plane crashed before persisting the first response
+    CP->>SP: POST /api/v1alpha1/clusters?id=...<br/>{spec: {...}}
+    SP->>FS: Clusters/Create<br/>(Cluster.id = id)
     FS-->>SP: AlreadyExists (id already taken)
-    SP->>FS: Clusters/Get(resource_id)
+    SP->>FS: Clusters/Get(id)
     FS-->>SP: Existing Cluster object
-    SP-->>AG: 201 Created {request_id: resource_id}<br/>(idempotent — no duplicate created)
-    AG->>DCM: PUBLISH dcm.agent.creation-acknowledged<br/>{resource_id, status: PROVISIONING}
+    SP-->>CP: 201 Created {id, status: PROGRESSING}<br/>(idempotent — no duplicate created)
 ```
 
 #### ID Mapping
 
-Because `resource_id` is set directly as OSAC's own `id` at creation time (see
-[Idempotent Creation](#idempotent-creation)), the two identifiers are the same
+Because DCM's resource identifier is passed through as OSAC's own `id` at
+creation time — as the `id` query parameter in Phase 1 (see
+[Idempotent Creation](#idempotent-creation)) — the two identifiers are the same
 value — the SP does not need a separate translation table to go from a DCM
 identifier to an OSAC one. `GET`/`DELETE` on
 `/api/v1alpha1/clusters/{cluster_id}` and `/api/v1alpha1/vms/{vm_id}` use that
@@ -1058,15 +1265,17 @@ version to the appropriate OSAC `release_image` in
 
 ### Risks and Mitigations
 
-| Risk                                                                         | Mitigation                                                                                                                   |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| OSAC fulfillment service unavailable                                         | Health check detects connectivity loss; agent marks SP unhealthy; DCM routes to alternative providers                        |
-| Status polling introduces latency                                            | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback                      |
-| ID mapping data loss causes orphaned resources                               | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership                       |
-| OSAC platform version upgrades change the gRPC API                           | Pin to a specific OSAC API version; version negotiation on startup                                                           |
-| OIDC token expiry causes transient auth failures                             | Token refresh before expiry; 401 triggers immediate refresh and retry                                                        |
-| DCM catalog size tiers don't line up with available OSAC templates           | Catalog admins provision one OSAC template per size tier in advance; `422` error when no matching template exists            |
-| Default network provisioning fails or is slow on a tenant's first VM request | Pre-provision default subnets for known tenants at SP startup; surface provisioning failure as `502` on VM create with retry |
+| Risk                                                                                                                                                                                                                                                                                                     | Mitigation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OSAC fulfillment service unavailable                                                                                                                                                                                                                                                                     | Health check detects connectivity loss; `control-plane` marks SP unhealthy; DCM routes to alternative providers                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Status polling introduces latency                                                                                                                                                                                                                                                                        | Configurable poll interval; Events/Watch streaming for lower-latency detection with polling as fallback                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ID mapping data loss causes orphaned resources                                                                                                                                                                                                                                                           | Persist mapping in a durable store; reconciliation loop uses OSAC metadata labels to recover ownership                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| OSAC platform version upgrades change the gRPC API                                                                                                                                                                                                                                                       | Pin to a specific OSAC API version; version negotiation on startup                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| OIDC token expiry causes transient auth failures                                                                                                                                                                                                                                                         | Token refresh before expiry; 401 triggers immediate refresh and retry                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| DCM catalog size tiers don't line up with available OSAC templates                                                                                                                                                                                                                                       | Catalog admins provision one OSAC template per size tier in advance; `422` error when no matching template exists                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Default network provisioning fails or is slow on a tenant's first VM request                                                                                                                                                                                                                             | Pre-provision default subnets for known tenants at SP startup; surface provisioning failure as `502` on VM create with retry                                                                                                                                                                                                                                                                                                                                                                                            |
+| SP authentication against `control-plane` has no active, unblocked implementation path — Phase 1 depends indefinitely on `AUTH_DISABLED=true`, which the [authentication enhancement](../authentication/authentication.md) states must not be used in production (see [Authentication](#authentication)) | Treat this as a Phase 1 production blocker rather than a cosmetic gap; track resolution against [FLPATH-4622](https://redhat.atlassian.net/browse/FLPATH-4622) and re-evaluate the [Phase 2 migration criteria](#phased-delivery) if it remains unaddressed                                                                                                                                                                                                                                                             |
+| Policy resolves `provider_name` per request independently; nothing pins a `vm` request to the same provider that fulfilled a related `cluster` request, so DCM could route a cluster to OSAC SP and a co-located VM to a different provider despite user intent to keep them in one environment          | Pre-existing DCM-wide placement gap, not introduced by this enhancement — the environment agent model (Phase 2) has the identical limitation and defers a fix to "SP-Based Advertisement for Policy Selection" ([environment agent enhancement](../environment-agent/environment-agent.md#sp-based-advertisement-for-policy-selection), listed as a Future Enhancement). Mitigated today by keeping OSAC-specific catalog items uniquely resolvable via `provider_hints.osac.*` so no other registered provider matches |
 
 ## Design Details
 
@@ -1076,6 +1285,13 @@ The OSAC SP publishes status updates to the messaging system using
 [CloudEvents v1.0](https://cloudevents.io/) per the
 [SP Status Reporting](../state-management/service-provider-status-reporting.md)
 enhancement.
+
+**Transport (Phase 1):** the OSAC SP publishes directly to NATS JetStream;
+`control-plane` runs a durable consumer against a configurable subject
+(defaulting to a `dcm.*` wildcard, matching the `dcm.cluster`/`dcm.vm` subjects
+below) and applies each event to the corresponding `ServiceTypeInstance` record.
+This is the same CloudEvents shape the environment agent model (Phase 2) already
+assumes — only the consumer differs.
 
 **CloudEvents Fields:**
 
@@ -1162,6 +1378,35 @@ remains backward-compatible.
 - 2026-06-29: Initial enhancement proposal created.
 - 2026-06-30: Updated to agent model, added VM support, fixed OSAC API
   references per PR #78 review feedback.
+- 2026-07-27: Reworked delivery to two phases — Phase 1 registers with and
+  dispatches through `control-plane`'s SP API; Phase 2 (deferred) migrates to
+  the environment agent model documented above, once it reaches sufficient
+  maturity. See [Phased Delivery](#phased-delivery) and
+  [enhancements#95](https://github.com/dcm-project/enhancements/issues/95).
+- 2026-07-27: Corrected the Phase 1 rework after an accuracy audit against live
+  `control-plane` sources: the SP dispatch hop was mis-depicted as a network
+  call between "DCM" and "`control-plane`" (it is in-process within one
+  monolith); the Authentication section understated a since-merged
+  `security: bearerAuth` requirement on the SP OpenAPI specs and flagged that
+  the ticket to authenticate SPs against `control-plane` was closed with no
+  active successor; the `id` query parameter's "DCM-issued" framing was softened
+  to reflect that it is optional at the API level; and an unsupported
+  `timestamp` field was removed from a status CloudEvent example.
+- 2026-07-27: Second accuracy pass: corrected the claim that a Provider
+  response's top-level `id`/`status` fields are schema-required —
+  `control-plane` does not validate their presence and silently persists empty
+  values if the SP omits them — and fixed a typo (`control- plane`).
+- 2026-07-30: Addressed
+  [PR #96](https://github.com/dcm-project/enhancements/pull/96) review feedback:
+  restored Phase 2 (environment agent) content alongside Phase 1 in
+  Registration, the OSAC Fulfillment Service Integration diagram, and Status
+  Reporting, rather than replacing it; fixed a Mermaid rendering error and
+  corrected "catalog/placement" attribution to policy (selects `provider_name`)
+  vs. placement (dispatches) after code verification; answered how the SP reacts
+  to a `409` on registration; trimmed the Authentication section's ticket-trail
+  detail into a new Non-Goals entry; and added a Risk entry for the
+  pre-existing, cross-phase gap in policy's ability to co-locate related
+  resources on the same provider.
 
 ## Drawbacks
 
