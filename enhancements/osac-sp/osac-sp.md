@@ -824,61 +824,69 @@ used for cluster creation (see
 
 **Field Mapping (DCM to OSAC Fulfillment API):**
 
-| DCM Field                            | OSAC Field              | Notes                                                                                                |
-| ------------------------------------ | ----------------------- | ---------------------------------------------------------------------------------------------------- |
-| `id` query parameter                 | id                      | DCM-issued identifier, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
-| spec.vcpu.count                      | spec.cores              | Only when `spec.provider_hints.osac.instance_type` is unset — see below                              |
-| spec.memory.size                     | spec.memory_gib         | Convert to GiB integer; only when `instance_type` is unset                                           |
-| spec.storage.disks[boot].capacity    | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                |
-| spec.storage.disks[*]                | spec.additional_disks   | Additional disks                                                                                     |
-| spec.guest_os.type                   | spec.image              | Mapped to image source_ref                                                                           |
-| spec.access.ssh_public_key           | spec.ssh_key            | SSH public key                                                                                       |
-| spec.metadata.name                   | metadata.name           | Instance name (DNS label)                                                                            |
-| spec.provider_hints.osac.template_id | spec.template           | OSAC template reference                                                                              |
+| DCM Field                              | OSAC Field              | Notes                                                                                                |
+| -------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------- |
+| `id` query parameter                   | id                      | DCM-issued identifier, set as `ComputeInstance.id` — see [Idempotent Creation](#idempotent-creation) |
+| spec.vcpu.count                        | _(not sent)_            | Informational only — OSAC has no field to receive it; see [VM Sizing](#vm-sizing)                    |
+| spec.memory.size                       | _(not sent)_            | Informational only — see [VM Sizing](#vm-sizing)                                                     |
+| spec.storage.disks[boot].capacity      | spec.boot_disk.size_gib | Boot disk size in GiB                                                                                |
+| spec.storage.disks[*]                  | spec.additional_disks   | Additional disks                                                                                     |
+| spec.guest_os.type                     | spec.image.source_ref   | Mapped to image source_ref                                                                           |
+| spec.access.ssh_public_key             | spec.ssh_public_key     | SSH public key (field name corrected — not `ssh_key`)                                                |
+| spec.metadata.name                     | metadata.name           | Instance name (DNS label)                                                                            |
+| spec.provider_hints.osac.template_id   | spec.template           | OSAC template reference                                                                              |
+| spec.provider_hints.osac.instance_type | spec.instance_type      | **Required** — see [VM Sizing](#vm-sizing)                                                           |
 
 As with cluster creation, the `id` query parameter is DCM-issued and forwarded
 unchanged by `control-plane` — see [Idempotent Creation](#idempotent-creation).
 
 **Provider Hints (osac) for VMs:**
 
-| Field         | Type   | Required | Description                                                           |
-| ------------- | ------ | -------- | --------------------------------------------------------------------- |
-| template_id   | string | Yes      | OSAC compute instance template                                        |
-| instance_type | string | No       | OSAC instance_type name; mutually exclusive with `cores`/`memory_gib` |
-| is_windows    | bool   | No       | Windows guest OS flag                                                 |
-
-`instance_type` and `cores`/`memory_gib` are mutually exclusive on
-`ComputeInstances/Create` — setting both is rejected. When
-`provider_hints.osac.instance_type` is set, the SP sends `spec.instance_type`
-and omits `spec.cores`/`spec.memory_gib` entirely (dropping `vcpu.count`/
-`memory.size` from the request). When it's unset, the SP falls back to the
-direct `cores`/`memory_gib` mapping, which OSAC currently accepts but flags as
-deprecated (see [VM Sizing](#vm-sizing)).
+| Field         | Type   | Required | Description                                           |
+| ------------- | ------ | -------- | ----------------------------------------------------- |
+| template_id   | string | Yes      | OSAC compute instance template                        |
+| instance_type | string | Yes      | OSAC instance_type name — see [VM Sizing](#vm-sizing) |
+| is_windows    | bool   | No       | Windows guest OS flag                                 |
 
 ##### VM Sizing
 
-OSAC now has a live
-[`InstanceTypes`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/instance_types_service.proto)
-catalog ([OSAC-46](https://redhat.atlassian.net/browse/OSAC-46), In Progress),
-and `ComputeInstances/Create`
-[already rejects](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/servers/private_compute_instances_server.go#L419-L433)
-setting `instance_type` together with `cores`/`memory_gib` (mutually exclusive),
-and returns a deprecation warning — _"Direct cores/memory_gib is deprecated, use
-instance_type instead. This path will be removed in a future release."_ —
-whenever `cores`/`memory_gib` are set without an `instance_type`. No removal
-date is set yet.
+**Correction (verified directly against vendored + current upstream proto,
+2026-08-03):** this section previously described `cores`/`memory_gib` as
+deprecated-but-still-accepted on `ComputeInstances/Create`, pending
+[OSAC-46](https://redhat.atlassian.net/browse/OSAC-46) ("In Progress" at the
+time). OSAC-46 has since progressed further: `ComputeInstanceSpec`'s `cores` and
+`memory_gib` fields have been **removed**, not merely deprecated — both the
+field numbers (`5`, `6`) and names (`"cores"`, `"memory_gib"`) are `reserved` in
+[`compute_instance_type.proto`](https://github.com/osac-project/fulfillment-service/blob/c4110b28a14d4a3b3926ae5360e2cd59c15430d5/proto/public/osac/public/v1/compute_instance_type.proto#L134-L136),
+confirmed identical on `fulfillment-service`'s `main` as of
+[`c4110b2`](https://github.com/osac-project/fulfillment-service/blob/c4110b28a14d4a3b3926ae5360e2cd59c15430d5/proto/public/osac/public/v1/compute_instance_type.proto)
+— this is the current contract, not a stale-vendoring artifact.
+`private_compute_instances_server.go`'s own comment confirms this is deliberate,
+finished design rather than an in-flight deprecation:
 
-**Resolution:** reviewers agreed to keep the direct mapping for v1 —
-`vcpu.count`/`memory.size` map straight to `cores`/`memory_gib`, and the SP
-accepts the deprecation warning on every VM create rather than resolving a
-best-fit `instance_type` from DCM's raw values. `InstanceTypes/List` already
-exposes `spec.cores`/`spec.memory_gib` per type
-([`instance_type_type.proto#L85-L100`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/proto/public/osac/public/v1/instance_type_type.proto#L85-L100)),
-so best-fit matching is technically feasible today, but `OSAC-46` is still **In
-Progress** — the catalog's shape may still change before it's done, and building
-matching logic against a moving target isn't worth the churn risk yet. Revisit
-once OSAC-46 stabilizes and a removal date for the direct `cores`/`memory_gib`
-fields is set.
+> Per D-01, the API stores only the instance_type name and does NOT expand
+> cores/memory_gib. Per D-02, the API validates existence and state but
+> resolution happens in the reconciler.
+
+There is no code path left that accepts `cores`/`memory_gib` on
+`ComputeInstances/Create` — the deprecation-warning behavior and the
+`instance_type`/`cores`+`memory_gib` mutual-exclusivity check this section
+previously cited no longer exist to be rejected against, because the fields
+themselves no longer exist on the wire.
+
+**Resolution (supersedes the original "keep direct mapping for v1" decision —
+that decision depended on a `cores`/`memory_gib` path which no longer exists):**
+`provider_hints.osac.instance_type` is now **required** on every VM Create;
+there is no direct-mapping fallback. `spec.vcpu.count`/`spec.memory.size` remain
+valid, informational-only inputs on the DCM-facing generic `VMSpec` (that schema
+is shared across all VM Service Providers, and other providers may still honor
+them directly) — the OSAC SP itself simply does not translate them to any OSAC
+field. A Create request missing `provider_hints.osac.instance_type` MUST be
+rejected (`400 Bad Request`) before any OSAC call is made. Best-fit resolution
+of an `instance_type` from `vcpu.count`/`memory.size` via `InstanceTypes/List`
+was considered and explicitly deferred for v1 (not attempted), pushing the
+sizing decision to the DCM caller instead — revisit if DCM callers need to size
+VMs without prior knowledge of OSAC's instance-type catalog.
 
 **Response:** Returns `201 Created` with the VM resource in its initial state:
 
