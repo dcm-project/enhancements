@@ -1019,23 +1019,24 @@ API before the underlying Hosted Control Plane teardown finishes.
 **Correction (verified 2026-07-31 against a newer OSAC commit than this
 section's citations elsewhere use):** `ClusterState` now defines
 `CLUSTER_STATE_DELETING` and `CLUSTER_STATE_DELETE_FAILED`
-([`cluster_type.proto`](https://github.com/osac-project/fulfillment-service/blob/73ae26e8cb0a476d4b035b18776603f60a361ed9/proto/public/osac/public/v1/cluster_type.proto#L237-L253) —
-340 commits ahead of this doc's `98c6b686` pin used elsewhere, dated
-2026-07-27; `osac-service-provider`'s own Milestone 2 proto vendoring is
-pinned to this same later commit). [OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391)
-(adding these values) therefore appears resolved upstream. **However,
-[OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) is still open** —
-the cluster feedback controller's
+([`cluster_type.proto`](https://github.com/osac-project/fulfillment-service/blob/73ae26e8cb0a476d4b035b18776603f60a361ed9/proto/public/osac/public/v1/cluster_type.proto#L237-L253)
+— 340 commits ahead of this doc's `98c6b686` pin used elsewhere, dated
+2026-07-27; `osac-service-provider`'s own Milestone 2 proto vendoring is pinned
+to this same later commit).
+[OSAC-1391](https://redhat.atlassian.net/browse/OSAC-1391) (adding these values)
+therefore appears resolved upstream. **However,
+[OSAC-1586](https://redhat.atlassian.net/browse/OSAC-1586) is still open** — the
+cluster feedback controller's
 [`syncPhase`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go#L262-L272)
 has a literal `// TODO: There is no equivalent phase.` for
 `ClusterOrderPhaseDeleting`, and
 [`handleDelete`](https://github.com/osac-project/osac-operator/blob/065c4fd420e367ddb54bf0f63c64315c27fd87a9/internal/controller/feedback_controller.go#L347-L350)
-itself is `// TODO.` with an empty body — so nothing in OSAC's reconciler
-path actually *sets* either new enum value yet, even though the proto now
-defines them. Net effect on the SP's design below is **unchanged**: there is
-still no signal to drive an intermediate deleting status today, so the SP
-polls silently and, like `acm-cluster-sp`, publishes `DELETED` and removes
-the entry from its local mapping store as soon as it observes the `404`.
+itself is `// TODO.` with an empty body — so nothing in OSAC's reconciler path
+actually _sets_ either new enum value yet, even though the proto now defines
+them. Net effect on the SP's design below is **unchanged**: there is still no
+signal to drive an intermediate deleting status today, so the SP polls silently
+and, like `acm-cluster-sp`, publishes `DELETED` and removes the entry from its
+local mapping store as soon as it observes the `404`.
 
 VMs don't have this gap today: the
 [`computeinstance` reconciler's `delete()`](https://github.com/osac-project/fulfillment-service/blob/98c6b6860cc3844acfbe505402ebb2f4d80523c9/internal/controllers/computeinstance/computeinstance_reconciler_function.go#L291-L325)
