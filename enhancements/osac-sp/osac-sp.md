@@ -688,22 +688,16 @@ host type:
   of new ones), which is a day-2 operation out of scope for v1 per
   [Non-Goals](#non-goals).
 
-**Resolution:** reviewers agreed cluster sizing is coarser-grained than VM
-sizing for v1 — each DCM catalog size tier is configured with a
-`provider_hints.osac.template_id` pointing at a pre-provisioned OSAC template
-for that tier, per the mapping above. The OSAC SP does **not** maintain an
-internal size-tier matrix — it is a pass-through: whatever `template_id` arrives
-in `provider_hints.osac` is sent to OSAC as-is (see
-[Catalog Independence](#catalog-independence)). The mapping is entirely
-expressed as DCM catalog item configuration, authored by whoever administers the
-DCM catalog. This still leaves DCM catalog size tiers and OSAC template tiers as
-two independently-maintained sources of truth: whoever adds a new DCM size tier
-must also ensure a matching OSAC template exists and wire the `template_id` by
-hand, with no automated check that keeps them in sync. Accepted for v1 on the
-assumption that size tiers change infrequently; if catalog churn makes the
-manual wiring error-prone in practice, revisit whether DCM needs a way to query
-the SP's supported size tiers (or vice versa) instead of relying on an admin to
-keep both catalogs aligned.
+**Resolution:** cluster sizing is coarser-grained than VM sizing for v1. Each
+DCM catalog size tier maps to a pre-provisioned OSAC template via
+`provider_hints.osac.template_id`; the SP is a pure pass-through with no
+internal size-tier matrix (see [Catalog Independence](#catalog-independence)),
+and the mapping lives entirely in DCM catalog configuration. This leaves DCM
+size tiers and OSAC templates as two independently-maintained sources of truth —
+adding a tier requires manually wiring a matching `template_id`, with no
+automated check keeping them in sync. Accepted for v1 since size tiers change
+infrequently; revisit (e.g. letting DCM query the SP's supported tiers, or vice
+versa) if catalog churn makes the manual wiring error-prone.
 
 **Provider Hints (osac):**
 
