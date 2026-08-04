@@ -850,43 +850,22 @@ unchanged by `control-plane` — see [Idempotent Creation](#idempotent-creation)
 
 ##### VM Sizing
 
-**Correction (verified directly against vendored + current upstream proto,
-2026-08-03):** this section previously described `cores`/`memory_gib` as
-deprecated-but-still-accepted on `ComputeInstances/Create`, pending
-[OSAC-46](https://redhat.atlassian.net/browse/OSAC-46) ("In Progress" at the
-time). OSAC-46 has since progressed further: `ComputeInstanceSpec`'s `cores` and
-`memory_gib` fields have been **removed**, not merely deprecated — both the
-field numbers (`5`, `6`) and names (`"cores"`, `"memory_gib"`) are `reserved` in
-[`compute_instance_type.proto`](https://github.com/osac-project/fulfillment-service/blob/c4110b28a14d4a3b3926ae5360e2cd59c15430d5/proto/public/osac/public/v1/compute_instance_type.proto#L134-L136),
-confirmed identical on `fulfillment-service`'s `main` as of
-[`c4110b2`](https://github.com/osac-project/fulfillment-service/blob/c4110b28a14d4a3b3926ae5360e2cd59c15430d5/proto/public/osac/public/v1/compute_instance_type.proto)
-— this is the current contract, not a stale-vendoring artifact.
-`private_compute_instances_server.go`'s own comment confirms this is deliberate,
-finished design rather than an in-flight deprecation:
+`provider_hints.osac.instance_type` is **required** on every VM Create.
+[OSAC-46](https://redhat.atlassian.net/browse/OSAC-46) removed — not merely
+deprecated — `ComputeInstanceSpec`'s `cores`/`memory_gib` fields (both are
+`reserved` in
+[`compute_instance_type.proto`](https://github.com/osac-project/fulfillment-service/blob/main/proto/public/osac/public/v1/compute_instance_type.proto)),
+so there is no direct-mapping fallback: a Create request missing
+`provider_hints.osac.instance_type` MUST be rejected (`400 Bad Request`) before
+any OSAC call is made.
 
-> Per D-01, the API stores only the instance_type name and does NOT expand
-> cores/memory_gib. Per D-02, the API validates existence and state but
-> resolution happens in the reconciler.
-
-There is no code path left that accepts `cores`/`memory_gib` on
-`ComputeInstances/Create` — the deprecation-warning behavior and the
-`instance_type`/`cores`+`memory_gib` mutual-exclusivity check this section
-previously cited no longer exist to be rejected against, because the fields
-themselves no longer exist on the wire.
-
-**Resolution (supersedes the original "keep direct mapping for v1" decision —
-that decision depended on a `cores`/`memory_gib` path which no longer exists):**
-`provider_hints.osac.instance_type` is now **required** on every VM Create;
-there is no direct-mapping fallback. `spec.vcpu.count`/`spec.memory.size` remain
-valid, informational-only inputs on the DCM-facing generic `VMSpec` (that schema
-is shared across all VM Service Providers, and other providers may still honor
-them directly) — the OSAC SP itself simply does not translate them to any OSAC
-field. A Create request missing `provider_hints.osac.instance_type` MUST be
-rejected (`400 Bad Request`) before any OSAC call is made. Best-fit resolution
-of an `instance_type` from `vcpu.count`/`memory.size` via `InstanceTypes/List`
-was considered and explicitly deferred for v1 (not attempted), pushing the
-sizing decision to the DCM caller instead — revisit if DCM callers need to size
-VMs without prior knowledge of OSAC's instance-type catalog.
+`spec.vcpu.count`/`spec.memory.size` remain valid, informational-only inputs on
+the DCM-facing generic `VMSpec` (shared across all VM Service Providers) but are
+not translated to any OSAC field by this SP — sizing is OSAC's `instance_type`
+catalog, not a DCM-computed value. Valid `instance_type` values are discoverable
+via
+[`InstanceTypes/List`](https://github.com/osac-project/fulfillment-service/blob/main/proto/public/osac/public/v1/instance_types_service.proto),
+which OSAC owns and populates.
 
 **Response:** Returns `201 Created` with the VM resource in its initial state:
 
