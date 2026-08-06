@@ -363,6 +363,30 @@ sequenceDiagram
 > the SP recovers, or rejected if the SP becomes Unavailable (see
 > [Environment Agent — Retry Topic](../environment-agent/environment-agent.md#retry-topic)).
 
+### Concurrent Delete Race
+
+The current implementation dispatches to the provider synchronously within
+`CreateInstance`, and persists the instance record before that dispatch resolves
+(see
+[Service Type Instance Creation Flow](#service-type-instance-creation-flow)).
+This opens two windows for a concurrent `DELETE` on the same instance:
+
+- **Delete vs. in-flight create.** A `DELETE` must not race a still-outstanding
+  create dispatch, but can't gate on `status` alone:
+  [Status Consumer Flow](#status-consumer-flow) can move `status` off `PENDING`
+  independently of whether the dispatch has actually returned. A
+  `create_dispatch_started_at` timestamp, set when the placeholder is persisted
+  and cleared in one atomic update once the dispatch resolves (success or
+  failure), lets `DELETE` (synchronous or scheduled cleanup) defer on the
+  dispatch itself rather than on `status`. It is bounded by a staleness window
+  (default 5 minutes, above the provider client's worst-case retry ceiling) so a
+  crash between insert and clear self-heals instead of permanently blocking
+  deletion.
+- **Rollback vs. independent status update.** If the dispatch fails, rollback
+  deletes the placeholder only if `status` is still `PENDING` — a status update
+  that already landed via Status Consumer wins over the rollback instead of
+  being discarded.
+
 ### Instance Status Lifecycle
 
 An instance transitions through the following statuses during its lifecycle.
