@@ -109,6 +109,9 @@ DCM currently cannot enable this because:
   control plane, not peer-to-peer.
 - **UDLM Relationships** - Full bidirectional UDLM relationship model is
   deferred until UDLM is released.
+- **SP-specific outputs** - Outputs are service-type, not provider-specific.
+  Provider-specific output fields (analogous to `provider_hints` for input) are
+  not defined in this enhancement and are deferred.
 
 ## Proposal
 
