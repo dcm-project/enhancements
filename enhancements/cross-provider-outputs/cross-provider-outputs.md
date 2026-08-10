@@ -6,6 +6,10 @@ reviewers:
   - "@gciavarrini"
   - "@jenniferubah"
   - "@machacekondra"
+  - "@gpb88"
+  - "@gabriel-farache"
+  - "@jordigilh"
+  - "@NoamNakash"
 approvers:
   - "@gciavarrini"
   - "@jenniferubah"
@@ -19,6 +23,7 @@ see-also:
   - "/enhancements/sp-resource-manager/sp-resource-manager.md"
   - "/enhancements/sp-resource-status-reader/sp-resource-status-reader.md"
   - "/enhancements/state-management/service-provider-status-reporting.md"
+  - "/enhancements/gitops-controller/gitops-controller.md"
 ---
 
 # Cross-Provider Outputs
@@ -126,13 +131,13 @@ DCM currently cannot enable this because:
 
 3. **CEL Reference Validation (Authoring Time):** When a catalog item is
    created, DCM validates all CEL output references (`${resource.outputName}`)
-   against the service type's output definition. The Catalog Manager already
-   owns the service type definitions, so no cross-domain call is needed for
+   against the service type's output definition. The Catalog domain already owns
+   the service type definitions, so no cross-domain call is needed for
    validation.
 
 4. **Stored Outputs for CEL Resolution:** The `outputs` table provides the data
    store that the declarative-api's two-phase CEL evaluation reads from when
-   resolving output references like `${ordersDb.connectionString}`.
+   resolving output references like `${ordersDb.connection_string}`.
 
 **MVP delivers independently:**
 
@@ -164,9 +169,14 @@ DCM currently cannot enable this because:
 resources:
   - name: ordersDb
     service_type: database
+    fields:
+      - path: engine
+        default: postgresql
+      - path: version
+        default: "18"
 ```
 
-The `database` service type defines output fields like `connectionString`,
+The `database` service type defines output fields like `connection_string`,
 `host`, and `port` in its service type spec. When a consumer provisions this
 catalog item and the resource reaches `Running` status, the service provider
 publishes a CloudEvent status event that includes the `outputs` map. The
@@ -183,6 +193,11 @@ output references:
 resources:
   - name: ordersDb
     service_type: database
+    fields:
+      - path: engine
+        default: postgresql
+      - path: version
+        default: "18"
 
   - name: app
     service_type: container
@@ -191,12 +206,12 @@ resources:
       - path: process.env[0].name
         default: DATABASE_URL
       - path: process.env[0].value
-        default: "${ordersDb.connectionString}"
+        default: "${ordersDb.connection_string}"
 ```
 
 DCM validates at creation time that `ordersDb` exists, is in `app`'s
 `requires_resources`, and that the `database` service type defines
-`connectionString` in its output spec. Invalid references are rejected with
+`connection_string` in its output spec. Invalid references are rejected with
 clear errors.
 
 #### Story 3: Database + Application (Target State)
@@ -213,17 +228,38 @@ database connection string.
 
 **Service Type Output Contract:**
 
-Output fields are seeded from spec files at
-`api/catalog/v1alpha1/servicetypes/<type>/`. The service type definition
-declares each output's name, type, and description. Any provider that implements
-the service type populates these fields in its CloudEvent status payload's
-`outputs` map.
+Output fields are defined as an `outputs:` key in the existing
+`api/catalog/v1alpha1/servicetypes/<type>/spec.yaml`, no separate file is
+introduced. These spec files are the single source of truth for the output
+contract. Both the catalog (seed.go) and service provider implementers reference
+them to know what output fields a service type produces.
+
+The service type definition declares each output's name, type, and description.
+Any provider that implements the service type populates these fields in its
+CloudEvent status payload's `outputs` map.
 
 How a provider maps its internal data to the declared output fields is an
-implementation detail of the provider. For example, the container SP extracts
-`ip` from its Pod status and `cluster_ip` from its Service object. The service
-type contract only defines what fields must be present, not how they are
-sourced.
+implementation detail of the provider. For example, the container SP derives
+`endpoint` (e.g. `"10.96.45.12:8080"`) from its Pod IP and Service port, and
+`internal_dns` from the Kubernetes cluster DNS name. The service type contract
+only defines what fields must be present, not how they are sourced.
+
+**Relationship to `readOnly` Spec Fields:**
+
+Service type spec files contain fields marked `readOnly: true` (see PR #41):
+they must not be set at authoring time and appear in GET responses to represent
+the full runtime state, including structured types such as `endpoints[]`. The
+`outputs` definition is a distinct, flat scalar subset of that runtime state;
+the fields published in the CloudEvent status payload and available for CEL
+cross-provider references. Structured `readOnly` fields are display-only and are
+not published to the `outputs` map.
+
+| `readOnly` spec field | `outputs` definition key                                               | CEL-referenceable |
+| --------------------- | ---------------------------------------------------------------------- | ----------------- |
+| `endpoints[]` (array) | —                                                                      | No (display-only) |
+| `namespace` (string)  | `namespace`                                                            | Yes               |
+| —                     | `endpoint` (derived: Pod IP + Service port, e.g. `"10.96.45.12:8080"`) | Yes               |
+| —                     | `internal_dns` (derived: K8s cluster DNS name)                         | Yes               |
 
 **CloudEvent Status Payload Extension:**
 
@@ -236,7 +272,7 @@ Providers extend their existing CloudEvent status payload with an optional
   "status": "RUNNING",
   "message": "Database is running",
   "outputs": {
-    "connectionString": "jdbc:postgresql://10.0.1.5:5432/orders",
+    "connection_string": "jdbc:postgresql://10.0.1.5:5432/orders",
     "host": "10.0.1.5",
     "port": 5432
   }
@@ -272,12 +308,13 @@ removed.
 
 ### Risks and Mitigations
 
-| Risk                                                     | Mitigation                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Service providers must extend CloudEvent status payloads | Additive, non-breaking. Roll out incrementally.                           |
-| Outputs table growth                                     | CASCADE DELETE on instance deletion. Future phase adds TTL-based cleanup. |
-| CEL reference errors in catalog items                    | Validation at creation time catches errors before provisioning.           |
-| End-to-end flow requires declarative-api orchestration   | MVP delivers standalone value: output capture and CEL validation.         |
+| Risk                                                     | Mitigation                                                                                                                                                       |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service providers must extend CloudEvent status payloads | Additive, non-breaking. Roll out incrementally.                                                                                                                  |
+| Outputs table growth                                     | CASCADE DELETE on instance deletion. Future phase adds TTL-based cleanup.                                                                                        |
+| CEL reference errors in catalog items                    | Validation at creation time catches errors before provisioning.                                                                                                  |
+| End-to-end flow requires declarative-api orchestration   | MVP delivers standalone value: output capture and CEL validation.                                                                                                |
+| `readOnly` spec fields and `outputs` definition diverge  | spec.yaml is the source of truth; output definition keys are flat scalars derived from or alongside `readOnly` fields. Document convention enforces consistency. |
 
 ## Design Details
 
@@ -341,7 +378,7 @@ sequenceDiagram
         CM->>DB: INSERT catalog_item
         CM-->>User: 201 Created
     else Validation fails
-        CM-->>User: 400 Bad Request<br/>"CEL reference ${ordersDb.connectionString}<br/>references unknown output 'connectionString'<br/>on service type 'database'"
+        CM-->>User: 400 Bad Request<br/>"CEL reference ${ordersDb.connection_string}<br/>references unknown output 'connection_string'<br/>on service type 'database'"
     end
 ```
 
@@ -359,7 +396,8 @@ ServiceTypeOutputs:
   description: >
     Declares the output fields a service type produces. Defined centrally on the
     service type, alongside the input schema. Keys are output field names;
-    values define the type and description of each output.
+    values define the type and description of each output. Keys must be flat
+    scalars; CEL resolves output references as simple key lookups.
   additionalProperties:
     type: object
     properties:
@@ -460,15 +498,15 @@ ServiceType:
       type: string
     spec:
       type: object
-      description: Input schema (existing — defines provisioning fields)
+      description: Input schema (existing, defines provisioning fields)
       additionalProperties: true
     outputs:
       type: object
       description: >
-        Declares output fields this service type produces. Keys are output field
-        names; values define type and description. Any provider implementing
-        this service type is expected to populate these fields in its CloudEvent
-        status payload.
+        Declares output fields this service type produces for CEL cross-provider
+        references. Keys are flat scalar field names; values define type and
+        description. Any provider implementing this service type is expected to
+        populate these fields in its CloudEvent status payload.
       additionalProperties: true
     path:
       type: string
@@ -507,6 +545,16 @@ definitions is ignored by older versions.
 2. **Cross-Repo Coordination** - Providers must add an `outputs` map to their
    CloudEvent status payloads, requiring coordinated changes across multiple
    repos.
+
+3. **Two representations of runtime fields** - `readOnly` spec fields and
+   `outputs` definition keys both declare what a service type produces at
+   runtime. The two representations exist because the channels are different:
+   `readOnly` fields travel through the REST API (GET responses from service
+   providers), while outputs travel through NATS CloudEvent status payloads.
+   They serve different consumers and cannot be collapsed into one definition.
+   The two sets do not always overlap one-to-one. Document convention is the
+   enforcer, there is no automated consistency check between them in this
+   enhancement.
 
 ## Alternatives
 
@@ -598,6 +646,52 @@ The extra HTTP round-trip is redundant when the provider can include outputs in
 the status event it already publishes. Embedding outputs in the CloudEvent
 payload keeps the capture path purely event-driven with no new call patterns and
 no additional failure modes.
+
+### Alternative 4: `readOnly` Spec Fields as the Sole Output Definition
+
+#### Description
+
+Use the `readOnly: true` markers in the service type spec YAML as the sole
+output contract, eliminating the separate `outputs` field on the `ServiceType`
+model. The CEL validation function derives output field names by scanning the
+spec for `readOnly: true` entries rather than reading a dedicated `Outputs`
+field.
+
+#### Pros
+
+- Single source of truth: one definition in spec.yaml covers both the REST API
+  shape and the output contract
+- Eliminates the `Outputs` GORM column and the seeding work in seed.go
+- PR #41's `readOnly` fields become the canonical output definition
+
+#### Cons
+
+- Structured `readOnly` fields (arrays, nested objects) cannot serve as CEL
+  output references. The declarative-api's CEL engine resolves
+  `${resource.fieldName}` as a flat key lookup; array indexing
+  (`${container.endpoints[0].address}`) is not supported. This makes
+  `endpoints[]` and similar structured fields unusable as CEL cross-provider
+  references without a CEL parser change.
+- The `readOnly` JSON Schema marker conflates two different semantics: "do not
+  let users set this field" (input validation) and "this is a cross-provider
+  output" (CEL contract). These are independent concerns.
+- Discovering CEL-referenceable output fields requires scanning and parsing the
+  spec schema rather than reading a dedicated flat field.
+- Output fields like `endpoint` and `internal_dns` (for the container service
+  type) are derived by the provider and have no direct 1:1 `readOnly` spec
+  field. They cannot be represented under this alternative without adding them
+  to the spec solely to mark them `readOnly`.
+
+#### Status
+
+Rejected
+
+#### Rationale
+
+CEL resolution requires flat scalar keys. Structured `readOnly` fields (e.g.
+`endpoints[]`) cannot satisfy this, and provider-derived outputs (e.g.
+`endpoint`, `internal_dns`) have no `readOnly` spec field to mark. The separate
+`outputs` field is therefore required.
 
 ## Infrastructure Needed
 
