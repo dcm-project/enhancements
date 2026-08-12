@@ -419,20 +419,20 @@ ServiceTypeOutputs:
 outputs:
   type: object
   description: >
-    Key-value pairs of captured outputs stored as typed JSONB. Keys match
-    those declared in the service type's output definition. Values preserve
-    their native JSON types from the CloudEvent status payload (strings,
-    integers, booleans).
+    Key-value pairs of captured outputs stored as typed JSONB. Keys match those
+    declared in the service type's output definition. Values preserve their
+    native JSON types from the CloudEvent status payload (strings, integers,
+    booleans).
   additionalProperties: true
 ```
 
 **Instance Repository Operations (additions to existing repository):**
 
-| Operation     | Input                    | Output                               | Description                                        |
-| ------------- | ------------------------ | ------------------------------------ | -------------------------------------------------- |
-| UpdateOutputs | instance_id, outputs map | error                                | Merge outputs into the instance row's outputs column |
-| GetOutputs    | instance_id              | outputs map, error                   | Retrieve outputs for a single resource             |
-| GetOutputsBatch | instance_id list       | map of instance_id to outputs, error | Retrieve outputs for multiple resources            |
+| Operation       | Input                    | Output                               | Description                                          |
+| --------------- | ------------------------ | ------------------------------------ | ---------------------------------------------------- |
+| UpdateOutputs   | instance_id, outputs map | error                                | Merge outputs into the instance row's outputs column |
+| GetOutputs      | instance_id              | outputs map, error                   | Retrieve outputs for a single resource               |
+| GetOutputsBatch | instance_id list         | map of instance_id to outputs, error | Retrieve outputs for multiple resources              |
 
 ### API Changes
 
