@@ -40,18 +40,19 @@ see-also:
    (preserve existing keys, update provided keys) or replace semantics
    (overwrite the entire map on each status event)?
    - **Proposed:** Merge. The Upsert operation merges incoming keys into the
-     stored outputs map — new keys are added, existing keys are updated, keys
+     stored outputs column; new keys are added, existing keys are updated, keys
      absent from the payload are preserved. A status event with no `outputs`
-     field is a no-op (no overwrite with empty). Explicit cleanup happens via
-     CASCADE DELETE on instance removal.
+     field is a no-op (no overwrite with empty). Explicit cleanup happens
+     automatically when the instance row is deleted.
 
 ## Summary
 
 This enhancement adds the output data layer for cross-service provider metadata
 sharing: a standard `outputs` map in service provider CloudEvent status
-payloads, persistent storage in an `outputs` table (typed JSONB), output
-definitions on the service type (consistent with how input schemas are already
-defined), and CEL reference validation at authoring time.
+payloads, persistent storage in an `outputs` column on the
+`service_type_instances` table (typed JSONB), output definitions on the service
+type (consistent with how input schemas are already defined), and CEL reference
+validation at authoring time.
 
 ## Motivation
 
@@ -78,8 +79,8 @@ DCM currently cannot enable this because:
 ### Goals
 
 1. **Output Publishing** - Read runtime outputs from a standard `outputs` map in
-   service provider CloudEvent status payloads. Store outputs persistently in
-   the `outputs` table as typed JSONB.
+   service provider CloudEvent status payloads. Store outputs persistently in an
+   `outputs` column on the `service_type_instances` table as typed JSONB.
 
 2. **Output Definition on Service Types** - Extend the service type definition
    with an `outputs` spec that declares which output fields a service type
@@ -129,8 +130,9 @@ DCM currently cannot enable this because:
    events per the
    [sp-resource-status-reader](/enhancements/sp-resource-status-reader/sp-resource-status-reader.md)
    enhancement — extracts the `outputs` map and stores it in the `outputs`
-   table. Capture happens for every provisioned resource, regardless of whether
-   outputs are consumed downstream.
+   column of the resource's `service_type_instances` row. Capture happens for
+   every provisioned resource, regardless of whether outputs are consumed
+   downstream.
 
 3. **CEL Reference Validation (Authoring Time):** When a catalog item is
    created, DCM validates all CEL output references (`${resource.outputName}`)
@@ -138,9 +140,10 @@ DCM currently cannot enable this because:
    the service type definitions, so no cross-domain call is needed for
    validation.
 
-4. **Stored Outputs for CEL Resolution:** The `outputs` table provides the data
-   store that the declarative-api's two-phase CEL evaluation reads from when
-   resolving output references like `${ordersDb.connection_string}`.
+4. **Stored Outputs for CEL Resolution:** The `outputs` column on
+   `service_type_instances` provides the data store that the declarative-api's
+   two-phase CEL evaluation reads from when resolving output references like
+   `${ordersDb.connection_string}`.
 
 **MVP delivers independently:**
 
@@ -160,7 +163,6 @@ DCM currently cannot enable this because:
 - Service providers add an `outputs` map to their CloudEvent status payloads
 - The StatusConsumer's message processing pipeline can be extended to extract
   and store outputs from status events
-- The `outputs` table can be added to the existing PostgreSQL database
 
 ### User Stories
 
@@ -184,8 +186,8 @@ The `database` service type defines output fields like `connection_string`,
 catalog item and the resource reaches `Running` status, the service provider
 publishes a CloudEvent status event that includes the `outputs` map. The
 StatusConsumer processes this event and stores the outputs in the `outputs`
-table. No per-resource output declaration is needed — the outputs are defined by
-the service type.
+column of the instance row. No per-resource output declaration is needed, the
+outputs are defined by the service type.
 
 #### Story 2: CEL Reference Validation at Authoring Time (MVP)
 
@@ -306,7 +308,7 @@ declarative-api enhancements.
 - Dependency graph must be acyclic
 
 **Rehydration:** Follows the same provisioning path as initial creation. Old
-outputs are cleaned up via CASCADE DELETE when old resource instances are
+outputs are cleaned up automatically when old resource instance rows are
 removed.
 
 ### Risks and Mitigations
@@ -314,7 +316,7 @@ removed.
 | Risk                                                     | Mitigation                                                                                                                                                       |
 | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Service providers must extend CloudEvent status payloads | Additive, non-breaking. Roll out incrementally.                                                                                                                  |
-| Outputs table growth                                     | CASCADE DELETE on instance deletion. Future phase adds TTL-based cleanup.                                                                                        |
+| Outputs column growth                                    | Outputs are deleted automatically when the instance row is deleted. Future phase adds TTL-based cleanup if needed.                                               |
 | CEL reference errors in catalog items                    | Validation at creation time catches errors before provisioning.                                                                                                  |
 | End-to-end flow requires declarative-api orchestration   | MVP delivers standalone value: output capture and CEL validation.                                                                                                |
 | `readOnly` spec fields and `outputs` definition diverge  | spec.yaml is the source of truth; output definition keys are flat scalars derived from or alongside `readOnly` fields. Document convention enforces consistency. |
@@ -338,7 +340,6 @@ sequenceDiagram
     participant SP as Service Provider
     participant MS as Messaging System
     participant SC as SP Resource Manager<br/>(StatusConsumer)
-    participant OR as Outputs Repository
     participant DB as PostgreSQL
 
     Note over SP: Instance state changes<br/>(e.g. PROVISIONING → RUNNING)
@@ -350,13 +351,12 @@ sequenceDiagram
     SC->>SC: Parse CloudEvent envelope
     SC->>SC: Extract instance_id,<br/>deserialize status payload
 
-    SC->>DB: UPDATE service_type_instances<br/>SET status='RUNNING'<br/>WHERE instance_id={instance_id}
+    SC->>DB: UPDATE service_type_instances<br/>SET status='RUNNING'<br/>WHERE id={instance_id}
     DB-->>SC: OK
 
     alt outputs map present in payload
-        SC->>OR: Upsert(instance_id, outputs)
-        OR->>DB: INSERT INTO outputs
-        OR-->>SC: Success
+        SC->>DB: UPDATE service_type_instances<br/>SET outputs=outputs || {outputs map}<br/>WHERE id={instance_id}
+        DB-->>SC: OK
     end
 
     Note over SC: Continue with OnResourceRunning<br/>notification to Placement
@@ -413,40 +413,26 @@ ServiceTypeOutputs:
         description: Human-readable description of the output field
 ```
 
-**Stored Outputs (record in `outputs` table):**
+**Stored Outputs (column on `service_type_instances`):**
 
 ```yaml
-StoredOutputs:
+outputs:
   type: object
-  required: [instance_id, outputs]
-  properties:
-    instance_id:
-      type: string
-      description: References service_type_instances.id
-    outputs:
-      type: object
-      description: >
-        Key-value pairs of captured outputs stored as typed JSONB. Keys match
-        those declared in the service type's output definition. Values preserve
-        their native JSON types from the CloudEvent status payload (strings,
-        integers, booleans).
-      additionalProperties: true
-    created_at:
-      type: string
-      format: date-time
-    updated_at:
-      type: string
-      format: date-time
+  description: >
+    Key-value pairs of captured outputs stored as typed JSONB. Keys match
+    those declared in the service type's output definition. Values preserve
+    their native JSON types from the CloudEvent status payload (strings,
+    integers, booleans).
+  additionalProperties: true
 ```
 
-**Outputs Repository Operations:**
+**Instance Repository Operations (additions to existing repository):**
 
-| Operation | Input                    | Output                               | Description                             |
-| --------- | ------------------------ | ------------------------------------ | --------------------------------------- |
-| Upsert    | instance_id, outputs map | error                                | Insert or update outputs for a resource |
-| Get       | instance_id              | outputs map, error                   | Retrieve outputs for a single resource  |
-| GetBatch  | instance_id list         | map of instance_id to outputs, error | Retrieve outputs for multiple resources |
-| Delete    | instance_id              | error                                | Remove outputs for a resource           |
+| Operation     | Input                    | Output                               | Description                                        |
+| ------------- | ------------------------ | ------------------------------------ | -------------------------------------------------- |
+| UpdateOutputs | instance_id, outputs map | error                                | Merge outputs into the instance row's outputs column |
+| GetOutputs    | instance_id              | outputs map, error                   | Retrieve outputs for a single resource             |
+| GetOutputsBatch | instance_id list       | map of instance_id to outputs, error | Retrieve outputs for multiple resources            |
 
 ### API Changes
 
@@ -526,10 +512,11 @@ ServiceType:
 
 ### Upgrade / Downgrade Strategy
 
-**Upgrade:** The `outputs` table is created alongside existing domain tables.
-Providers add `outputs` to CloudEvent status payloads incrementally.
+**Upgrade:** The `outputs` column is added to `service_type_instances` via GORM
+AutoMigrate alongside the existing domain table migrations. Providers add
+`outputs` to CloudEvent status payloads incrementally.
 
-**Downgrade:** Deploy the previous control-plane image. The `outputs` table
+**Downgrade:** Deploy the previous control-plane image. The `outputs` column
 remains inert; the `outputs` field in CloudEvent payloads and on service type
 definitions is ignored by older versions.
 
@@ -695,6 +682,41 @@ CEL resolution requires flat scalar keys. Structured `readOnly` fields (e.g.
 `endpoints[]`) cannot satisfy this, and provider-derived outputs (e.g.
 `endpoint`, `internal_dns`) have no `readOnly` spec field to mark. The separate
 `outputs` field is therefore required.
+
+### Alternative 5: Separate `outputs` Table
+
+#### Description
+
+Store outputs in a dedicated `outputs` table with a foreign key referencing
+`service_type_instances.id` and CASCADE DELETE.
+
+#### Pros
+
+- Independent schema evolution: the outputs table can grow columns (e.g. TTL,
+  version) without touching the instance table
+- Explicit foreign key makes the relationship visible in the schema
+
+#### Cons
+
+- Adds a new table, new repository (~200 LOC), and a JOIN or second query
+  everywhere instance outputs are needed
+- Diverges from the established DCM pattern: the `spec` column on
+  `service_type_instances` already stores flexible input as JSONB using the same
+  GORM serialization approach
+- CASCADE DELETE is redundant. The column approach achieves the same cleanup
+  automatically as part of the row deletion
+- GORM AutoMigrate cannot handle new tables without explicit registration;
+  column additions to an existing model are handled automatically
+
+#### Status
+
+Rejected
+
+#### Rationale
+
+The `outputs` column on `service_type_instances` is simpler, follows the
+existing `spec` JSONB pattern, requires no new repository, and cleans up
+automatically.
 
 ## Infrastructure Needed
 
