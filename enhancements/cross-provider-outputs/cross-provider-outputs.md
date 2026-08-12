@@ -67,9 +67,9 @@ DCM currently cannot enable this because:
    `outputs` field. Runtime data exists within provider-specific response
    structures but is not surfaced in a provider-agnostic way.
 
-2. **No Output Persistence** - There is no storage mechanism for runtime
-   outputs. Even if a provider published outputs, DCM has nowhere to store them
-   for downstream consumption.
+2. **No Output Persistence** - The `service_type_instances table` captures `id`,
+   `status` and `status_message` but not the runtime output data; outputs are
+   not retained for downstream consumption.
 
 3. **No Output Definition on Service Types** - Service types define their input
    schema (the spec fields accepted for provisioning) but not their output
