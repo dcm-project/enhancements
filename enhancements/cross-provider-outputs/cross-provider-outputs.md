@@ -39,11 +39,11 @@ see-also:
 2. **Output Capture Semantics:** Should output capture use merge semantics
    (preserve existing keys, update provided keys) or replace semantics
    (overwrite the entire map on each status event)?
-   - **Proposed:** Merge. The Upsert operation merges incoming keys into the
-     stored outputs column; new keys are added, existing keys are updated, keys
-     absent from the payload are preserved. A status event with no `outputs`
-     field is a no-op (no overwrite with empty). Explicit cleanup happens
-     automatically when the instance row is deleted.
+   - **Proposed:** Merge. The UpdateOutputs operation merges incoming keys into
+     the stored outputs column; new keys are added, existing keys are updated,
+     keys absent from the payload are preserved. A status event with no
+     `outputs` field is a no-op (no overwrite with empty). Explicit cleanup
+     happens automatically when the instance row is deleted.
 
 ## Summary
 
@@ -216,8 +216,9 @@ resources:
 
 DCM validates at creation time that `ordersDb` exists, is in `app`'s
 `requires_resources`, and that the `database` service type defines
-`connection_string` in its output spec. Invalid references are rejected with
-clear errors.
+`connection_string` in its output definition (the structured
+`ServiceTypeOutputs` schema of named fields — not the opaque output _values_
+captured at runtime). Invalid references are rejected with clear errors.
 
 #### Story 3: Database + Application (Target State)
 
@@ -400,7 +401,13 @@ ServiceTypeOutputs:
     Declares the output fields a service type produces. Defined centrally on the
     service type, alongside the input schema. Keys are output field names;
     values define the type and description of each output. Keys must be flat
-    scalars; CEL resolves output references as simple key lookups.
+    scalars; CEL resolves output references as simple key lookups. This is the
+    output *definition* — a structured, named-field schema. It is returned as
+    the `outputs` field on the Service Type Response (see API Changes) and is
+    the schema that authoring-time CEL reference validation checks against. It
+    is distinct from the captured output *values* (the `outputs` column on
+    `service_type_instances` and the `outputs` map in the CloudEvent status
+    payload), which are opaque key/value pairs.
   additionalProperties:
     type: object
     properties:
@@ -492,11 +499,24 @@ ServiceType:
     outputs:
       type: object
       description: >
-        Declares output fields this service type produces for CEL cross-provider
-        references. Keys are flat scalar field names; values define type and
-        description. Any provider implementing this service type is expected to
-        populate these fields in its CloudEvent status payload.
-      additionalProperties: true
+        The service type's output definition (see ServiceTypeOutputs). Declares
+        the output fields this service type produces for CEL cross-provider
+        references. Keys are flat scalar field names; each value defines that
+        field's type and description. Any provider implementing this service
+        type is expected to populate these fields in its CloudEvent status
+        payload. This is the output *definition* (structured, named fields) —
+        distinct from the captured output *values* stored on an instance and
+        published in status events, which are opaque key/value pairs.
+      additionalProperties:
+        type: object
+        properties:
+          type:
+            type: string
+            description:
+              JSON type of the output value (string, integer, array, object)
+          description:
+            type: string
+            description: Human-readable description of the output field
     path:
       type: string
       readOnly: true
