@@ -232,6 +232,19 @@ database connection string.
 
 ### Implementation Details/Notes/Constraints
 
+**Three meanings of "outputs":**
+
+"Outputs" refers to three distinct things: the output _definition_ (structured,
+authored on the service type) and the output _values_ it produces at runtime
+(opaque, captured then resolved). CEL validation checks references against the
+definition; CEL resolution reads the values.
+
+| Term                        | What it is                                                           | Shape                    | Where it lives                                                         |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------- |
+| Output **definition**       | Fields a service type declares it produces (name, type, description) | Structured, named fields | `ServiceTypeOutputs`; the `outputs` field on the Service Type Response |
+| Stored output **values**    | Runtime values captured for an instance                              | Opaque JSONB             | `outputs` column on `service_type_instances`                           |
+| Published output **values** | Runtime values a provider emits on status change                     | Opaque                   | `outputs` map in the CloudEvent status payload (NATS)                  |
+
 **Service Type Output Contract:**
 
 Output fields are defined as an `outputs:` key in the existing
