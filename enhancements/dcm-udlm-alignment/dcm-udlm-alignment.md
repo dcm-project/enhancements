@@ -393,6 +393,7 @@ format if UDLM integration introduces issues.
 | Ticket                                                         | Summary                                                        | UDLM Mention         |
 | -------------------------------------------------------------- | -------------------------------------------------------------- | -------------------- |
 | [FLPATH-4436](https://redhat.atlassian.net/browse/FLPATH-4436) | Align DCM types with UDLM (epic)                               | Yes                  |
+| [FLPATH-4793](https://redhat.atlassian.net/browse/FLPATH-4793) | Enhancement: Align DCM with UDLM at the SP boundary            | Yes (this document)  |
 | [FLPATH-4491](https://redhat.atlassian.net/browse/FLPATH-4491) | Finalize UDLM (blocker, status: New)                           | Yes                  |
 | [FLPATH-4654](https://redhat.atlassian.net/browse/FLPATH-4654) | Test alignment of DCM types with UDLM                          | Yes                  |
 | [FLPATH-4298](https://redhat.atlassian.net/browse/FLPATH-4298) | Define output parameters for service types                     | **No**               |
