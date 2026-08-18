@@ -262,25 +262,25 @@ The biggest gap and the recommended starting point.
 
 Current status payload:
 
-```json
-{
-  "id": "string",
-  "status": "string",
-  "message": "string"
+```go
+type VmStatus struct {
+    Id      string `json:"id"`
+    Status  string `json:"status"`
+    Message string `json:"message"`
 }
 ```
 
 Target (aligned with UDLM `outputs`):
 
-```json
-{
-  "ip_addresses": ["string"],
-  "primary_ip": "string",
-  "hostname": "string",
-  "mac_addresses": ["string"],
-  "provider_handle": "string",
-  "observed_run_state": "string",
-  "target_segment": "string"
+```go
+type ComputeVMOutputs struct {
+    IPAddresses      []string `json:"ip_addresses"`
+    PrimaryIP        string   `json:"primary_ip"`
+    Hostname         string   `json:"hostname"`
+    MACAddresses     []string `json:"mac_addresses"`
+    ProviderHandle   string   `json:"provider_handle"`
+    ObservedRunState string   `json:"observed_run_state"`
+    TargetSegment    string   `json:"target_segment"`
 }
 ```
 
@@ -301,26 +301,27 @@ that both the control plane and every SP import:
 - **Each SP** imports the SDK to implement the `VMServiceProvider` interface
   (`Naturalize`, `Realize`, `Denaturalize`) using the shared types.
 
-The shared SDK repository contains:
+```
+dcm-project/service-provider-api/        <-- shared, both control plane and SPs import
+  pkg/types/compute_vm.go                <-- UDLM Compute.VM as Go struct
+  pkg/types/compute_vm_outputs.go        <-- UDLM outputs as Go struct
+  pkg/contract/interfaces.go             <-- VMServiceProvider interface
+  pkg/helpers/units.go                   <-- GB<->Gi, MB<->Mi
 
-- UDLM type schemas (`Compute.VM`, `Compute.VM` outputs, `Compute.Container`,
-  etc.)
-- SP interface contract (naturalize, realize, denaturalize)
-- Common helpers (unit conversion, validation)
-- Standard error schema
-
-Each SP repository imports the shared SDK and provides provider-specific
-naturalization and denaturalization logic.
+dcm-project/kubevirt-sp/                 <-- per-SP, imports shared SDK
+  pkg/naturalize.go                      <-- ComputeVM -> KubeVirt VirtualMachine CR
+  pkg/denaturalize.go                    <-- VMI status -> ComputeVMOutputs
+```
 
 Both sides of the boundary speak the same types. A new SP joins by importing the
 SDK and implementing the interface.
 
-The SDK also defines a standard error schema:
+The SDK also defines a standard error type:
 
-```json
-{
-  "code": "NATURALIZE_FAILED | REALIZE_FAILED | DENATURALIZE_FAILED",
-  "message": "string"
+```go
+type SPError struct {
+    Code    string  // "NATURALIZE_FAILED", "REALIZE_FAILED", "DENATURALIZE_FAILED"
+    Message string
 }
 ```
 
