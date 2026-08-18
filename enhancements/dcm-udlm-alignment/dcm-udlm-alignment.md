@@ -13,9 +13,38 @@ see-also:
   - "/enhancements/environment-agent"
   - "/enhancements/sp-resource-manager"
   - "/enhancements/service-type-definitions"
+  - "/enhancements/udlm-dcm-split/udlm-dcm-split.md"
+  - "/enhancements/cross-provider-outputs/cross-provider-outputs.md"
 ---
 
 # Aligning DCM with UDLM
+
+## Open Questions
+
+1. FLPATH-4491 (Finalize UDLM) is blocked. Should work proceed against UDLM
+   v1.5.3 at risk, or wait for finalization?
+2. Should the shared SDK live in `dcm-project/service-provider-api` or a new
+   repo?
+3. How should `storage.disks[]` -> `layout_ref` + `Storage.Layout` structural
+   transform be handled? Needs a code spike.
+
+### Related Jira Tickets
+
+| Ticket                                                         | Summary                                                        | UDLM Mention         |
+| -------------------------------------------------------------- | -------------------------------------------------------------- | -------------------- |
+| [FLPATH-4436](https://redhat.atlassian.net/browse/FLPATH-4436) | Align DCM types with UDLM (epic)                               | Yes                  |
+| [FLPATH-4793](https://redhat.atlassian.net/browse/FLPATH-4793) | Enhancement: Align DCM with UDLM at the SP boundary            | Yes (this document)  |
+| [FLPATH-4491](https://redhat.atlassian.net/browse/FLPATH-4491) | Finalize UDLM (blocker, status: New)                           | Yes                  |
+| [FLPATH-4654](https://redhat.atlassian.net/browse/FLPATH-4654) | Test alignment of DCM types with UDLM                          | Yes                  |
+| [FLPATH-4298](https://redhat.atlassian.net/browse/FLPATH-4298) | Define output parameters for service types                     | **No**               |
+| [FLPATH-4748](https://redhat.atlassian.net/browse/FLPATH-4748) | Define output definitions on service types with CEL validation | **No**               |
+| [FLPATH-4749](https://redhat.atlassian.net/browse/FLPATH-4749) | Add outputs query endpoint for service type instances          | **No**               |
+| [FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487) | Implement Environment Agent usage in DCM control plane         | No (transport layer) |
+| [FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767) | Remove KubeVirt SP HTTP APIs in favor of agent-based (NATS)    | No (transport layer) |
+
+> **Risk:** FLPATH-4298/4748/4749 are building the outputs subsystem without
+> referencing UDLM. This risks locking in a DCM-specific format that will need
+> rework.
 
 ## Summary
 
@@ -402,6 +431,10 @@ Not applicable at this stage -- DCM is not in production. The per-SP
 `payload_format` flag allows incremental migration. An SP can revert to `"dcm"`
 format if UDLM integration introduces issues.
 
+## Implementation History
+
+N/A — no implementation yet.
+
 ## Drawbacks
 
 - Maintaining a translation layer adds complexity during the transition period
@@ -409,33 +442,6 @@ format if UDLM integration introduces issues.
   developers working across the boundary
 - The SDK becomes a shared dependency that all SPs and the control plane must
   keep in sync
-
-## Open Questions
-
-1. FLPATH-4491 (Finalize UDLM) is blocked. Should work proceed against UDLM
-   v1.5.3 at risk, or wait for finalization?
-2. Should the shared SDK live in `dcm-project/service-provider-api` or a new
-   repo?
-3. How should `storage.disks[]` -> `layout_ref` + `Storage.Layout` structural
-   transform be handled? Needs a code spike.
-
-### Related Jira Tickets
-
-| Ticket                                                         | Summary                                                        | UDLM Mention         |
-| -------------------------------------------------------------- | -------------------------------------------------------------- | -------------------- |
-| [FLPATH-4436](https://redhat.atlassian.net/browse/FLPATH-4436) | Align DCM types with UDLM (epic)                               | Yes                  |
-| [FLPATH-4793](https://redhat.atlassian.net/browse/FLPATH-4793) | Enhancement: Align DCM with UDLM at the SP boundary            | Yes (this document)  |
-| [FLPATH-4491](https://redhat.atlassian.net/browse/FLPATH-4491) | Finalize UDLM (blocker, status: New)                           | Yes                  |
-| [FLPATH-4654](https://redhat.atlassian.net/browse/FLPATH-4654) | Test alignment of DCM types with UDLM                          | Yes                  |
-| [FLPATH-4298](https://redhat.atlassian.net/browse/FLPATH-4298) | Define output parameters for service types                     | **No**               |
-| [FLPATH-4748](https://redhat.atlassian.net/browse/FLPATH-4748) | Define output definitions on service types with CEL validation | **No**               |
-| [FLPATH-4749](https://redhat.atlassian.net/browse/FLPATH-4749) | Add outputs query endpoint for service type instances          | **No**               |
-| [FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487) | Implement Environment Agent usage in DCM control plane         | No (transport layer) |
-| [FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767) | Remove KubeVirt SP HTTP APIs in favor of agent-based (NATS)    | No (transport layer) |
-
-> **Risk:** FLPATH-4298/4748/4749 are building the outputs subsystem without
-> referencing UDLM. This risks locking in a DCM-specific format that will need
-> rework.
 
 ## Alternatives
 
