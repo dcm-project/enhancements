@@ -225,31 +225,62 @@ It converts DCM `map[string]any` to UDLM typed structs before sending to SPs.
 | _(not in DCM)_           | `instance_size`                            | Alternative to explicit cpu+memory (`oneOf`)                    |
 | `provider_hints`         | Provider Class optional fields             | During transition, pass as sidecar alongside UDLM payload       |
 
+**How provider-specific required fields are resolved**
+
+UDLM defines the portable fields -- what the user wants (cpu, memory, guest_os).
+But each provider needs additional platform-specific data to create a functional
+resource. For example, KubeVirt requires a `namespace`; VMware requires a
+`datacenter`, `cluster`, and `datastore`. These fields are not in UDLM's
+`Compute.VM` because they are not portable across providers.
+
+The provider-specific data comes from three sources, merged in priority order
+(later wins):
+
+| Priority | Source                  | Example (KubeVirt)                                | Example (VMware)                             |
+| -------- | ----------------------- | ------------------------------------------------- | -------------------------------------------- |
+| 1        | SP environment config   | `namespace: production-vms`                       | `datacenter: DC-RDU2, cluster: Prod`         |
+| 2        | CatalogItem defaults    | may override SP defaults                          | may override SP defaults                     |
+| 3        | User request            | `cpu: 4, memory: 8Gi`                             | `cpu: 4, memory: 8Gi`                        |
+| 4        | `provider_hints` (user) | `namespace: my-special-ns` (overrides SP default) | `folder: /vm/testing` (overrides SP default) |
+
+This means a CatalogItem can be fully portable -- just `cpu`, `memory`,
+`guest_os` -- and Placement decides which SP handles it. The SP fills in
+platform-specific required fields from its own environment config.
+Naturalization is the step in each SP that combines UDLM portable fields with
+provider-specific context to produce a functional provider-native resource
+(e.g., a KubeVirt `VirtualMachine` CR or a vSphere VM spec).
+
+In UDLM terms, provider-specific fields are declared in **Provider Classes**
+(e.g., `Compute.VM.OCPVirt` for KubeVirt, `Compute.VM.VSphere` for VMware).
+During the transition, these fields travel as `provider_hints` alongside the
+UDLM payload. Long-term, they are formally declared in the Provider Class schema
+so they are typed and validated.
+
 **Layer 2: Outputs contract (realized payload)**
 
 The biggest gap and the recommended starting point.
 
 Current status payload:
 
-```go
-type VmStatus struct {
-    Id      string `json:"id"`
-    Status  string `json:"status"`
-    Message string `json:"message"`
+```json
+{
+  "id": "string",
+  "status": "string",
+  "message": "string"
 }
 ```
 
 Target (aligned with UDLM `outputs`):
 
-```go
-type ComputeVMOutputs struct {
-    IPAddresses      []string `json:"ip_addresses"`
-    PrimaryIP        string   `json:"primary_ip"`
-    Hostname         string   `json:"hostname"`
-    MACAddresses     []string `json:"mac_addresses"`
-    ProviderHandle   string   `json:"provider_handle"`
-    ObservedRunState string   `json:"observed_run_state"`
-    TargetSegment    string   `json:"target_segment"`
+```json
+{
+  "ip_addresses": ["string"],
+  "primary_ip": "string",
+  "hostname": "string",
+  "mac_addresses": ["string"],
+  "provider_handle": "string",
+  "observed_run_state": "string",
+  "target_segment": "string"
 }
 ```
 
@@ -270,27 +301,26 @@ that both the control plane and every SP import:
 - **Each SP** imports the SDK to implement the `VMServiceProvider` interface
   (`Naturalize`, `Realize`, `Denaturalize`) using the shared types.
 
-```
-dcm-project/service-provider-api/        <-- shared, both control plane and SPs import
-  pkg/types/compute_vm.go                <-- UDLM Compute.VM as Go struct
-  pkg/types/compute_vm_outputs.go        <-- UDLM outputs as Go struct
-  pkg/contract/interfaces.go             <-- VMServiceProvider interface
-  pkg/helpers/units.go                   <-- GB<->Gi, MB<->Mi
+The shared SDK repository contains:
 
-dcm-project/kubevirt-sp/                 <-- per-SP, imports shared SDK
-  pkg/naturalize.go                      <-- ComputeVM -> KubeVirt VirtualMachine CR
-  pkg/denaturalize.go                    <-- VMI status -> ComputeVMOutputs
-```
+- UDLM type schemas (`Compute.VM`, `Compute.VM` outputs, `Compute.Container`,
+  etc.)
+- SP interface contract (naturalize, realize, denaturalize)
+- Common helpers (unit conversion, validation)
+- Standard error schema
+
+Each SP repository imports the shared SDK and provides provider-specific
+naturalization and denaturalization logic.
 
 Both sides of the boundary speak the same types. A new SP joins by importing the
 SDK and implementing the interface.
 
-The SDK also defines a standard error type:
+The SDK also defines a standard error schema:
 
-```go
-type SPError struct {
-    Code    string  // "NATURALIZE_FAILED", "REALIZE_FAILED", "DENATURALIZE_FAILED"
-    Message string
+```json
+{
+  "code": "NATURALIZE_FAILED | REALIZE_FAILED | DENATURALIZE_FAILED",
+  "message": "string"
 }
 ```
 
