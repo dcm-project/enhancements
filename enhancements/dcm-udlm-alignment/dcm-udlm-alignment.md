@@ -21,26 +21,28 @@ see-also:
 
 ## Open Questions
 
-1. FLPATH-4491 (Finalize UDLM) is blocked. Should work proceed against UDLM
-   v1.5.3 at risk, or wait for finalization?
+1. ~~FLPATH-4491 (Finalize UDLM) is blocked. Should work proceed against UDLM
+   v1.5.3 at risk, or wait for finalization?~~ **Resolved:** Proceed now. Pin
+   the SDK to the current UDLM release (v1.5.3+); treat future schema deltas as
+   a versioned-dependency bump.
 2. Should the shared SDK live in `dcm-project/service-provider-api` or a new
    repo?
 3. How should `storage.disks[]` -> `layout_ref` + `Storage.Layout` structural
-   transform be handled? Needs a code spike.
+   transform be handled? Needs a code spike (v1: VM / KubeVirt path only).
 
 ### Related Jira Tickets
 
-| Ticket                                                         | Summary                                                        | UDLM Mention         |
-| -------------------------------------------------------------- | -------------------------------------------------------------- | -------------------- |
-| [FLPATH-4436](https://redhat.atlassian.net/browse/FLPATH-4436) | Align DCM types with UDLM (epic)                               | Yes                  |
-| [FLPATH-4793](https://redhat.atlassian.net/browse/FLPATH-4793) | Enhancement: Align DCM with UDLM at the SP boundary            | Yes (this document)  |
-| [FLPATH-4491](https://redhat.atlassian.net/browse/FLPATH-4491) | Finalize UDLM (blocker, status: New)                           | Yes                  |
-| [FLPATH-4654](https://redhat.atlassian.net/browse/FLPATH-4654) | Test alignment of DCM types with UDLM                          | Yes                  |
-| [FLPATH-4298](https://redhat.atlassian.net/browse/FLPATH-4298) | Define output parameters for service types                     | **No**               |
-| [FLPATH-4748](https://redhat.atlassian.net/browse/FLPATH-4748) | Define output definitions on service types with CEL validation | **No**               |
-| [FLPATH-4749](https://redhat.atlassian.net/browse/FLPATH-4749) | Add outputs query endpoint for service type instances          | **No**               |
-| [FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487) | Implement Environment Agent usage in DCM control plane         | No (transport layer) |
-| [FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767) | Remove KubeVirt SP HTTP APIs in favor of agent-based (NATS)    | No (transport layer) |
+| Ticket                                                         | Summary                                                        | UDLM Mention                      |
+| -------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------- |
+| [FLPATH-4436](https://redhat.atlassian.net/browse/FLPATH-4436) | Align DCM types with UDLM (epic)                               | Yes                               |
+| [FLPATH-4793](https://redhat.atlassian.net/browse/FLPATH-4793) | Enhancement: Align DCM with UDLM at the SP boundary            | Yes (this document)               |
+| [FLPATH-4491](https://redhat.atlassian.net/browse/FLPATH-4491) | Finalize UDLM (blocker, status: New)                           | Yes                               |
+| [FLPATH-4654](https://redhat.atlassian.net/browse/FLPATH-4654) | Test alignment of DCM types with UDLM                          | Yes                               |
+| [FLPATH-4298](https://redhat.atlassian.net/browse/FLPATH-4298) | Define output parameters for service types                     | **No**                            |
+| [FLPATH-4748](https://redhat.atlassian.net/browse/FLPATH-4748) | Define output definitions on service types with CEL validation | **No**                            |
+| [FLPATH-4749](https://redhat.atlassian.net/browse/FLPATH-4749) | Add outputs query endpoint for service type instances          | **No**                            |
+| [FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487) | Implement Environment Agent usage in DCM control plane         | No (transport layer) — **Closed** |
+| [FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767) | Remove KubeVirt SP HTTP APIs in favor of agent-based (NATS)    | No (transport layer)              |
 
 > **Risk:** FLPATH-4298/4748/4749 are building the outputs subsystem without
 > referencing UDLM. This risks locking in a DCM-specific format that will need
@@ -50,13 +52,31 @@ see-also:
 
 Align DCM (Data Center Management) Service Provider boundary with UDLM
 (Universal Data Lifecycle Model) so that UDLM becomes the common language
-between all Service Providers (SPs) and the DCM control plane. This means
-request payloads sent to SPs follow UDLM structure (`Compute.VM`,
-`Compute.Container`, etc.) and realized payloads returned from SPs follow UDLM's
-`outputs` schema (IPs, hostnames, provider handles). A shared SDK provides UDLM
-types and the SP interface contract, enabling new SPs to integrate by
-implementing naturalize/denaturalize (translate between UDLM and provider-native
-formats) against UDLM types without learning DCM's internal schema.
+between Service Providers (SPs) and the DCM control plane.
+
+**v1 scope:** `Compute.VM` (UDLM) / `service_type: vm` (DCM) / **KubeVirt SP**
+only. This delivers request translation, UDLM-aligned outputs, and a shared SDK
+interface as a reference pattern. Other service types and SPs (OSAC, VMware,
+container, cluster) follow the same architecture in later phases.
+
+v1 means request payloads sent to KubeVirt SP follow UDLM `Compute.VM`
+structure, and realized payloads follow UDLM `outputs` (IPs, hostnames, provider
+handles). A shared SDK provides UDLM types and the SP interface contract;
+KubeVirt SP implements naturalize/denaturalize as the reference implementation.
+
+### v1 Scope
+
+| Layer                | v1 deliverable                                                    | Out of v1 scope                                                    |
+| -------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| **UDLM type**        | `Compute.VM` only                                                 | `Compute.Container`, `Compute.Cluster`, database, storage, network |
+| **DCM service type** | `service_type: vm` (`servicetypes/vm/spec.yaml`)                  | All other service types                                            |
+| **Service Provider** | **KubeVirt SP** (`kubevirt-sp`) — reference implementation        | OSAC SP, VMware/vSphere SP, other VM backends                      |
+| **Control plane**    | Translator + outputs for `vm` at SPRM dispatch boundary           | Translators for other service types                                |
+| **SDK**              | `Compute.VM` + `ComputeVMOutputs` + `VMServiceProvider` interface | Other UDLM type structs until next phase                           |
+
+There is no separate "VM Service Provider" component. `service_type: vm` is the
+DCM abstraction; KubeVirt SP is one concrete backend that registers against it.
+OSAC SP also registers as `service_type: vm` but is explicitly deferred from v1.
 
 ## Motivation
 
@@ -73,24 +93,38 @@ consumers (CLI, UI, other services) can use without provider-specific parsing.
 
 ### Goals
 
-- Request payloads sent from the control plane to any SP follow UDLM structure
-  (e.g., `Compute.VM`)
-- Realized payloads returned from any SP follow UDLM's `outputs` schema
-- A shared SDK provides UDLM types that both the control plane and every SP
-  import
-- New SPs integrate by importing the SDK and implementing the interface -- no
-  DCM-specific schema knowledge required
-- DCM's internal schemas converge to UDLM over time
+**v1 (this effort):**
+
+- Align `service_type: vm` request payloads to UDLM `Compute.VM` at the SP
+  dispatch boundary (translation layer)
+- Align realized VM outputs to UDLM `Compute.VM` outputs schema
+- Deliver a shared SDK with `Compute.VM` types and `VMServiceProvider` interface
+- Implement naturalize/denaturalize in **KubeVirt SP** as the reference SP
+
+**Long-term (post-v1):**
+
+- Extend the same pattern to other service types and SPs
+- New SPs integrate by importing the SDK and implementing the interface
+- DCM internal schemas (catalog, policy, intent) converge to UDLM over time
 
 ### Non-Goals
 
+**v1:**
+
+- Other service types (`container`, `database`, `cluster`, `storage`, `network`)
+- Other VM backends (OSAC SP, VMware/vSphere SP)
+- Replacing DCM catalog, policy engine, or placement manager with UDLM schemas
+  (Chris's full Option A upstream adoption — target end state, not v1)
+- Defining new UDLM types — this enhancement consumes existing UDLM specs
+
+**General:**
+
 - Replacing DCM's internal catalog system, policy engine, or placement manager
-- Changing the NATS transport layer or Environment Agent architecture -- those
-  are independent efforts
-  ([FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487),
-  [FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767))
-- Defining new UDLM types -- this enhancement consumes existing UDLM
-  specifications
+  in a single step
+- Environment Agent work — **done**
+  ([FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487), Closed).
+  Remaining transport work is SP-side HTTP removal
+  ([FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767))
 
 ## Proposal
 
@@ -104,6 +138,13 @@ comparison):
   migrates independently
 
 **Decision: Option B first, converge to Option A over time.**
+
+**Reviewer feedback (croadfeldt):** Full UDLM adoption upstream — catalog items,
+service categories, intent capture, policy — is the north star and may be less
+total work long term than maintaining a translation layer. Option B at the SP
+boundary is the pragmatic v1 path given blast radius and active developer
+velocity on DCM field names. v1 proves the pattern on `Compute.VM` / KubeVirt
+SP; convergence to Option A across the platform remains the explicit end state.
 
 #### Why Option B -- blast radius analysis
 
@@ -233,9 +274,10 @@ flowchart LR
 the left (OPA, Placement, CatalogItems, PostgreSQL) stays in DCM format.
 Everything to the right (SPs) speaks UDLM via the shared SDK.
 
-#### What Needs to Change -- 4 Layers
+#### What Needs to Change -- 4 Layers (v1: Compute.VM / KubeVirt SP)
 
-> VM used as example. Each layer applies to all service types.
+> v1 implements all four layers for `Compute.VM` / `service_type: vm` / KubeVirt
+> SP only. The layer model applies to other service types in later phases.
 
 **Layer 1: Schema alignment (request payload)**
 
@@ -383,34 +425,44 @@ in, structured outputs out):
 | **UDLM payload in** | _(not planned)_   | Full alignment         |
 
 The Environment Agent
-([FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487)) is a
-transparent relay -- it does not need to know whether the payload is DCM-shaped
-or UDLM-shaped. The transport change (HTTP -> agent+NATS) and payload format
-change (DCM -> UDLM) should remain independent.
+([FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487), **Closed**) is
+a transparent relay -- it does not need to know whether the payload is
+DCM-shaped or UDLM-shaped. The transport foundation is in place; v1 focuses on
+payload format alignment (DCM `vm` spec → UDLM `Compute.VM`) and structured
+outputs. SP-side HTTP removal
+([FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767)) proceeds
+independently.
 
 ### Risks and Mitigations
 
-| Risk                                                         | Impact                                                   | Mitigation                                                    |
-| ------------------------------------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------- |
-| FLPATH-4491 is blocked (UDLM not finalized)                  | Schemas may still change                                 | Pin SDK to UDLM v1.5.3; outputs and SDK structure can proceed |
-| Outputs work (FLPATH-4298/4748/4749) proceeding without UDLM | Locks in a DCM-specific format                           | Add UDLM reference to those tickets immediately               |
-| NATS migration (FLPATH-4487/4767) timing                     | Adds scope if coupled                                    | Treat transport and payload format changes as independent     |
-| Translation layer complexity                                 | Some mappings are structural transforms, not renames     | Spike the VM translator in code first                         |
-| `additionalProperties: false` shift                          | Undocumented fields passed through open schema may break | Audit actual SP payload usage before designing translator     |
-| Translation layer becomes permanent                          | No incentive to remove once working                      | Plan for convergence; the layer is explicitly temporary       |
+| Risk                                                         | Impact                                                   | Mitigation                                                                 |
+| ------------------------------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| FLPATH-4491 is blocked (UDLM not finalized)                  | Schemas may still change                                 | Pin SDK to UDLM v1.5.3; outputs and SDK structure can proceed              |
+| Outputs work (FLPATH-4298/4748/4749) proceeding without UDLM | Locks in a DCM-specific format                           | Add UDLM reference to those tickets immediately                            |
+| NATS migration (FLPATH-4487/4767) timing                     | Adds scope if coupled                                    | FLPATH-4487 Closed; treat 4767 (SP HTTP removal) as independent of UDLM v1 |
+| Translation layer complexity                                 | Some mappings are structural transforms, not renames     | Spike the VM translator in code first                                      |
+| `additionalProperties: false` shift                          | Undocumented fields passed through open schema may break | Audit actual SP payload usage before designing translator                  |
+| Translation layer becomes permanent                          | No incentive to remove once working                      | Plan for convergence; the layer is explicitly temporary                    |
 
 ## Design Details
 
 ### Sequencing
 
-| Phase | Action                                             | Dependency                                                  |
-| ----- | -------------------------------------------------- | ----------------------------------------------------------- |
-| 1     | **Finalize UDLM** (FLPATH-4491)                    | Blocker -- schemas must be stable                           |
-| 2     | **Define outputs contract** aligned with UDLM      | Easiest win; aligns with in-flight FLPATH-4748/4749         |
-| 3     | **Build SP SDK** with UDLM types                   | Gives SPs a target to code against                          |
-| 4     | **Update KubeVirt SP** as reference implementation | First SP to implement naturalize/denaturalize using the SDK |
-| 5     | **Add translation layer** in control plane         | Converts DCM payloads to UDLM before dispatch               |
-| 6     | **Converge DCM schemas** to UDLM                   | Once all SPs are UDLM-native, remove the translation layer  |
+**v1 (Compute.VM / KubeVirt SP):**
+
+| Step | Action                                                                | Notes                                                                              |
+| ---- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 1    | **Define VM outputs contract** aligned with UDLM `Compute.VM` outputs | Builds on cross-provider-outputs (#99); denaturalize plugs in after opaque outputs |
+| 2    | **Build SDK** with `Compute.VM` + `ComputeVMOutputs` types            | Pin to current UDLM release                                                        |
+| 3    | **Update KubeVirt SP** — naturalize/denaturalize                      | Reference implementation for v1                                                    |
+| 4    | **Add VM translation layer** in control plane                         | `service_type: vm` DCM spec → UDLM `Compute.VM` at SPRM boundary                   |
+
+**Post-v1:**
+
+| Phase | Action                                                     | Dependency                                                                         |
+| ----- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 5     | Extend pattern to other service types / SPs                | v1 pattern proven on VM                                                            |
+| 6     | **Converge DCM schemas** to UDLM (catalog, policy, intent) | Chris's Option A upstream; remove translation layer when all paths are UDLM-native |
 
 ### Versioning
 
@@ -476,11 +528,12 @@ Deferred
 #### Rationale
 
 Option A is the target end state but not feasible as a first step given the
-blast radius. Option B provides the migration bridge. Once all SPs are
-UDLM-native and DCM schemas converge, Option A is achieved and the translation
-layer is removed.
+blast radius. Option B provides the migration bridge for v1 (`Compute.VM` /
+KubeVirt SP). Once all SPs are UDLM-native and DCM schemas converge upstream
+(catalog, policy, intent), Option A is achieved and the translation layer is
+removed.
 
 ## Infrastructure Needed
 
 - Shared SDK repository (new or evolve `dcm-project/service-provider-api`)
-- Golden file test fixtures for each ServiceType translation
+- Golden file test fixtures for `Compute.VM` translation (v1 scope)
