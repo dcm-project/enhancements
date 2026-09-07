@@ -213,8 +213,9 @@ sequenceDiagram
 
         PM->>SPRM: DELETE /api/v1/service-type-instances/{old_resource_id}?deferred=true
         activate SPRM
-        SPRM->>SPRM: Record pending cleanup<br/>{old_resource_id, agent_name}
-        SPRM-->>PM: 200 OK (deletion deferred)
+        SPRM->>SPRM: Enroll for deletion<br/>deletion_status: SCHEDULED
+        SPRM->>MS: PUBLISH CloudEvent (best-effort)<br/>type: dcm.request.delete<br/>{old_resource_id, service_type}
+        SPRM-->>PM: 204 No Content
         deactivate SPRM
 
         PM->>DB: Remove old instance record
@@ -285,10 +286,12 @@ sequenceDiagram
    - Once the new resource is created, Placement Manager requests SP Resource
      Manager to delete the old resource using the old InstanceID with the
      `deferred` flag set to `true`
-   - SP Resource Manager immediately records the instance in the cleanup queue
-     for background deletion without publishing to the agent (see
+   - SP Resource Manager enrolls the old instance for deletion
+     (`deletion_status: SCHEDULED`) and attempts, best-effort, to publish a
+     deletion CloudEvent to the agent — exactly like a non-deferred delete (see
      [Deferred Deletion](#deferred-deletion))
-   - SP Resource Manager returns success to allow the flow to continue
+   - SP Resource Manager returns `204 No Content` once enrolled, regardless of
+     whether the publish succeeded, so the rehydration flow is never blocked
    - Placement Manager removes the old instance record from the Placement DB and
      returns success to the Catalog Manager
 
@@ -297,95 +300,101 @@ sequenceDiagram
 #### Deferred Deletion
 
 During rehydration, the deletion request is sent with the `deferred` flag set to
-`true`. When the SP Resource Manager receives a deferred deletion request, it
-does **not** publish a deletion CloudEvent to the Agent. Instead, it immediately
-enqueues the instance for background cleanup:
+`true`. A deferred deletion request enrolls the instance for deletion
+(`deletion_status: SCHEDULED` in the database) and attempts to publish a
+deletion CloudEvent to the agent — **exactly like a non-deferred delete**. The
+only behavior specific to `deferred=true` is that once the deletion completes,
+the instance record is preserved as a tombstone (`deletion_status: DELETED`,
+visible when listing or getting with `show_deleted=true`) rather than
+hard-deleted.
 
-1. The SP Resource Manager records the pending deletion in a **cleanup queue**
-   (persisted in the database) with the following information:
+1. The SP Resource Manager enrolls the instance for deletion, recording:
    - `instance_id`: The instance to be deleted
    - `agent_name`: The Agent that manages the instance
-   - `service_type`: The type of the service
-   - `timestamp`: When the deletion was requested
-2. The SP Resource Manager returns success to the Placement Manager, allowing
-   the rehydration flow to continue
+   - `deletion_requested_at`: When the deletion was first requested
+   - `retry_count`: How many redelivery attempts the cleanup scheduler has made
+     (starts at `0`)
+2. The SP Resource Manager publishes a deletion CloudEvent to the agent's topic,
+   best-effort
+3. The SP Resource Manager returns `204 No Content` to the Placement Manager
+   once enrollment succeeds, **regardless of whether the publish succeeded** — a
+   publish failure is not surfaced as an error and is retried later by the
+   cleanup scheduler (see [Cleanup Mechanism](#cleanup-mechanism)). This is what
+   makes the call non-blocking: the rehydration flow never waits on agent
+   latency or availability
 
 #### Cleanup Mechanism
 
-The SP Resource Manager runs a background cleanup process that periodically
-attempts to complete deferred deletions. The cleanup queue serves two purposes:
-
-1. **Rehydration deferred deletions**: When the Placement Manager sends a
-   deletion with `deferred=true`, SPRM enqueues it without publishing to the
-   Agent (described above).
-2. **SP-unavailable deletion failures**: When a regular deletion is rejected by
-   the Agent because the SP became Unavailable, SPRM enqueues it for deferred
-   retry rather than marking the resource as failed (see
-   [Placement Manager — Service Deletion Flow](../placement-manager/placement-manager.md#service-deletion-flow)).
-
-The scheduler applies the following resolution logic for each pending deletion:
+The SP Resource Manager runs a background Deletion Cleanup Scheduler that
+periodically drives every instance with `deletion_status: SCHEDULED` to a
+terminal outcome. This is the same scheduler used for every enrolled deletion,
+not just rehydration's — a non-deferred delete whose initial publish failed is
+enrolled and resolved the same way (see
+[SP Resource Manager — Deletion Cleanup Scheduler](../sp-resource-manager/sp-resource-manager.md#deletion-cleanup-scheduler)
+for the full behavior and configuration). This section summarizes it as it
+applies to a deferred deletion queued during rehydration.
 
 ```mermaid
 flowchart TD
-    A[Cleanup scheduler triggers] --> B[Query cleanup queue<br/>for pending deletions]
-    B --> C{Any pending?}
-    C -->|No| D[Sleep until next interval]
-    C -->|Yes| E[For each pending deletion]
-    E --> F[Lookup agent<br/>in Agent Registry]
-    F --> G{Agent registered?}
-    G -->|No| H[Mark as DELETED<br/>Environment presumed decommissioned]
-    G -->|Yes| I{Agent advertises<br/>the service type?}
-    I -->|No| J[Skip, retry next cycle]
-    I -->|Yes| K[Publish deletion CloudEvent<br/>to agent topic]
-    K --> L{Deletion succeeded?}
-    L -->|Yes| M[Mark as DELETED]
-    L -->|No| N[Mark as DELETED<br/>Original SP context is gone]
-    M --> D
-    N --> D
-    H --> D
-    J --> D
+    A[Cleanup scheduler tick] --> B[Query instances with<br/>deletion_status: SCHEDULED]
+    B --> C[For each instance]
+    C --> D{Has agent_name?}
+    D -- No --> E[Mark DELETED<br/>nothing to wait for]
+    E --> C
+    D -- Yes --> F{Agent registered?}
+    F -- No --> G[Audit give-up: mark DELETED<br/>without confirmed physical deletion]
+    G --> C
+    F -- Yes --> H{retry_count >=<br/>cleanup_max_retries?}
+    H -- Yes --> I[Mark FAILED<br/>for manual intervention]
+    I --> C
+    H -- No --> J[Re-publish dcm.request.delete<br/>to agent topic]
+    J --> K[Increment retry_count<br/>whether or not publish succeeded]
+    K --> C
 ```
 
 **Resolution rules:**
 
-- **Agent not registered**: The Agent and its environment are presumed
-  decommissioned. The resource is marked as `DELETED` and removed from the
-  cleanup queue.
-- **Agent registered but service type not advertised**: The SP for the service
-  type has not recovered yet. The scheduler skips the entry and retries on the
-  next cycle.
-- **Agent registered and service type advertised — deletion succeeds**: The SP
-  processed the deletion. The resource is marked as `DELETED`.
-- **Agent registered and service type advertised — deletion fails**: The service
-  type is now served by a different SP that has no knowledge of the resource
-  (the original SP's infrastructure is gone). The resource is marked as
-  `DELETED` because there is nothing left to clean up from DCM's perspective.
+- **No `agent_name`**: nothing to wait for. Marked `DELETED` immediately, a
+  normal (non-audited) completion.
+- **Agent not registered**: the Agent and its environment are presumed
+  decommissioned, and the resource may be orphaned. Marked `DELETED` as an
+  audited give-up — logged as a structured audit event.
+- **Agent registered, retries exhausted**: marked `FAILED` for manual/operator
+  intervention. This does **not** silently resolve to `DELETED` — an operator
+  must investigate.
+- **Agent registered, retries remaining**: re-publishes the deletion CloudEvent
+  to the agent's topic and increments `retry_count`, whether or not the publish
+  itself succeeded. Actual finalization to `DELETED` happens separately, when
+  the agent's `dcm.agent.deletion-acknowledged` event arrives (see
+  [SP Resource Manager — Asynchronous Response Processing](../sp-resource-manager/sp-resource-manager.md#asynchronous-response-processing)).
 
-**Cleanup queue record:**
+**Instance record fields relevant to cleanup:**
 
 ```json
 {
   "instance_id": "08aa81d1-a0d2-4d5f-a4df-b80addf07781",
   "agent_name": "prod-eu-agent",
-  "service_type": "vm",
-  "requested_at": "2026-03-23T10:00:00Z",
+  "deletion_status": "SCHEDULED",
+  "deletion_requested_at": "2026-03-23T10:00:00Z",
   "retry_count": 0,
-  "status": "PENDING",
-  "last_attempt": null
+  "last_deletion_attempt": null
 }
 ```
 
 #### Key Characteristics
 
-- **Non-blocking**: Deferred deletion does not publish to the Agent, so the
-  calling flow is never blocked by agent latency or availability
-- **Persistent**: The cleanup queue is stored in the database to survive
-  restarts
-- **Automatic retry**: The cleanup process retries deletions once the Agent
-  re-advertises the service type
-- **Deterministic resolution**: Every terminal outcome marks the resource as
-  `DELETED` — either the deletion succeeds, the original SP context is gone, or
-  the environment is decommissioned. No entry remains in the queue indefinitely.
+- **Non-blocking**: A deferred deletion enrolls the instance and attempts to
+  publish, but never waits on or fails because of agent latency or availability
+  — the calling flow is never blocked
+- **Persistent**: Deletion enrollment (`deletion_status`, `retry_count`,
+  `deletion_requested_at`) is stored on the instance record in the database,
+  surviving restarts
+- **Automatic retry**: The cleanup scheduler retries the publish until the agent
+  acknowledges the deletion, the agent is found to be deregistered, or retries
+  are exhausted
+- **Deterministic resolution**: Every entry reaches a terminal `deletion_status`
+  — `DELETED` (confirmed or audited give-up) or `FAILED` (retries exhausted,
+  needs manual intervention). No entry is retried forever
 - **Idempotent**: Cleanup deletions are idempotent; repeated attempts to delete
   an already-deleted resource are safe
 
@@ -423,10 +432,12 @@ flowchart TD
   the recreated resource, avoiding ID conflicts in downstream services
 - **Policy Re-evaluation**: Every rehydration re-evaluates the full policy
   chain, potentially selecting a different Agent or applying different mutations
-- **Deferred Cleanup**: Deletion of the old resource is always deferred during
-  rehydration. The SP Resource Manager enqueues the old instance for background
-  cleanup without publishing to the Agent, ensuring the rehydration flow is
-  never blocked by agent availability or errors
+- **Deferred Cleanup**: Deletion of the old resource is always requested with
+  `deferred=true` during rehydration. The SP Resource Manager enrolls the old
+  instance for deletion and attempts to publish to the Agent, but never blocks
+  on or fails because of agent availability or publish errors — a failed publish
+  is retried later by the cleanup scheduler (see
+  [Deferred Deletion](#deferred-deletion))
 - **Idempotent Rehydration**: Rehydrating an already-rehydrated resource works
   the same way; a new resource is created from the original intent and the
   current resource is deleted afterward

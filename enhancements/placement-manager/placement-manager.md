@@ -679,13 +679,14 @@ sequenceDiagram
         PM->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}
         activate SPRM
 
-        alt SPRM returns error
-            SPRM-->>PM: Error response
+        alt Instance not found (already deleted)
+            SPRM-->>PM: 404 Not Found
             Note over PM: Leave graph PENDING_DELETION<br/>for later retry
             PM-->>CM: Error response
-        else SPRM returns 202 Accepted
+        else Instance found — enrolled for deletion
+            Note over SPRM: deletion_status: SCHEDULED<br/>Publish to agent is best-effort;<br/>a failure here is retried later<br/>by the cleanup scheduler, never<br/>returned to Placement Manager
             PM->>DB: Update resource status to DELETING
-            SPRM-->>PM: 202 Accepted<br/>{instance_id, agent_name, status: DELETING}
+            SPRM-->>PM: 204 No Content
         end
         deactivate SPRM
     end
@@ -695,13 +696,14 @@ sequenceDiagram
 
     Note over SPRM,PM: Remaining resources (async, after prior DELETED)
 
-    SPRM->>DB: Update resource row (DELETED)
+    Note over SPRM: Agent's dcm.agent.deletion-acknowledged<br/>arrives (see SP Resource Manager —<br/>Asynchronous Response Processing)
+    SPRM->>DB: Finalize resource<br/>deletion_status: DELETED
     SPRM->>PM: OnResourceDeleted (in-process)
     activate PM
 
     loop each next resource<br/>in reverse DAG order when prior DELETED
         PM->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}
-        SPRM-->>PM: 202 Accepted
+        SPRM-->>PM: 204 No Content
         PM->>DB: Update resource status to DELETING
     end
 
@@ -717,8 +719,8 @@ sequenceDiagram
 
     alt Agent reports SP recovered — deletion processed
         SPRM->>PM: Notify: deletion acknowledged<br/>{instance_id, status: DELETING}
-    else Agent reports SP Unavailable — deletion rejected
-        Note over SPRM: SPRM enqueues the deletion<br/>in the cleanup queue for<br/>deferred retry.<br/>Resource stays DELETING.
+    else Agent reports SP Unavailable, or publish never reached the agent
+        Note over SPRM: Instance stays deletion_status: SCHEDULED.<br/>The cleanup scheduler retries the publish<br/>until acknowledged, until the agent is<br/>found deregistered (audited DELETED),<br/>or until retries are exhausted (FAILED).<br/>Resource stays DELETING at the PM level<br/>throughout.
     end
 ```
 
@@ -743,35 +745,42 @@ sequenceDiagram
 
 - For each resource at the highest `dag_level`, Placement sends a delete request
   to SPRM
-- SPRM publishes a deletion CloudEvent to the agent's messaging topic
-- SPRM always responds synchronously with one of:
-  - **SPRM returns error**: Placement returns an error to Catalog and leaves all
-    resource status as `PENDING_DELETION` so deletion can be retried
-  - **SPRM returns 202 Accepted**: Placement marks those resources as `DELETING`
-    and returns `202 Accepted` with `run_id` to Catalog. Lower level resources
-    stay `PENDING_DELETION` until the deletion run continues in reverse DAG
-    order (see
+- SPRM enrolls the instance for deletion (`deletion_status: SCHEDULED`) and
+  attempts, best-effort, to publish a deletion CloudEvent to the agent's
+  messaging topic. SPRM always responds synchronously with one of:
+  - **SPRM returns an error** (`404` — instance not found, or `400` — bad
+    request): Placement returns an error to Catalog and leaves all resource
+    status as `PENDING_DELETION` so deletion can be retried. This is a
+    structural error only — SPRM never returns an error because the publish to
+    the agent failed; that failure is retried later by the cleanup scheduler
+    instead (see
+    [SP Resource Manager — Service Type Instance Deletion Flow](../sp-resource-manager/sp-resource-manager.md#service-type-instance-deletion-flow))
+  - **SPRM returns `204 No Content`**: Placement marks those resources as
+    `DELETING` and returns `202 Accepted` with `run_id` to Catalog. Lower level
+    resources stay `PENDING_DELETION` until the deletion run continues in
+    reverse DAG order (see
     [Status-driven reverse-DAG deletion](#status-driven-reverse-dag-deletion))
-- **SPRM notifies QUEUED (asynchronous)**: After returning 202, SPRM may
+- **SPRM notifies QUEUED (asynchronous)**: After returning `204`, SPRM may
   asynchronously notify PM of a `QUEUED` status if the Agent reports the SP for
   the service type is unhealthy. Unlike creation, deletion cannot be re-routed
   to a different agent because the resource exists on the original agent's SP.
   The resource status at the PM level remains `DELETING` — the QUEUED state is
   an SPRM-level concern, not a PM resource status change. PM relies on the
   Agent's retry topic to resolve the deletion automatically: when the SP
-  recovers, the Agent processes the held deletion request and reports success.
-  If the SP transitions to Unavailable, the Agent rejects the held request with
-  an error CloudEvent. SPRM then enqueues the deletion in its cleanup queue for
-  deferred retry rather than marking the resource as failed (see
-  [Rehydration Flow — Cleanup Mechanism](../rehydration-flow/rehydration-flow.md#cleanup-mechanism)).
-  The cleanup scheduler retries the deletion once the Agent re-advertises the
-  service type. If the retry fails (e.g., the service type is now served by a
-  different SP that has no knowledge of the resource), the resource is
-  considered deleted. If the Agent itself is no longer registered, the resource
-  is also considered deleted since the underlying environment is presumed
-  decommissioned. PM does not apply `queued_request_timeout` for deletions
-  because the Agent retry topic and SPRM cleanup queue provide automatic
-  resolution.
+  recovers, the Agent processes the held deletion request and reports success
+  via `dcm.agent.deletion-acknowledged`. If the SP transitions to Unavailable
+  and the Agent rejects the held request, the instance remains enrolled at
+  `deletion_status: SCHEDULED` and the Deletion Cleanup Scheduler takes over the
+  retry (see
+  [SP Resource Manager — Deletion Cleanup Scheduler](../sp-resource-manager/sp-resource-manager.md#deletion-cleanup-scheduler)).
+  The cleanup scheduler re-publishes on each cycle until the agent acknowledges
+  the deletion. If retries are exhausted first, the instance is marked `FAILED`
+  for manual/operator intervention — it is **not** silently considered deleted.
+  If the Agent itself is no longer registered, the instance is marked `DELETED`
+  as an audited give-up, since the underlying environment is presumed
+  decommissioned and the resource may be orphaned. PM does not apply
+  `queued_request_timeout` for deletions because the Agent retry topic and the
+  SPRM cleanup scheduler provide automatic resolution.
 
 #### Status-driven reverse-DAG deletion
 

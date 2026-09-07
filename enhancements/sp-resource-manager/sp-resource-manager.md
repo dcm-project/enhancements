@@ -166,7 +166,9 @@ Example of payload for incoming VM request
 ```
 
 **GET /api/v1/service-type-instances**  
-List all service type instances according to AEP standards.
+List all service type instances according to AEP standards. Accepts an optional
+`show_deleted` query parameter (default `false`); when `true`, deferred-deletion
+tombstones (`deletion_status: DELETED`) are included alongside active instances.
 
 Example of Response Payload
 
@@ -194,7 +196,9 @@ Example of Response Payload
 ```
 
 **GET /api/v1/service-type-instances/{instance_id}**  
-Get a service type instance based on id.
+Get a service type instance based on id. Accepts an optional `show_deleted`
+query parameter (default `false`); when `true`, a deferred-deletion tombstone is
+returned instead of `404`.
 
 Example of Response Payload
 
@@ -207,8 +211,13 @@ Example of Response Payload
 }
 ```
 
-**Delete /api/v1/service-type-instances/{instance_id}**  
-Delete a service type instance based on id.
+**DELETE /api/v1/service-type-instances/{instance_id}**  
+Delete a service type instance based on id. Accepts an optional `deferred` query
+parameter (default `false`) that controls whether the completed deletion keeps a
+visible tombstone (`deferred=true`) or is fully purged (`deferred=false`).
+Returns `204 No Content` once the deletion is enrolled, regardless of whether
+the underlying agent publish succeeds — see
+[Service Type Instance Deletion Flow](#service-type-instance-deletion-flow).
 
 **GET /api/v1/health**  
 Retrieve the health status of SP Resource Manager.
@@ -291,8 +300,27 @@ sequenceDiagram
 ### Service Type Instance Deletion Flow
 
 This flow demonstrates the deletion of a service type instance through the SP
-Resource Manager. It mirrors the creation flow, publishing a deletion CloudEvent
-instead of a creation one.
+Resource Manager. Deletion always accepts synchronously (`204`) once the
+instance is enrolled for deletion; a publish failure to the agent is never
+surfaced to the caller — it is retried later by the
+[Deletion Cleanup Scheduler](#deletion-cleanup-scheduler). Actual removal of an
+agent-routed instance's physical resource is confirmed asynchronously, when the
+agent's `dcm.agent.deletion-acknowledged` CloudEvent arrives (see
+[Asynchronous Response Processing](#asynchronous-response-processing)).
+
+The `deferred` query parameter
+(`DELETE /api/v1/service-type-instances/{instance_id}?deferred=<bool>`, default
+`false`) does **not** change whether a delete is published or retried — both
+modes attempt to publish and both tolerate publish failure the same way. The
+only thing `deferred` controls is what happens to the instance record once
+deletion is confirmed: a non-deferred delete is hard-deleted (no trace left
+behind); a deferred delete is soft-completed, keeping a tombstone record
+(`deletion_status: DELETED`) that remains visible when listing or getting with
+`show_deleted=true`. This is a deliberate design choice, not an implementation
+detail: callers that need a visible record of what was deleted and when (e.g.
+rehydration, which deletes the pre-rehydration resource after the replacement is
+already running) pass `deferred=true`; callers that want a clean removal with no
+residue pass `deferred=false` (the default).
 
 ```mermaid
 sequenceDiagram
@@ -302,21 +330,30 @@ sequenceDiagram
     participant DB as Database
     participant MS as Messaging System
 
-    PS->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}
+    PS->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}<br/>?deferred=<bool>
     activate SPRM
 
-    SPRM->>DB: Lookup instance by instance_id<br/>Get agent_name, service_type.<br/>Use instance_id for resource_id
-
-    SPRM->>DB: Lookup agent by agent_name
-    alt Agent not found
+    SPRM->>DB: Lookup instance by instance_id<br/>Use instance_id for resource_id
+    alt Instance not found
         SPRM-->>PS: 404 Not Found
-    else Agent Unavailable or Congested
-        SPRM-->>PS: 503 Service Unavailable
-    else Agent healthy
-        SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topic_name}<br/>type: dcm.request.delete<br/>{resource_id, service_type}
-
-        SPRM->>DB: Update instance status to DELETING
-        SPRM-->>PS: 202 Accepted<br/>{instance_id, status: DELETING}
+    else Instance has no agent_name<br/>(never agent-routed)
+        Note over SPRM,DB: Nothing to wait for: a non-deferred<br/>delete purges the record now; a deferred<br/>delete is enrolled and completed by the<br/>cleanup scheduler's next cycle (see below)
+        SPRM-->>PS: 204 No Content
+    else Agent-routed instance
+        SPRM->>DB: Enroll for deletion<br/>deletion_status: SCHEDULED<br/>(reset retry_count if already SCHEDULED,<br/>preserving original deletion_requested_at)
+        SPRM->>DB: Lookup agent by agent_name
+        alt Agent not found (deregistered)
+            alt deferred = false
+                SPRM->>DB: Purge instance record now<br/>(no acknowledgement will ever arrive)
+            else deferred = true
+                Note over SPRM: Left SCHEDULED; the cleanup scheduler's<br/>own give-up logic resolves this later
+            end
+        else Agent found
+            SPRM->>MS: PUBLISH CloudEvent (best-effort)<br/>topic: {topic_name}<br/>type: dcm.request.delete<br/>{resource_id, service_type}
+            Note over SPRM,MS: Publish failure (any reason) is logged<br/>and retried by the cleanup scheduler,<br/>never returned to the caller
+            SPRM->>DB: Update instance status to DELETING
+        end
+        SPRM-->>PS: 204 No Content
     end
     deactivate SPRM
 ```
@@ -325,30 +362,66 @@ sequenceDiagram
 
 - **Request Reception**
   - SP Resource Manager receives a DELETE request
-    (`/api/v1/service-type-instances/{instance_id}`) from Placement Manager
+    (`/api/v1/service-type-instances/{instance_id}`) from Placement Manager,
+    with an optional `deferred` query parameter (default `false`)
 - **Instance Lookup**
-  - Queries the database by `instance_id`
-  - Retrieves `agent_name` and `service_type` from the instance record
+  - Queries the database by `instance_id`; if not found, returns 404 to
+    Placement Manager
   - `resource_id` is set with the value of `instance_id`
+- **Never Agent-Routed**
+  - If the instance record has no `agent_name` (it was created without agent
+    routing), there is no physical resource on an agent to wait for
+  - A non-deferred delete purges the record immediately, within the same call
+  - A deferred delete is enrolled (`deletion_status: SCHEDULED`) and completed
+    by the [Deletion Cleanup Scheduler](#deletion-cleanup-scheduler) on its next
+    cycle, since the scheduler resolves agent-less entries without waiting on
+    anything
+- **Enrollment (agent-routed instances)**
+  - Before any publish attempt, the instance is enrolled for deletion:
+    `deletion_status` is set to `SCHEDULED`
+  - If the instance was already `SCHEDULED` (e.g. a retried deferred delete, or
+    a repeated deletion call), its `retry_count` is reset to `0` instead,
+    preserving the original `deletion_requested_at` timestamp
+  - This enrollment happens regardless of `deferred`, and regardless of whether
+    the subsequent publish attempt succeeds
 - **Agent Lookup**
   - Queries the Agent Registry by `agent_name`
-  - Retrieves `topic_name`, `health_status`, and `consumer_lag`
-  - If agent is not found, returns 404 error to Placement Manager
-  - If agent is Unavailable or Congested, returns 503 error to Placement Manager
+  - **Agent not found (deregistered)**: no `dcm.agent.deletion-acknowledged`
+    event will ever arrive for this instance
+    - Non-deferred: the instance is purged immediately, since waiting would
+      never resolve
+    - Deferred: the enrollment from the previous step is left in place; the
+      cleanup scheduler's own give-up logic resolves it later (see
+      [Deletion Cleanup Scheduler](#deletion-cleanup-scheduler))
+  - **Agent found**: proceeds to CloudEvent publishing below. Delete does
+    **not** check agent `health_status` or `consumer_lag` — unlike creation, a
+    delete is always attempted and enrolled for retry regardless of agent
+    health, since the cleanup scheduler is the mechanism that resolves an
+    unhealthy or unresponsive agent over time
 - **CloudEvent Publishing**
   - Publishes a deletion request CloudEvent to the agent's topic
-    (`{topic_name}`) via the Messaging System
+    (`{topic_name}`) via the Messaging System, best-effort
   - CloudEvent type: `dcm.request.delete`
   - CloudEvent data: `{resource_id, service_type}`
   - See
     [Environment Agent - CloudEvent Message Definitions](../environment-agent/environment-agent.md#cloudevent-message-definitions)
     for the full CloudEvent schema
+  - A publish failure (NATS unavailable, timeout, etc.) is logged but never
+    returned to Placement Manager — the instance stays enrolled at
+    `deletion_status: SCHEDULED` and the cleanup scheduler retries the publish
+    on its next cycle
 - **Instance Record Update**
-  - Updates the instance record status to `DELETING`
+  - If the publish was attempted (agent found), updates the instance record
+    status to `DELETING`
 - **Response to Placement Manager**
-  - Returns 202 Accepted with:
-    - `instance_id`: The instance identifier
-    - `status`: `DELETING`
+  - Returns `204 No Content` once the instance is either purged or enrolled —
+    regardless of whether the publish to the agent succeeded
+- **Finalization (asynchronous)**
+  - When the agent's `dcm.agent.deletion-acknowledged` CloudEvent arrives, a
+    non-deferred delete is hard-deleted from the database (no tombstone); a
+    deferred delete is soft-completed (`deletion_status: DELETED`), preserving a
+    tombstone visible with `show_deleted=true` (see
+    [Asynchronous Response Processing](#asynchronous-response-processing))
 
 > **Note:** For **queued creation requests**, the Placement Manager also uses
 > this DELETE endpoint to cancel the queued creation when its
@@ -363,6 +436,66 @@ sequenceDiagram
 > the SP recovers, or rejected if the SP becomes Unavailable (see
 > [Environment Agent — Retry Topic](../environment-agent/environment-agent.md#retry-topic)).
 
+### Deletion Cleanup Scheduler
+
+The Deletion Cleanup Scheduler is a periodic background process, analogous to
+[Pending Request Timeout](#pending-request-timeout) for creation, that drives
+every enrolled deletion (`deletion_status: SCHEDULED`) to a terminal outcome:
+either a confirmed or audited `DELETED`, or an operator-facing `FAILED`. No
+entry is retried forever.
+
+#### Flow
+
+```mermaid
+flowchart TD
+    A[Cleanup scheduler tick] --> B[Query instances with<br/>deletion_status: SCHEDULED,<br/>oldest deletion_requested_at first]
+    B --> C[For each instance]
+    C --> D{Has agent_name?}
+    D -- No --> E[Mark DELETED<br/>nothing to wait for]
+    E --> C
+    D -- Yes --> F{Agent registered?}
+    F -- No --> G[Audit give-up: mark DELETED<br/>without confirmed physical deletion<br/>Log structured audit event]
+    G --> C
+    F -- Yes --> H{retry_count >=<br/>cleanup_max_retries?}
+    H -- Yes --> I[Mark FAILED<br/>for manual/operator intervention]
+    I --> C
+    H -- No --> J[Re-publish dcm.request.delete<br/>to agent topic]
+    J --> K[Increment retry_count<br/>whether or not publish succeeded]
+    K --> C
+```
+
+#### Behavior
+
+1. On each tick, the scheduler queries all instances with
+   `deletion_status: SCHEDULED`, oldest `deletion_requested_at` first
+2. For each instance:
+   - **No `agent_name`**: there is no physical resource on an agent to wait for.
+     Marked `DELETED` immediately — a normal, non-audited completion
+   - **Has `agent_name`, agent not found (deregistered)**: the environment is
+     presumed decommissioned and the underlying resource may be orphaned. Marked
+     `DELETED` as an audited give-up — logged as a structured audit event so
+     operators can find instances whose backing resource was never confirmed
+     removed
+   - **Has `agent_name`, agent found, retries exhausted**: marked `FAILED` for
+     manual/operator intervention. This does **not** silently regress to
+     `DELETED` — an operator must investigate why the agent never acknowledged
+     the deletion
+   - **Has `agent_name`, agent found, retries remaining**: re-publishes
+     `dcm.request.delete` to the agent's topic and increments `retry_count`. The
+     retry counter is incremented whether or not the publish itself succeeded,
+     so a permanently unreachable agent or messaging system still reaches the
+     `FAILED` give-up state eventually, instead of retrying forever
+3. Every entry reaches a terminal `deletion_status` (`DELETED` or `FAILED`)
+   deterministically
+
+#### Configuration
+
+| Parameter               | Type     | Default | Description                                                                                                       |
+| ----------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `cleanup_interval`      | Duration | `1m`    | How often the scheduler sweeps `SCHEDULED` deletions.                                                             |
+| `cleanup_max_retries`   | integer  | `10`    | Maximum number of re-publish attempts before an agent-routed deletion is marked `FAILED` for manual intervention. |
+| `cleanup_cycle_timeout` | Duration | `10s`   | Upper bound on how long a single sweep may run, so a slow database or agent lookup cannot stall the next tick.    |
+
 ### Instance Status Lifecycle
 
 An instance transitions through the following statuses during its lifecycle.
@@ -376,13 +509,27 @@ acknowledges the request, confirming that an SP has begun processing it.
 | `QUEUED`       | Agent received request but SP is unhealthy; held in retry    |
 | `PROVISIONING` | Agent acknowledged; SP is actively provisioning              |
 | `RUNNING`      | Resource provisioned and operational                         |
-| `DELETING`     | Deletion request published or acknowledged                   |
+| `DELETING`     | Deletion request published; awaiting agent acknowledgment    |
 | `FAILED`       | Agent or SP reported an error                                |
-| `DELETED`      | Resource deleted                                             |
 
-`RUNNING` and `DELETED` are the statuses that drive Placement orchestration DAG
-progression after the [Status Consumer Flow](#status-consumer-flow) updates the
-database.
+`RUNNING` is the status that drives Placement orchestration DAG progression
+after the [Status Consumer Flow](#status-consumer-flow) updates the database. An
+instance's removal is tracked separately from `status`, via the
+`deletion_status` field below — a deletion can be enrolled and retried without
+changing `status` away from whatever it already was (typically `DELETING` for an
+agent-routed instance; see
+[Service Type Instance Deletion Flow](#service-type-instance-deletion-flow)).
+
+#### Deletion Status
+
+`deletion_status` is absent for an active instance with no deletion in progress.
+Once a deletion is enrolled, it is one of:
+
+| `deletion_status` | Meaning                                                                                                                                                                                                                                                     |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SCHEDULED`       | Enrolled for deletion; the cleanup scheduler retries until a terminal outcome is reached                                                                                                                                                                    |
+| `FAILED`          | Retries exhausted; needs manual/operator intervention                                                                                                                                                                                                       |
+| `DELETED`         | Deletion complete — either confirmed by the agent, or an audited give-up (agent deregistered). The instance record is only retained (as a tombstone) for deferred deletes — see [Service Type Instance Deletion Flow](#service-type-instance-deletion-flow) |
 
 ### Asynchronous Response Processing
 
@@ -394,7 +541,7 @@ describes the actions taken for each response type:
 | CloudEvent Type                   | Action                                                                                                                                                                                                                           |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dcm.agent.creation-acknowledged` | Update instance record: status from `PENDING` to `PROVISIONING`, store `provider_name` from response                                                                                                                             |
-| `dcm.agent.deletion-acknowledged` | Update instance record: status to `DELETING`                                                                                                                                                                                     |
+| `dcm.agent.deletion-acknowledged` | Finalize the deletion: non-deferred (`deferred=false`) instances are hard-deleted from the database; deferred instances are soft-completed (`deletion_status: DELETED`), keeping a tombstone visible with `show_deleted=true`    |
 | `dcm.agent.error`                 | Update instance record: status to `FAILED`, store error details. Notify Placement Manager.                                                                                                                                       |
 | `dcm.agent.request-queued`        | Update instance record: status to `QUEUED`. Report queued status to Placement Manager (PM handles timeout logic).                                                                                                                |
 | `dcm.agent.cancel-rejected`       | The agent could not cancel the creation (resource already provisioning on its SP). SPRM sends a deletion request to the old agent to remove the resource, since the re-evaluated agent is the authoritative `resource_id` owner. |
@@ -502,6 +649,14 @@ mechanism is an SP implementation concern — different SPs may use different
 strategies depending on the underlying platform.
 
 #### Error Handling
+
+The codes below apply to **creation** (`POST`). **Deletion** (`DELETE`) has a
+narrower error surface: it returns `404` if the instance does not exist, or
+`400` for a malformed request, but never a distinct code for an agent-publish
+failure — that failure is retried by the
+[Deletion Cleanup Scheduler](#deletion-cleanup-scheduler) instead of being
+surfaced to the caller. See
+[Service Type Instance Deletion Flow](#service-type-instance-deletion-flow).
 
 - **404 Not Found**: Agent with the given `agent_name` is not registered
 - **400 Bad Request**: Invalid request schema
