@@ -83,8 +83,8 @@ a non-goal. This enhancement is the foundation those deferrals depend on.
   credential exchange, NATS messaging auth) — tracked by
   [FLPATH-4622](https://redhat.atlassian.net/browse/FLPATH-4622) (supersedes
   [FLPATH-4196](https://redhat.atlassian.net/browse/FLPATH-4196))
-- **RHDH Backstage catalog `User` entities as the DCM identity source** — catalog
-  users are optional for portal UX; DCM authorization uses `actors`, not
+- **RHDH Backstage catalog `User` entities as the DCM identity source** —
+  catalog users are optional for portal UX; DCM authorization uses `actors`, not
   Backstage catalog entries
 
 ## Proposal
@@ -115,13 +115,13 @@ services" concern (see Alternative 1 for the trade-off analysis).
 The codebase already has the scaffolding for auth — it just needs to be wired
 up:
 
-| Component                                                                | Current State                                   | Integration Point                                                                              |
-| ------------------------------------------------------------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [dcm-server](https://github.com/dcm-project/control-plane) (all domains) | No auth middleware configured                   | Insert actor middleware in the HTTP handler chain; validate JWTs via OIDC discovery            |
-| [OpenAPI specs](https://github.com/dcm-project/control-plane)            | 401/403 responses defined, no `securitySchemes` | Add Bearer token security scheme                                                               |
-| [CLI (`dcm`)](https://github.com/dcm-project/cli)                        | Plain HTTP client, no auth headers              | Add token acquisition (device flow or token file) and `Authorization: Bearer` header injection |
+| Component                                                                | Current State                                   | Integration Point                                                                                                   |
+| ------------------------------------------------------------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| [dcm-server](https://github.com/dcm-project/control-plane) (all domains) | No auth middleware configured                   | Insert actor middleware in the HTTP handler chain; validate JWTs via OIDC discovery                                 |
+| [OpenAPI specs](https://github.com/dcm-project/control-plane)            | 401/403 responses defined, no `securitySchemes` | Add Bearer token security scheme                                                                                    |
+| [CLI (`dcm`)](https://github.com/dcm-project/cli)                        | Plain HTTP client, no auth headers              | Add token acquisition (device flow or token file) and `Authorization: Bearer` header injection                      |
 | RHDH plugin                                                              | Uses shared `dcm-proxy` tokens today            | OIDC login to Keycloak `dcm` realm; forward **end-user JWT** to control-plane; eager or lazy DCM actor provisioning |
-| [Policy domain](https://github.com/dcm-project/control-plane)            | Policy hierarchy defined                        | Provide verified identity from request context for policy evaluation                           |
+| [Policy domain](https://github.com/dcm-project/control-plane)            | Policy hierarchy defined                        | Provide verified identity from request context for policy evaluation                                                |
 
 ### Risks and Mitigations
 
@@ -149,26 +149,25 @@ audience) — no per-request call to the identity provider.
 
 - **`dcm-cli`** (public) — CLI authentication via Device Authorization Grant. No
   client secret required.
-- **`dcm-proxy`** (confidential) — programmatic access for CI pipelines and
-  lab automation. Supports password and client-credentials grants. **Not** the
+- **`dcm-proxy`** (confidential) — programmatic access for CI pipelines and lab
+  automation. Supports password and client-credentials grants. **Not** the
   long-term identity path for interactive RHDH users — a shared confidential
   client cannot represent per-user DCM actors.
 - **`rhdh`** (confidential or public OIDC client, name configurable) — Red Hat
   Developer Hub (Backstage) authenticates users against the **same** `dcm`
-  realm. RHDH must not use a separate direct GitHub OAuth provider when DCM
-  auth is enabled; external IdPs federate into Keycloak instead (see
+  realm. RHDH must not use a separate direct GitHub OAuth provider when DCM auth
+  is enabled; external IdPs federate into Keycloak instead (see
   [External Identity Federation](#external-identity-federation)).
 
-Both `dcm-cli` and `dcm-proxy` include an audience mapper that adds `dcm-api`
-to the token's `aud` claim, which dcm-server validates via the
-`AUTH_JWT_AUDIENCE` configuration. The `rhdh` client must include the same
-audience mapper so portal-issued tokens are accepted by the control-plane.
+Both `dcm-cli` and `dcm-proxy` include an audience mapper that adds `dcm-api` to
+the token's `aud` claim, which dcm-server validates via the `AUTH_JWT_AUDIENCE`
+configuration. The `rhdh` client must include the same audience mapper so
+portal-issued tokens are accepted by the control-plane.
 
-The RHDH DCM backend plugin obtains a bearer token and calls the
-control-plane API. V1 lab deployments may use `dcm-proxy` client credentials as
-a transitional shortcut; production and multi-user deployments must forward the
-**end-user JWT** from the RHDH OIDC session so each caller maps to a distinct
-DCM actor.
+The RHDH DCM backend plugin obtains a bearer token and calls the control-plane
+API. V1 lab deployments may use `dcm-proxy` client credentials as a transitional
+shortcut; production and multi-user deployments must forward the **end-user
+JWT** from the RHDH OIDC session so each caller maps to a distinct DCM actor.
 
 **Bootstrap:** The initial admin account is seeded at deploy time via the
 `DCM_ADMIN_SUBJECT` environment variable, which contains the Keycloak `sub`
@@ -182,23 +181,23 @@ pre-configured realm (realm export JSON shipped in the repository).
 
 #### External Identity Federation
 
-External identity providers (GitHub for lab, Red Hat SSO or LDAP for
-production) integrate through **Keycloak identity brokering** into the `dcm`
-realm — not through separate per-client OAuth configuration on RHDH or
-dcm-server.
+External identity providers (GitHub for lab, Red Hat SSO or LDAP for production)
+integrate through **Keycloak identity brokering** into the `dcm` realm — not
+through separate per-client OAuth configuration on RHDH or dcm-server.
 
-| Layer | Responsibility |
-| ----- | -------------- |
-| External IdP (GitHub, SSO) | Source of user credentials, org membership |
-| Keycloak `dcm` realm | OIDC issuer for all DCM clients; broker JIT user creation |
-| dcm-server `actors` table | DCM platform identity ("DCM users") for ownership, audit, RBAC input |
+| Layer                      | Responsibility                                                       |
+| -------------------------- | -------------------------------------------------------------------- |
+| External IdP (GitHub, SSO) | Source of user credentials, org membership                           |
+| Keycloak `dcm` realm       | OIDC issuer for all DCM clients; broker JIT user creation            |
+| dcm-server `actors` table  | DCM platform identity ("DCM users") for ownership, audit, RBAC input |
 
 **Broker flow:** On first SSO login, Keycloak's first-broker-login flow creates
 a Keycloak user in the `dcm` realm (JIT at the IdP layer). Subsequent logins
 reuse the same Keycloak `sub`. Realm administrators configure:
 
 - Identity provider alias (e.g., `github`, `rhsso`)
-- First-broker-login flow (auto-create user; optional admin review in production)
+- First-broker-login flow (auto-create user; optional admin review in
+  production)
 - Attribute and group mappers (external groups → Keycloak groups → realm roles)
 
 **RHDH integration:** RHDH authenticates via OIDC against the Keycloak `dcm`
@@ -251,25 +250,25 @@ Keycloak alone is insufficient for policy evaluation, resource ownership, or
 actor suspension. Manual creation of DCM actors without SSO is insufficient for
 production. Both records are required.
 
-| Keycloak claim / field | DCM `actors` / `actor_identities` field |
-| ---------------------- | --------------------------------------- |
-| `sub` | `actor_identities.external_id` (`auth_provider=keycloak`) |
-| `preferred_username` | `actors.username` |
-| `email` | `actors.email` |
-| — | `actors.type = human`, `actors.status = active` |
+| Keycloak claim / field | DCM `actors` / `actor_identities` field                   |
+| ---------------------- | --------------------------------------------------------- |
+| `sub`                  | `actor_identities.external_id` (`auth_provider=keycloak`) |
+| `preferred_username`   | `actors.username`                                         |
+| `email`                | `actors.email`                                            |
+| —                      | `actors.type = human`, `actors.status = active`           |
 
 **Provisioning modes** (DCM actor creation — Keycloak broker JIT is always on
 first external login):
 
-| Mode | Trigger | When actor appears | V1 scope |
-| ---- | ------- | ------------------ | -------- |
-| **Lazy JIT** | First authenticated control-plane API request with unknown `sub` | First `/dcm` page load, CLI call, or API request | Implemented in dcm-server |
-| **Eager JIT** | Immediately after RHDH OIDC login or Keycloak event | Before first explicit API call | Recommended for RHDH; implementation in RHDH plugin or Keycloak event listener |
+| Mode          | Trigger                                                          | When actor appears                               | V1 scope                                                                       |
+| ------------- | ---------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------ |
+| **Lazy JIT**  | First authenticated control-plane API request with unknown `sub` | First `/dcm` page load, CLI call, or API request | Implemented in dcm-server                                                      |
+| **Eager JIT** | Immediately after RHDH OIDC login or Keycloak event              | Before first explicit API call                   | Recommended for RHDH; implementation in RHDH plugin or Keycloak event listener |
 
 Lazy JIT is sufficient when every interactive path reaches the control-plane
 with the user's JWT (e.g., opening the DCM plugin). Eager JIT avoids a window
-where the user exists in Keycloak but not yet as a DCM actor. Both modes use
-the same idempotent actor-creation logic; eager paths call it proactively.
+where the user exists in Keycloak but not yet as a DCM actor. Both modes use the
+same idempotent actor-creation logic; eager paths call it proactively.
 
 ```mermaid
 sequenceDiagram
@@ -318,11 +317,11 @@ V1 custom code:
   actor_identities)
 - [Seed migration](#v1-implementations) — bootstrap admin actor from
   `DCM_ADMIN_SUBJECT`
-- [JIT actor provisioning](#first-login--unknown-subject) — auto-create DCM actors
-  ("DCM users") on first authenticated request
+- [JIT actor provisioning](#first-login--unknown-subject) — auto-create DCM
+  actors ("DCM users") on first authenticated request
 - [External identity federation](#external-identity-federation) — Keycloak
-  broker configuration and RHDH OIDC convergence (deployment/docs; realm
-  export updates)
+  broker configuration and RHDH OIDC convergence (deployment/docs; realm export
+  updates)
 - [Dual user provisioning](#dual-user-provisioning) — requirement and lazy vs
   eager actor creation paths
 
@@ -402,8 +401,8 @@ When a validated JWT contains a `sub` claim that has no matching
 actor** provisioning: it creates a new actor record and identity binding in a
 single transaction. The `preferred_username` claim populates the actor's
 username; `email` is populated when present in the token. Race conditions from
-concurrent first requests with the same subject are handled via unique constraint
-violation detection and retry.
+concurrent first requests with the same subject are handled via unique
+constraint violation detection and retry.
 
 This is the **second** provisioning layer. The **first** layer — Keycloak user
 creation via identity brokering on SSO login — is described in
