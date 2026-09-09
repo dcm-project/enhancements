@@ -10,10 +10,10 @@ reviewers:
   - "@gabriel-farache"
   - "@jordigilh"
   - "@NoamNakash"
-  - "@LinskId"
 approvers:
-  - "@LinskId"
-  - "@jordigilh"
+  - "@gciavarrini"
+  - "@jenniferubah"
+  - "@machacekondra"
 creation-date: 2026-07-31
 see-also:
   - "/enhancements/catalog-item-schema/catalog-item-schema.md"
@@ -628,8 +628,17 @@ assert payload + definition -> stored outputs, covering the recursive path
 and rejection of drifted/undeclared fields.
 
 CEL reference validation unit tests assert that references resolving against a
-service type's output definition pass and that unknown-output,
-missing-dependency, and cyclic references are rejected with clear errors.
+service type's output definition pass and that unknown-output and
+missing-dependency references are rejected with clear errors. (Cross-resource
+cycle detection is declarative-api's DAG concern, out of scope here.)
+
+Migration: a test asserts GORM AutoMigrate adds the `output_spec` column to
+`service_type_instances` on a fresh database, is idempotent on re-run, and leaves
+existing rows with an empty/null `output_spec`.
+
+Backward-compatibility: a status payload from an SP that omits `output_spec` is
+captured as a no-op — the row's existing outputs and status are preserved with no
+error — covering the old-provider case.
 
 Integration tests with real SPs (storage first for the scalar path, container
 for structured capture) added as needed.
