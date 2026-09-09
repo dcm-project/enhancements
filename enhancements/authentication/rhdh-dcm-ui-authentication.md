@@ -115,13 +115,12 @@ The DCM control plane remains responsible for cryptographic JWT validation,
 including signature, issuer, expiry, and audience checks. The plugin and proxy
 do not weaken those checks or disable TLS verification.
 
-The audience must not be inferred from the RHDH client ID. DCM must be
-configured with an audience that is present in the RHDH access token. A Keycloak
-audience mapper may add a DCM-specific audience when the client does not already
-include one. During early lab validation, the token contained `account` as `aud`
-because the selected Keycloak client used its default audience; DCM can instead
-be configured to accept that value or a mapper can add a deliberate DCM audience
-such as `dcm-api`.
+The audience must not be inferred from the RHDH client ID. The RHDH Keycloak
+client must include a dedicated DCM audience in the access token, either through
+its client configuration or an audience mapper. The example uses `dcm-api`, and
+DCM is configured with `AUTH_JWT_AUDIENCE=dcm-api`. The generic Keycloak
+`account` audience observed during early lab validation is not suitable for the
+documented DCM integration because it is not specific to the RHDH-to-DCM flow.
 
 ### Risks and Mitigations
 
