@@ -10,10 +10,10 @@ reviewers:
   - "@gabriel-farache"
   - "@jordigilh"
   - "@NoamNakash"
+  - "@LinskId"
 approvers:
-  - "@gciavarrini"
-  - "@jenniferubah"
-  - "@machacekondra"
+  - "@LinskId"
+  - "@jordigilh"
 creation-date: 2026-07-31
 see-also:
   - "/enhancements/catalog-item-schema/catalog-item-schema.md"
@@ -28,31 +28,15 @@ see-also:
 
 # Cross-Provider Outputs
 
-## Open Questions
-
-1. **Service Provider Outputs Implementation:** Which service providers should
-   implement the `outputs` map first?
-   - **Proposed:** Start with k8s-container-sp and the k8s-storage-sp, enabling
-     a composite catalog item where a container references outputs. Then the
-     cloudnative-pg-database-sp as it matures.
-
-2. **Output Capture Semantics:** Should output capture use merge semantics
-   (preserve existing keys, update provided keys) or replace semantics
-   (overwrite the entire map on each status event)?
-   - **Proposed:** Merge. The UpdateOutputs operation merges incoming keys into
-     the stored outputs column; new keys are added, existing keys are updated,
-     keys absent from the payload are preserved. A status event with no
-     `outputs` field is a no-op (no overwrite with empty). Explicit cleanup
-     happens automatically when the instance row is deleted.
-
 ## Summary
 
 This enhancement adds the output data layer for cross-service provider metadata
-sharing: a standard `outputs` map in service provider CloudEvent status
-payloads, persistent storage in an `outputs` column on the
-`service_type_instances` table (typed JSONB), output definitions on the service
-type (consistent with how input schemas are already defined), and CEL reference
-validation at authoring time.
+sharing: a standard `output_spec` map in service provider CloudEvent status
+payloads, persistent storage in an `output_spec` column on the
+`service_type_instances` table (typed JSONB), typed output definitions on the
+service type (consistent with how input schemas are already defined), validation
+of published outputs against those definitions at capture time, and CEL
+reference validation at authoring time.
 
 ## Motivation
 
@@ -64,7 +48,7 @@ backend service endpoints, containers needing database connection strings).
 DCM currently cannot enable this because:
 
 1. **No Output Publishing** - Service providers do not populate a standard
-   `outputs` field. Runtime data exists within provider-specific response
+   `output_spec` field. Runtime data exists within provider-specific response
    structures but is not surfaced in a provider-agnostic way.
 
 2. **No Output Persistence** - The `service_type_instances table` captures `id`,
@@ -74,27 +58,36 @@ DCM currently cannot enable this because:
 3. **No Output Definition on Service Types** - Service types define their input
    schema (the spec fields accepted for provisioning) but not their output
    schema. DCM has no way to know what outputs a given service type produces,
-   which prevents authoring-time validation of CEL output references.
+   which prevents authoring-time validation of CEL output references and leaves
+   no typed contract to validate published outputs against once providers (which
+   are independently authorable) start emitting them.
 
 ### Goals
 
-1. **Output Publishing** - Read runtime outputs from a standard `outputs` map in
-   service provider CloudEvent status payloads. Store outputs persistently in an
-   `outputs` column on the `service_type_instances` table as typed JSONB.
+1. **Output Publishing & Persistence** - Read runtime outputs from a standard
+   `output_spec` map in service provider CloudEvent status payloads. Store
+   outputs persistently in an `output_spec` column on the
+   `service_type_instances` table as typed JSONB. The same mechanism works for
+   any service provider combination, regardless of underlying platform.
 
-2. **Output Definition on Service Types** - Extend the service type definition
-   with an `outputs` spec that declares which output fields a service type
-   produces. Outputs are intrinsic to the service type — defined centrally in
-   the Catalog domain alongside the input schema, not declared per catalog
-   resource or per provider.
+2. **Typed Output Definition on Service Types** - Extend the service type
+   definition with an `output_spec` definition (a typed schema per service type,
+   scalar and structured) that declares which output fields a service type
+   produces. Outputs are internal to the service type, defined centrally in the
+   Catalog domain alongside the input schema, not declared per catalog resource
+   or per provider.
 
-3. **Universal Cross-Provider Pattern** - Same mechanism works for any service
-   provider combination, regardless of underlying platform.
+3. **Output Validation at Capture** - Validate published outputs recursively
+   against the service type's output definition before storage, so mistyped or
+   undeclared outputs are rejected at the boundary rather than propagating to a
+   downstream consumer. The reserved `provider_hints` object and explicit `null`
+   retracts are exempt.
 
-4. **CEL Reference Validation** - Validate CEL output references at catalog item
-   authoring time. Ensure referenced resources exist, are declared as
-   dependencies, and that the referenced output field exists in the service
-   type's output definition.
+4. **Authoring-Time CEL Reference Validation** - Provide the output definition
+   that enables validating CEL output references at catalog item authoring time:
+   references must resolve to declared outputs of resources declared as
+   dependencies. (This enhancement supplies the definition to validate against;
+   it does not build the CEL engine.)
 
 ### Non-Goals
 
@@ -108,31 +101,32 @@ DCM currently cannot enable this because:
   time. Changes to upstream resources are not propagated.
 - **Provider-to-Provider Direct Calls** - Providers communicate through the DCM
   control plane, not peer-to-peer.
+- **Provision-Time Value Injection** - Defining, capturing, storing, validating,
+  and authoring-time-checking outputs is in scope for any shape (scalar and
+  structured). Injecting a resolved output into a consuming resource at
+  provision time is out of scope: it depends on declarative-api orchestration.
 - **UDLM Relationships** - Full bidirectional UDLM relationship model is
   deferred until UDLM is released.
-- **SP-specific outputs** - Outputs are service-type, not provider-specific.
-  Provider-specific output fields (analogous to `provider_hints` for input) are
-  not defined in this enhancement and are deferred.
 
 ## Proposal
 
 ### Overview
 
 1. **Output Definition on Service Types:** The service type definition is
-   extended with an `outputs` spec that declares which output fields a service
-   type produces. Providers implement the contract by populating the declared
-   output fields in their CloudEvent status payloads.
+   extended with an `output_spec` definition that declares which output fields a
+   service type produces. Providers implement the contract by populating the
+   declared output fields in their CloudEvent status payloads.
 
 2. **Output Capture (Provider to DCM):** When a resource's status changes, the
    service provider publishes a CloudEvent status event that includes a standard
-   `outputs` map in the data payload, populated according to the output fields
-   defined for its service type. The StatusConsumer — already processing status
-   events per the
+   `output_spec` map in the data payload, populated according to the output
+   fields defined for its service type. The StatusConsumer, already processing
+   status events per the
    [sp-resource-status-reader](/enhancements/sp-resource-status-reader/sp-resource-status-reader.md)
-   enhancement — extracts the `outputs` map and stores it in the `outputs`
-   column of the resource's `service_type_instances` row. Capture happens for
-   every provisioned resource, regardless of whether outputs are consumed
-   downstream.
+   enhancement, extracts the `output_spec` map and stores it in the
+   `output_spec` column of the resource's `service_type_instances` row. Capture
+   happens for every provisioned resource, regardless of whether outputs are
+   consumed downstream.
 
 3. **CEL Reference Validation (Authoring Time):** When a catalog item is
    created, DCM validates all CEL output references (`${resource.outputName}`)
@@ -140,18 +134,22 @@ DCM currently cannot enable this because:
    the service type definitions, so no cross-domain call is needed for
    validation.
 
-4. **Stored Outputs for CEL Resolution:** The `outputs` column on
+4. **Stored Outputs for CEL Resolution:** The `output_spec` column on
    `service_type_instances` provides the data store that the declarative-api's
    two-phase CEL evaluation reads from when resolving output references like
    `${ordersDb.connection_string}`.
 
 **MVP delivers independently:**
 
-- Output definitions on service types
-- Single-resource output capture (provision a resource, read and store its
-  outputs)
-- CEL reference validation at catalog item authoring time
-- Outputs query endpoint for retrieving stored outputs
+- Output definitions on service types, scalar and structured (nested object and
+  array item types)
+- Single-resource capture of outputs of any shape (provision a resource, read
+  and store its outputs), validated recursively against the definition
+- CEL reference validation at catalog item authoring time, including nested and
+  indexed reference paths
+- Internal retrieval of stored outputs (`GetOutputSpec`) for CEL resolution; the
+  output _schema_ is exposed publicly via the Service Type Response, while a
+  public endpoint for output _values_ is deferred pending an authz model
 
 **Requires declarative-api orchestration:**
 
@@ -160,7 +158,7 @@ DCM currently cannot enable this because:
 
 ### Assumptions
 
-- Service providers add an `outputs` map to their CloudEvent status payloads
+- Service providers add an `output_spec` map to their CloudEvent status payloads
 - The StatusConsumer's message processing pipeline can be extended to extract
   and store outputs from status events
 
@@ -181,13 +179,13 @@ resources:
         default: "18"
 ```
 
-The `database` service type defines output fields like `connection_string`,
-`host`, and `port` in its service type spec. When a consumer provisions this
-catalog item and the resource reaches `Running` status, the service provider
-publishes a CloudEvent status event that includes the `outputs` map. The
-StatusConsumer processes this event and stores the outputs in the `outputs`
-column of the instance row. No per-resource output declaration is needed, the
-outputs are defined by the service type.
+The `database` service type defines the output field `connection_string` in its
+service type spec. When a consumer provisions this catalog item and the resource
+reaches `Running` status, the service provider publishes a CloudEvent status
+event that includes the `output_spec` map. The StatusConsumer processes this
+event and stores the outputs in the `output_spec` column of the instance row. No
+per-resource output declaration is needed, the outputs are defined by the
+service type.
 
 #### Story 2: CEL Reference Validation at Authoring Time (MVP)
 
@@ -217,8 +215,8 @@ resources:
 DCM validates at creation time that `ordersDb` exists, is in `app`'s
 `requires_resources`, and that the `database` service type defines
 `connection_string` in its output definition (the structured
-`ServiceTypeOutputs` schema of named fields — not the opaque output _values_
-captured at runtime). Invalid references are rejected with clear errors.
+`ServiceTypeOutputSpec` schema of named fields, not the output _values_ captured
+at runtime). Invalid references are rejected with clear errors.
 
 #### Story 3: Database + Application (Target State)
 
@@ -236,90 +234,98 @@ database connection string.
 
 "Outputs" refers to three distinct things: the output _definition_ (structured,
 authored on the service type) and the output _values_ it produces at runtime
-(opaque, captured then resolved). CEL validation checks references against the
-definition; CEL resolution reads the values.
+(typed per service type, captured then resolved). CEL validation checks
+references against the definition; CEL resolution reads the values.
 
-| Term                        | What it is                                                           | Shape                    | Where it lives                                                         |
-| --------------------------- | -------------------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------- |
-| Output **definition**       | Fields a service type declares it produces (name, type, description) | Structured, named fields | `ServiceTypeOutputs`; the `outputs` field on the Service Type Response |
-| Stored output **values**    | Runtime values captured for an instance                              | Opaque JSONB             | `outputs` column on `service_type_instances`                           |
-| Published output **values** | Runtime values a provider emits on status change                     | Opaque                   | `outputs` map in the CloudEvent status payload (NATS)                  |
+| Term                        | What it is                                                           | Shape                          | Where it lives                                                                |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------------------------- |
+| Output **definition**       | Fields a service type declares it produces (name, type, description) | Structured, named fields       | `ServiceTypeOutputSpec`; the `output_spec` field on the Service Type Response |
+| Stored output **values**    | Runtime values captured for an instance                              | Typed per service type (JSONB) | `output_spec` column on `service_type_instances`                              |
+| Published output **values** | Runtime values a provider emits on status change                     | Typed per service type         | `output_spec` map in the CloudEvent status payload (NATS)                     |
 
 **Service Type Output Contract:**
 
-Output fields are defined as an `outputs:` key in the existing
-`api/catalog/v1alpha1/servicetypes/<type>/spec.yaml`, no separate file is
-introduced. These spec files are the single source of truth for the output
-contract. Both the catalog (seed.go) and service provider implementers reference
-them to know what output fields a service type produces.
+Output fields are drawn from the service type's spec field definitions in
+`api/catalog/v1alpha1/servicetypes/<type>/spec.yaml` (the `readOnly` fields
+added in control-plane PR #41). These are the primary source for the declared
+output field names: the same names that appear in the spec schema are what
+providers publish in their CloudEvent status payload's `output_spec` map, with
+no separately-invented field set for the declared contract. Fields marked
+`readOnly: true` must not be set at authoring time and appear in GET responses
+as runtime state, so a single spec definition serves both the REST API shape and
+the declared output contract. All declared fields are strictly typed.
+Provider-specific data that falls outside the declared schema goes in a single
+reserved `provider_hints` object within `output_spec`: it is opaque, populated
+at the provider's discretion, and the only part of `output_spec` not validated
+against the output definition.
 
-The service type definition declares each output's name, type, and description.
-Any provider that implements the service type populates these fields in its
-CloudEvent status payload's `outputs` map.
-
-How a provider maps its internal data to the declared output fields is an
-implementation detail of the provider. For example, the container SP derives
-`endpoint` (e.g. `"10.96.45.12:8080"`) from its Pod IP and Service port, and
-`internal_dns` from the Kubernetes cluster DNS name. The service type contract
-only defines what fields must be present, not how they are sourced.
-
-**Relationship to `readOnly` Spec Fields:**
-
-Service type spec files contain fields marked `readOnly: true` (see PR #41):
-they must not be set at authoring time and appear in GET responses to represent
-the full runtime state, including structured types such as `endpoints[]`. The
-`outputs` definition is a distinct, flat scalar subset of that runtime state;
-the fields published in the CloudEvent status payload and available for CEL
-cross-provider references. Structured `readOnly` fields are display-only and are
-not published to the `outputs` map.
-
-| `readOnly` spec field | `outputs` definition key                                               | CEL-referenceable |
-| --------------------- | ---------------------------------------------------------------------- | ----------------- |
-| `endpoints[]` (array) | —                                                                      | No (display-only) |
-| `namespace` (string)  | `namespace`                                                            | Yes               |
-| —                     | `endpoint` (derived: Pod IP + Service port, e.g. `"10.96.45.12:8080"`) | Yes               |
-| —                     | `internal_dns` (derived: K8s cluster DNS name)                         | Yes               |
+How a provider maps its internal data to the declared fields is an
+implementation detail of the provider. For example, the database SP populates
+`connection_string` from its internal connection metadata; the contract defines
+what fields must be present, not how they are sourced.
 
 **CloudEvent Status Payload Extension:**
 
 Providers extend their existing CloudEvent status payload with an optional
-`outputs` map:
+`output_spec` map:
 
 ```json
 {
   "id": "db-uuid-123",
   "status": "RUNNING",
   "message": "Database is running",
-  "outputs": {
-    "connection_string": "jdbc:postgresql://10.0.1.5:5432/orders",
-    "host": "10.0.1.5",
-    "port": 5432
+  "output_spec": {
+    "connection_string": "jdbc:postgresql://10.0.1.5:5432/orders"
   }
 }
 ```
 
-Type enforcement lives at the provider level. Types are preserved naturally from
-the source data: if a port is an integer in the Kubernetes API response, it
-arrives as an integer in the `outputs` map, is stored as an integer in the JSONB
-column, and is resolved as an integer by the CEL evaluator. The StatusConsumer
-reads the `outputs` map as-is — no extraction or field mapping.
+Output values may be scalars or structured types (arrays, nested objects),
+matching the shape defined in the service type spec. For example, a container
+provider publishes structured outputs:
 
-Existing providers (k8s-container-sp, kubevirt-sp) need to be extended.
-Providers without `outputs` continue to work; output capture is skipped.
+```json
+{
+  "id": "container-uuid-456",
+  "status": "RUNNING",
+  "message": "Container is running",
+  "output_spec": {
+    "namespace": "default",
+    "endpoints": [
+      { "address": "10.96.45.12", "port": 8080, "scope": "internal" }
+    ],
+    "provider_hints": { "node": "worker-3" }
+  }
+}
+```
+
+Service providers are expected to emit values with the types declared in the
+service type's output definition, for example, if a `port` is an integer in the
+`output_spec` map then it's populated as integer and also stored as an integer
+in the JSONB column.
+
+However, the actual enforcement boundary is the control plane: since anyone can
+author a service provider, the control plane, before storing, validates the
+captured `output_spec` recursively against the service type's output definition,
+descending into nested object fields and array item types. A drifted type (e.g.
+a `port` sent as a string, whether top-level or nested inside an `endpoints[]`
+item) is caught at capture and rejected before it is stored, rather than being
+persisted as a contract violation and propagated to a downstream consumer. Two
+things are exempt from the check: the `provider_hints` object (see the Service
+Type Output Contract above) and an explicit `null` value.
+
+A provider retracts a stale output by publishing an explicit `null` value for
+its key; the StatusConsumer deletes that key on merge (see the capture sequence
+diagram below). Keys absent from the payload are left untouched.
 
 **CEL Output Reference Syntax:**
 
-`${<resourceName>.<outputName>}`
-
-This aligns with the CEL syntax defined in the catalog-item-schema and
-declarative-api enhancements.
-
-**CEL Reference Validation Rules:**
-
-- Referenced resource must exist in the catalog item
-- Referenced resource must be in `requires_resources`
-- Referenced output must exist in the service type's output definition
-- Dependency graph must be acyclic
+`${<resourceName>.<outputPath>}`, where `outputPath` is an output field name
+with optional nested and indexed access (e.g. `endpoints[0].address`). A
+reference resolves to the referenced field's value — a string, a non-string
+scalar, or a nested object/array. This is the grammar authoring-time validation
+checks references against, and it aligns with the CEL syntax defined in the
+catalog-item-schema and declarative-api enhancements.
 
 **Rehydration:** Follows the same provisioning path as initial creation. Old
 outputs are cleaned up automatically when old resource instance rows are
@@ -327,13 +333,15 @@ removed.
 
 ### Risks and Mitigations
 
-| Risk                                                     | Mitigation                                                                                                                                                       |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Service providers must extend CloudEvent status payloads | Additive, non-breaking. Roll out incrementally.                                                                                                                  |
-| Outputs column growth                                    | Outputs are deleted automatically when the instance row is deleted. Future phase adds TTL-based cleanup if needed.                                               |
-| CEL reference errors in catalog items                    | Validation at creation time catches errors before provisioning.                                                                                                  |
-| End-to-end flow requires declarative-api orchestration   | MVP delivers standalone value: output capture and CEL validation.                                                                                                |
-| `readOnly` spec fields and `outputs` definition diverge  | spec.yaml is the source of truth; output definition keys are flat scalars derived from or alongside `readOnly` fields. Document convention enforces consistency. |
+| Risk                                                                         | Mitigation                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Service providers must extend CloudEvent status payloads                     | Additive, non-breaking. Roll out incrementally.                                                                                                                                                                                                                                                |
+| Outputs column growth                                                        | Outputs are deleted automatically when the instance row is deleted; individual stale keys can be retracted via a `null` value. Future phase adds TTL-based cleanup if needed.                                                                                                                  |
+| CEL reference errors in catalog items                                        | Validation at creation time catches errors before provisioning.                                                                                                                                                                                                                                |
+| End-to-end flow requires declarative-api orchestration                       | MVP delivers standalone value: output capture and CEL validation.                                                                                                                                                                                                                              |
+| Output field names drift from spec definitions                               | Output field names are drawn directly from the spec field definitions, one source of truth. No separately-invented field set to diverge.                                                                                                                                                       |
+| Output value type drift (a provider changes a field's type)                  | Captured values are validated recursively against the service type's output definition before storage (see CloudEvent Status Payload Extension), so a drifted type — top-level or nested inside an array/object — is rejected at capture rather than propagating to a downstream CEL consumer. |
+| Structured output field/type definitions diverge from UDLM once it finalizes | Structured definitions are transcribed to best current knowledge and flagged for reconciliation — the same posture already accepted for scalar fields. The blast radius is a catalog-side spec edit, not a wire/contract break (see Output Typing and UDLM Alignment).                         |
 
 ## Design Details
 
@@ -358,7 +366,7 @@ sequenceDiagram
 
     Note over SP: Instance state changes<br/>(e.g. PROVISIONING → RUNNING)
 
-    SP->>MS: PUBLISH CloudEvent<br/>subject: dcm.{service_type}<br/>data: {id, status: "RUNNING",<br/>message, outputs}
+    SP->>MS: PUBLISH CloudEvent<br/>subject: dcm.{service_type}<br/>data: {id, status: "RUNNING",<br/>message, output_spec}
 
     MS->>SC: PUSH message
 
@@ -368,8 +376,9 @@ sequenceDiagram
     SC->>DB: UPDATE service_type_instances<br/>SET status='RUNNING'<br/>WHERE id={instance_id}
     DB-->>SC: OK
 
-    alt outputs map present in payload
-        SC->>DB: UPDATE service_type_instances<br/>SET outputs=outputs || {outputs map}<br/>WHERE id={instance_id}
+    alt output_spec map present in payload
+        SC->>SC: Validate output_spec recursively against<br/>ServiceTypeOutputSpec<br/>(nested + array item types checked,<br/>reject+log type mismatches,<br/>provider_hints and null exempt)
+        SC->>DB: UPDATE service_type_instances<br/>SET output_spec=output_spec || {output_spec map}<br/>(keys with null value deleted)<br/>WHERE id={instance_id}
         DB-->>SC: OK
     end
 
@@ -386,8 +395,8 @@ sequenceDiagram
 
     User->>CM: POST /catalog-items<br/>{resources with CEL references}
 
-    CM->>DB: SELECT outputs FROM service_types<br/>WHERE name = referenced service_type
-    DB-->>CM: {outputs definition}
+    CM->>DB: SELECT output_spec FROM service_types<br/>WHERE name = referenced service_type
+    DB-->>CM: {output_spec definition}
 
     CM->>CM: Validate resource names, service types,<br/>requires_resources, cycle detection,<br/>CEL references against service type outputs
 
@@ -403,24 +412,60 @@ sequenceDiagram
 > see the [declarative-api](/enhancements/declarative-api/declarative-api.md)
 > enhancement.
 
+### Output Typing and UDLM Alignment
+
+UDLM defines the schema and types of a resource's outputs. This enhancement
+consumes those types rather than inventing a parallel system: it transcribes the
+UDLM-defined output fields and their types into the service type spec
+(`spec.yaml`, following the existing input-schema pattern) and validates CEL
+references against them. Pinning to concrete UDLM version is covered in
+enhancement "Aligning DCM with UDLM".
+
+### What the MVP Covers
+
+The MVP covers the full output pipeline up to — but not including —
+provision-time injection, and it does so for outputs of **any shape** (scalar or
+structured):
+
+- **Definition:** output fields and their types are declared on the service type
+  spec (`spec.yaml`), including nested object fields and array item types (e.g.
+  `endpoints[]{address, port, scope}`).
+- **Capture and storage:** the StatusConsumer stores captured values in the
+  `output_spec` JSONB column whatever their shape.
+- **Capture-time validation:** captured values are validated recursively against
+  the definition (nested object fields and array item types included) before
+  storage.
+- **Authoring-time CEL reference validation:** references are checked against
+  the definition, including nested and indexed paths
+  (`${container.endpoints[0].address}`).
+
+Structured is included because the cost is small: the definition is authored in
+the same `spec.yaml` already being extended, JSONB stores nested values
+natively, and validation is one recursive walk of the same schema (see the Data
+Model worked example). It does not depend on a separate typed-value transport.
+
+**Deferred:** provision-time injection of a resolved value into a consuming
+resource. This depends on declarative-api's DAG orchestration (see Non-Goals),
+regardless of output shape.
+
 ### Data Model
 
 **Service Type Output Definition (extension to service type spec):**
 
 ```yaml
-ServiceTypeOutputs:
+ServiceTypeOutputSpec:
   type: object
   description: >
     Declares the output fields a service type produces. Defined centrally on the
-    service type, alongside the input schema. Keys are output field names;
-    values define the type and description of each output. Keys must be flat
-    scalars; CEL resolves output references as simple key lookups. This is the
-    output *definition* — a structured, named-field schema. It is returned as
-    the `outputs` field on the Service Type Response (see API Changes) and is
+    service type, alongside the input schema. Keys are output field names drawn
+    from the service type's spec field definitions; values define the type and
+    description of each output (scalars, arrays, or nested objects). This is the
+    output *definition*, a structured, named-field schema. It is returned as the
+    `output_spec` field on the Service Type Response (see API Changes) and is
     the schema that authoring-time CEL reference validation checks against. It
-    is distinct from the captured output *values* (the `outputs` column on
-    `service_type_instances` and the `outputs` map in the CloudEvent status
-    payload), which are opaque key/value pairs.
+    is distinct from the captured output *values* (the `output_spec` column on
+    `service_type_instances` and the `output_spec` map in the CloudEvent status
+    payload), which conform to this same schema.
   additionalProperties:
     type: object
     properties:
@@ -433,42 +478,81 @@ ServiceTypeOutputs:
         description: Human-readable description of the output field
 ```
 
+**Worked example, the `container` service type's output definition:**
+
+```yaml
+output_spec:
+  namespace:
+    type: string
+    description: Kubernetes namespace the container runs in
+  endpoints:
+    type: array
+    description: Network endpoints exposed by the container
+    items:
+      type: object
+      properties:
+        address:
+          type: string
+        port:
+          type: integer
+        scope:
+          type: string
+          description: internal or external
+```
+
+A catalog item references these outputs by path, for example
+`${container.namespace}` (scalar) or `${container.endpoints[0].address}`
+(indexed into the structured `endpoints[]` field). There is no `api_endpoint`
+field. The container schema exposes `endpoints[]{address, port, scope}`, per PR
+#41.
+
 **Stored Outputs (column on `service_type_instances`):**
 
 ```yaml
-outputs:
+output_spec:
   type: object
   description: >
-    Key-value pairs of captured outputs stored as typed JSONB. Keys match those
-    declared in the service type's output definition. Values preserve their
-    native JSON types from the CloudEvent status payload (strings, integers,
-    booleans).
+    Captured outputs stored as JSONB, conforming to the service type's
+    `ServiceTypeOutputSpec` schema. Keys match those declared in the output
+    definition; values are captured from the CloudEvent status payload.
   additionalProperties: true
 ```
 
 **Instance Repository Operations (additions to existing repository):**
 
-| Operation       | Input                    | Output                               | Description                                          |
-| --------------- | ------------------------ | ------------------------------------ | ---------------------------------------------------- |
-| UpdateOutputs   | instance_id, outputs map | error                                | Merge outputs into the instance row's outputs column |
-| GetOutputs      | instance_id              | outputs map, error                   | Retrieve outputs for a single resource               |
-| GetOutputsBatch | instance_id list         | map of instance_id to outputs, error | Retrieve outputs for multiple resources              |
+| Operation          | Input                    | Output                               | Description                                                                           |
+| ------------------ | ------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------- |
+| UpdateOutputSpec   | instance_id, outputs map | error                                | Merge outputs into the instance row's outputs column; a `null` value deletes that key |
+| GetOutputSpec      | instance_id              | outputs map, error                   | Retrieve outputs for a single resource                                                |
+| GetOutputSpecBatch | instance_id list         | map of instance_id to outputs, error | Retrieve outputs for multiple resources                                               |
 
 ### API Changes
 
-**New: Outputs Query Endpoint**
+**Output schema exposure (public):**
+
+The service type's output _definition_ is already exposed publicly through the
+Service Type Response (`GET /api/v1alpha1/service-types/{name}`, below), so
+consumers can discover what outputs a service type produces without exposing any
+runtime values.
 
 ```
-GET /api/v1alpha1/service-type-instances/{id}/outputs
+GET /api/v1alpha1/service-type-instances/{id}/output-spec
 ```
 
-Returns the stored outputs for a resource instance.
+**Output values (internal for MVP):**
+
+Stored output _values_ are retrieved internally via the `GetOutputSpec`
+repository operation for CEL resolution during DAG provisioning. A public
+endpoint for reading instance output values is deferred: output values can be
+credential-shaped, so exposing them requires an authn/authz model that is out of
+scope for this MVP. A future phase may add such an endpoint once that
+access-control model is defined:
 
 **Extended: CloudEvent Status Payload**
 
 The CloudEvent data payload defined in the
 [service-provider-status-reporting](/enhancements/state-management/service-provider-status-reporting.md)
-enhancement is extended with an optional `outputs` field:
+enhancement is extended with an optional `output_spec` field:
 
 ```yaml
 StatusEventData:
@@ -480,19 +564,22 @@ StatusEventData:
       type: string
     message:
       type: string
-    outputs:
+    output_spec:
       type: object
       description: >
-        Provider-agnostic key-value pairs of runtime data. Keys match the output
-        fields defined on the service type. Absent or empty when the resource
-        has no outputs to publish.
+        Provider-agnostic runtime data conforming to the service type's
+        `ServiceTypeOutputSpec` schema. Keys match the output fields defined on
+        the service type. An explicit `null` value retracts (deletes) that key
+        on merge. Absent or empty when the resource has no outputs to publish. A
+        reserved `provider_hints` object may carry opaque provider-specific
+        values and is not validated against the output definition.
       additionalProperties: true
 ```
 
 **Extended: Service Type Response**
 
-`GET /api/v1alpha1/service-types/{name}` returns an `outputs` field alongside
-the existing `spec`:
+`GET /api/v1alpha1/service-types/{name}` returns an `output_spec` field
+alongside the existing `spec`:
 
 ```yaml
 ServiceType:
@@ -509,27 +596,15 @@ ServiceType:
       type: object
       description: Input schema (existing, defines provisioning fields)
       additionalProperties: true
-    outputs:
+    output_spec:
       type: object
       description: >
-        The service type's output definition (see ServiceTypeOutputs). Declares
-        the output fields this service type produces for CEL cross-provider
-        references. Keys are flat scalar field names; each value defines that
-        field's type and description. Any provider implementing this service
-        type is expected to populate these fields in its CloudEvent status
-        payload. This is the output *definition* (structured, named fields) —
-        distinct from the captured output *values* stored on an instance and
-        published in status events, which are opaque key/value pairs.
+        The service type's output definition (see ServiceTypeOutputSpec).
+        Declares the output fields this service type produces for CEL
+        cross-provider references. Any provider implementing this service type
+        is expected to populate these fields in its CloudEvent status payload.
       additionalProperties:
         type: object
-        properties:
-          type:
-            type: string
-            description:
-              JSON type of the output value (string, integer, array, object)
-          description:
-            type: string
-            description: Human-readable description of the output field
     path:
       type: string
       readOnly: true
@@ -543,15 +618,31 @@ ServiceType:
       readOnly: true
 ```
 
+### Testing Strategy
+
+Golden file tests for capture-time validation: maintain reference files per
+service type (CloudEvent status payload, the service type's
+`ServiceTypeOutputSpec`, expected stored `output_spec` after merge). Unit tests
+assert payload + definition -> stored outputs, covering the recursive path
+(nested objects, array item types), the `provider_hints` and `null` exemptions,
+and rejection of drifted/undeclared fields.
+
+CEL reference validation unit tests assert that references resolving against a
+service type's output definition pass and that unknown-output,
+missing-dependency, and cyclic references are rejected with clear errors.
+
+Integration tests with real SPs (storage first for the scalar path, container
+for structured capture) added as needed.
+
 ### Upgrade / Downgrade Strategy
 
-**Upgrade:** The `outputs` column is added to `service_type_instances` via GORM
-AutoMigrate alongside the existing domain table migrations. Providers add
-`outputs` to CloudEvent status payloads incrementally.
+**Upgrade:** The `output_spec` column is added to `service_type_instances` via
+GORM AutoMigrate alongside the existing domain table migrations. Providers add
+`output_spec` to CloudEvent status payloads incrementally.
 
-**Downgrade:** Deploy the previous control-plane image. The `outputs` column
-remains inert; the `outputs` field in CloudEvent payloads and on service type
-definitions is ignored by older versions.
+**Downgrade:** Deploy the previous control-plane image. The `output_spec` column
+remains inert; the `output_spec` field in CloudEvent payloads and on service
+type definitions is ignored by older versions.
 
 ## Implementation History
 
@@ -564,20 +655,6 @@ definitions is ignored by older versions.
    declarative-api's DAG orchestration. This enhancement is designed to be
    implemented and tested independently, but its full value is realized only
    when both are deployed.
-
-2. **Cross-Repo Coordination** - Providers must add an `outputs` map to their
-   CloudEvent status payloads, requiring coordinated changes across multiple
-   repos.
-
-3. **Two representations of runtime fields** - `readOnly` spec fields and
-   `outputs` definition keys both declare what a service type produces at
-   runtime. The two representations exist because the channels are different:
-   `readOnly` fields travel through the REST API (GET responses from service
-   providers), while outputs travel through NATS CloudEvent status payloads.
-   They serve different consumers and cannot be collapsed into one definition.
-   The two sets do not always overlap one-to-one. Document convention is the
-   enforcer, there is no automated consistency check between them in this
-   enhancement.
 
 ## Alternatives
 
@@ -640,11 +717,11 @@ message. The ordering concern outweighs the separation-of-concerns benefit.
 After the StatusConsumer receives a `Running` status event via NATS, the SP
 Resource Manager makes a single HTTP GET request to the service provider's
 resource endpoint to retrieve the full resource state including outputs. The
-provider adds an `outputs` map to its existing GET response.
+provider adds an `output_spec` map to its existing GET response.
 
 #### Pros
 
-- Provider outputs are fetched on demand — the CloudEvent status payload does
+- Provider outputs are fetched on demand, so the CloudEvent status payload does
   not need to change
 - Outputs are guaranteed to reflect the provider's current state at query time
 
@@ -655,7 +732,7 @@ provider adds an `outputs` map to its existing GET response.
 - Adds a synchronous HTTP round-trip after every `Running` transition, including
   error handling, retries, and timeouts for a call that may fail independently
   of the status event
-- Couples output availability to provider reachability at query time — if the
+- Couples output availability to provider reachability at query time. If the
   provider is briefly unreachable after publishing `Running`, the outputs poll
   fails even though the resource is healthy
 
@@ -675,52 +752,46 @@ no additional failure modes.
 #### Description
 
 Use the `readOnly: true` markers in the service type spec YAML as the sole
-output contract, eliminating the separate `outputs` field on the `ServiceType`
-model. The CEL validation function derives output field names by scanning the
-spec for `readOnly: true` entries rather than reading a dedicated `Outputs`
-field.
+output contract, eliminating the separate `output_spec` field on the
+`ServiceType` model. The CEL validation function derives output field names by
+scanning the spec for `readOnly: true` entries rather than reading a dedicated
+`Outputs` field.
 
 #### Pros
 
 - Single source of truth: one definition in spec.yaml covers both the REST API
   shape and the output contract
-- Eliminates the `Outputs` GORM column and the seeding work in seed.go
 - PR #41's `readOnly` fields become the canonical output definition
+- No separately-invented output field names to maintain
 
 #### Cons
 
-- Structured `readOnly` fields (arrays, nested objects) cannot serve as CEL
-  output references. The declarative-api's CEL engine resolves
-  `${resource.fieldName}` as a flat key lookup; array indexing
-  (`${container.endpoints[0].address}`) is not supported. This makes
-  `endpoints[]` and similar structured fields unusable as CEL cross-provider
-  references without a CEL parser change.
 - The `readOnly` JSON Schema marker conflates two different semantics: "do not
   let users set this field" (input validation) and "this is a cross-provider
   output" (CEL contract). These are independent concerns.
-- Discovering CEL-referenceable output fields requires scanning and parsing the
-  spec schema rather than reading a dedicated flat field.
-- Output fields like `endpoint` and `internal_dns` (for the container service
-  type) are derived by the provider and have no direct 1:1 `readOnly` spec
-  field. They cannot be represented under this alternative without adding them
-  to the spec solely to mark them `readOnly`.
+- Discovering CEL-referenceable output fields by scanning and parsing the spec
+  schema at validation time is more complex than reading a dedicated field.
 
 #### Status
 
-Rejected
+Partially adopted
 
 #### Rationale
 
-CEL resolution requires flat scalar keys. Structured `readOnly` fields (e.g.
-`endpoints[]`) cannot satisfy this, and provider-derived outputs (e.g.
-`endpoint`, `internal_dns`) have no `readOnly` spec field to mark. The separate
-`outputs` field is therefore required.
+The field naming principle of this alternative was adopted: output field names
+are drawn from the spec field definitions (PR #41) rather than a
+separately-invented set. However, the `output_spec` field on the `ServiceType`
+model is retained for efficient CEL reference validation and API responses,
+populated from the spec definitions. The runtime scanning approach (deriving
+output names by parsing the spec schema at validation time) was not adopted. A
+dedicated `output_spec` field is simpler to query and does not require
+schema-walking logic.
 
-### Alternative 5: Separate `outputs` Table
+### Alternative 5: Separate `output_spec` Table
 
 #### Description
 
-Store outputs in a dedicated `outputs` table with a foreign key referencing
+Store outputs in a dedicated `output_spec` table with a foreign key referencing
 `service_type_instances.id` and CASCADE DELETE.
 
 #### Pros
@@ -747,11 +818,42 @@ Rejected
 
 #### Rationale
 
-The `outputs` column on `service_type_instances` is simpler, follows the
+The `output_spec` column on `service_type_instances` is simpler, follows the
 existing `spec` JSONB pattern, requires no new repository, and cleans up
 automatically.
 
+### Alternative 6: Opaque Output Values
+
+#### Description
+
+Store and publish output _values_ as an opaque `additionalProperties: true` map,
+keeping only the output _definition_ typed.
+
+#### Pros
+
+- Providers can add fields without a schema change
+- Simplest possible capture path (store the map verbatim)
+
+#### Cons
+
+- A provider changing a field's type (e.g. `port` integer → string) breaks a
+  downstream CEL consumer silently, with no schema-level signal
+- The stored/published shape diverges from the typed definition, so the two must
+  be reconciled by hand rather than by one schema
+
+#### Status
+
+Rejected
+
+#### Rationale
+
+Capture-time validation against the typed definition (see CloudEvent Status
+Payload Extension) catches the exact failure mode that makes an opaque map
+unsafe: silent type drift reaching a downstream CEL consumer. The flexibility
+this alternative offers is retained through the reserved `provider_hints`
+extension point rather than a fully-opaque map.
+
 ## Infrastructure Needed
 
-N/A — Uses existing DCM infrastructure (PostgreSQL, service type definition
+N/A. Uses existing DCM infrastructure (PostgreSQL, service type definition
 mechanism).
