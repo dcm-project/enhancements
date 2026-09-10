@@ -26,13 +26,14 @@ reports lifecycle status back to DCM. It does not implement the underlying
 block/file provisioning—that remains the responsibility of the cluster's
 StorageClass and CSI driver.
 
-The v1 implementation focuses exclusively on PVC lifecycle management (CREATE,
-READ, UPDATE, DELETE). UPDATE supports capacity expansion when the StorageClass
-allows it. StorageClass provisioning, volume snapshots, and cross-cluster
-migration are out of scope. The K8s Storage SP implements the `storage` service
-type schema. Each SP instance connects to exactly one Kubernetes cluster API.
-Multiple SP instances may target the same cluster when separate namespaces or
-registrations are required.
+The v1 implementation focuses on PVC lifecycle management (CREATE, READ,
+DELETE). This narrow scope enables faster implementation and validation. Future
+versions may add `UPDATE` (for example PVC capacity expansion). StorageClass
+provisioning, volume snapshots, and cross-cluster migration are out of scope.
+The K8s Storage SP implements the `storage` service type schema. Each SP
+instance connects to exactly one Kubernetes cluster API. Multiple SP instances
+may target the same cluster when separate namespaces or registrations are
+required.
 
 ## Motivation
 
@@ -47,10 +48,7 @@ portable `storage` service type on Kubernetes clusters.
 - Define the lifecycle of a Service Provider (SP) managing persistent volumes on
   Kubernetes clusters.
 - Define the registration flow with DCM SP API.
-- Define `CREATE`, `READ`, `UPDATE`, and `DELETE` endpoints for managing PVC
-  instances on a Kubernetes cluster. `UPDATE` supports capacity expansion when
-  the underlying StorageClass and CSI driver allow it (see
-  [PATCH /api/v1alpha1/volumes/{volume_id}](#patch-apiv1alpha1volumesvolume_id)).
+- Define `CREATE`, `READ`, and `DELETE` endpoints for managing PVC instances.
 - Define status reporting to DCM via CloudEvents on the messaging system.
 - Manage `PersistentVolumeClaim` resources through a single Kubernetes cluster
   API per SP instance. Multiple SP instances may target the same cluster when
@@ -73,7 +71,10 @@ portable `storage` service type on Kubernetes clusters.
 - Deployment strategy for the K8s Storage SP API (covered by platform deployment
   documentation).
 - `ReadWriteOncePod` (RWOP) support — requires Kubernetes 1.22+ and driver
-  support. If needed, it may be requested via `provider_hints.kubernetes` in v2.
+  support. If needed, it may be requested via `provider_hints.kubernetes` in a
+  future version.
+- Define `UPDATE` endpoint for volume instances (for example PVC capacity
+  expansion) — out of scope for the first version (v1).
 
 ## Proposal
 
@@ -129,8 +130,8 @@ portable `storage` service type on Kubernetes clusters.
   tier differentiation.
 - Authentication uses a kubeconfig file (external deployment) or an in-cluster
   ServiceAccount when deployed as a Kubernetes Deployment in the target cluster.
-- The SP may register directly with DCM or via an environment agent. See
-  [Environment Agent](../environment-agent/environment-agent.md).
+- The SP registers via an environment agent (embedded or standalone external).
+  See [Environment Agent](../environment-agent/environment-agent.md).
 - When multiple storage SPs register against the same cluster, DCM Placement
   selects the provider by policy.
 
@@ -147,8 +148,9 @@ portable `storage` service type on Kubernetes clusters.
 
 #### DCM SP Registry
 
-- Auto-registration on startup with DCM SP Registrar. See
-  [DCM Registration Flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md).
+- Registration with the environment-agent (embedded or standalone external SP).
+  See [Registration Flow](#registration-flow) and
+  [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md).
 
 #### DCM SP Health Check
 
@@ -192,14 +194,32 @@ Per-volume `storage_class`, `volume_mode`, and `access_mode` may be set under
 
 ### Registration Flow
 
-The K8s Storage SP API must successfully complete a registration process to
-ensure DCM is aware of it. During startup, the service uses the DCM registration
-client to send a request to the SP API registration endpoint
-`POST /api/v1alpha1/providers`. See DCM
-[registration flow](https://github.com/dcm-project/enhancements/blob/main/enhancements/sp-registration-flow/sp-registration-flow.md)
-for more information.
+K8s Storage is exposed to DCM through an
+[environment-agent](../environment-agent/environment-agent.md) in one of two
+modes:
 
-Example registration payload (via `service-provider-manager` client):
+- **Embedded:** storage SP code runs inside the agent. When enabled in agent
+  configuration (`AGENT_EMBEDDED_SPS` includes `storage`), the agent registers
+  the provider at startup with `service_type=storage` and
+  `endpoint=embedded://storage`. No standalone SP process or
+  `DCM_REGISTRATION_URL` is involved.
+- **Standalone external:** a separate K8s Storage SP process registers with the
+  **environment-agent** via `POST /api/v1alpha1/providers` (not directly with
+  the control-plane). Set `DCM_REGISTRATION_URL` to the agent API base URL, for
+  example `http://environment-agent:8080/api/v1alpha1`.
+
+Only one storage provider — embedded or external — may serve the `storage`
+service type per agent. Enabling a standalone external SP requires disabling
+embedded storage for that agent; otherwise registration returns `409 Conflict`.
+
+The agent forwards storage work to the embedded provider or the external SP
+endpoint and includes `storage` in its DCM agent registration when the provider
+is available. See
+[SP registration flow](../sp-registration-flow/sp-registration-flow.md) and
+[environment-agent SP registration](../environment-agent/environment-agent.md#sp-registration-to-agent).
+
+Example registration payload for a **standalone external** SP (via
+`service-provider-manager` client):
 
 ```golang
 import (
@@ -212,7 +232,7 @@ payload := dcmv1alpha1.Provider{
     DisplayName:   ptr("Kubernetes Storage Service Provider"),
     Endpoint:      fmt.Sprintf("%s/api/v1alpha1/volumes", apiHost),
     SchemaVersion: "v1alpha1",
-    Operations:    &[]string{"CREATE", "READ", "UPDATE", "DELETE"},
+    Operations:    &[]string{"CREATE", "READ", "DELETE"},
     Metadata: &dcmv1alpha1.ProviderMetadata{
         RegionCode: ptr("us-east-1"),
         Zone:       ptr("us-east-1b"),
@@ -228,32 +248,35 @@ the
 
 **K8s Storage SP-specific requirements:**
 
-- `service_type` field must be set to `"storage"`
-- `operations` field must include: `CREATE`, `READ`, `UPDATE`, `DELETE`
-- `metadata.resources.total_storage` may reflect cluster capacity at
-  registration time (optional)
+- `serviceType` field must be set to `"storage"`
+- `operations` field must include `CREATE`, `READ`, and `DELETE`
+- `metadata.resources.totalStorage` may reflect cluster capacity at registration
+  time (optional)
 
 #### Registration Process
 
-The K8s Storage SP follows the standard self-registration process. The
-registration request includes the endpoint URL in the format:
-`fmt.Sprintf("%s/api/v1alpha1/volumes", apiHost)`.
+For a **standalone external** SP, startup registration uses
+`DCM_REGISTRATION_URL` as the agent base URL and posts to
+`POST /api/v1alpha1/providers`. The payload includes an HTTP endpoint reachable
+from the agent in the format: `fmt.Sprintf("%s/api/v1alpha1/volumes", apiHost)`.
+
+For an **embedded** deployment, the agent performs internal registration at
+startup; the standalone process and `DCM_REGISTRATION_URL` are not used.
 
 ### API Endpoints
 
-The CRUD endpoints are consumed by the DCM SP API to create and manage storage
-resources.
+The volume lifecycle endpoints are consumed by the DCM SP API to create and
+manage storage resources.
 
 #### Endpoints Overview
 
-| Method | Endpoint                          | Description                     |
-| ------ | --------------------------------- | ------------------------------- |
-| POST   | /api/v1alpha1/volumes             | Create a new volume (PVC)       |
-| GET    | /api/v1alpha1/volumes             | List all volumes                |
-| GET    | /api/v1alpha1/volumes/{volume_id} | Get a volume instance           |
-| PATCH  | /api/v1alpha1/volumes/{volume_id} | Update volume (expand capacity) |
-| DELETE | /api/v1alpha1/volumes/{volume_id} | Delete a volume instance        |
-| GET    | /api/v1alpha1/volumes/health      | K8s Storage SP health check     |
+| Method | Endpoint                          | Description                 |
+| ------ | --------------------------------- | --------------------------- |
+| POST   | /api/v1alpha1/volumes             | Create a new volume (PVC)   |
+| GET    | /api/v1alpha1/volumes             | List all volumes            |
+| GET    | /api/v1alpha1/volumes/{volume_id} | Get a volume instance       |
+| DELETE | /api/v1alpha1/volumes/{volume_id} | Delete a volume instance    |
+| GET    | /api/v1alpha1/volumes/health      | K8s Storage SP health check |
 
 ##### AEP Compliance
 
@@ -264,20 +287,37 @@ to check for compliance with AEP.
 
 **Description:** Create a new storage volume instance.
 
-The POST endpoint follows the portable `storage` service type contract (see
+The POST endpoint accepts an AEP `Volume` resource body (portable fields in
+`spec`; read-only fields such as `id`, `path`, and `status` are omitted on
+create). The `spec` follows the portable `storage` service type contract (see
 [Service Type Definitions - Storage](../service-type-definitions/service-type-definitions.md#storage)).
-Required fields: `service_type`, `capacity`, `metadata.name`. Optional:
-`provider_hints.kubernetes` (`storage_class`, `volume_mode`, `access_mode`).
+Required fields in `spec`: `service_type`, `capacity`, `metadata.name`.
+Optional: `provider_hints.kubernetes` (`storage_class`, `volume_mode`,
+`access_mode`).
 
 During creation, each PVC must be labeled with:
 
 - `dcm.project/managed-by=dcm`
-- `dcm.project/dcm-instance-id=<UUID>`
+- `dcm.project/dcm-instance-id=<instance-id>` (AEP-122 format)
 - `dcm.project/dcm-service-type=storage`
 
-The `dcm-instance-id` is a UUID generated by DCM. If a PVC with the same
-`metadata.name` already exists in the configured namespace, the K8s Storage SP
-returns a `409 Conflict` error response without modifying the existing resource.
+The `dcm-instance-id` is the DCM catalog instance ID (AEP-122). In DCM-managed
+flows, the control-plane assigns this value and passes it via the `id` query
+parameter on create. The SP uses that id as the instance identity, sets
+`spec.metadata.name` to the same value, and creates the PVC with `metadata.name`
+equal to the id. The same value is stored in the `dcm.project/dcm-instance-id`
+label and used in URL paths.
+
+`spec.metadata.name` is required in the request body (catalog and OpenAPI
+validation) but may carry a catalog default placeholder; when `id` is provided,
+the SP ignores any mismatch and canonicalizes to the DCM instance id.
+
+When no `id` query parameter is provided (direct API use), the SP derives the
+instance id from `spec.metadata.name` and uses it as the PVC name.
+
+Conflict detection relies on Kubernetes PVC name uniqueness: a second create
+with the same instance id returns `409 Conflict` without modifying the existing
+resource.
 
 **PVC settings via provider_hints:**
 
@@ -289,24 +329,31 @@ returns a `409 Conflict` error response without modifying the existing resource.
 
 `access_mode` maps directly to Kubernetes PVC `spec.accessModes`.
 
-**Example request payload:**
+**Example request payload (DCM-managed create with client-assigned id):**
+
+`POST /api/v1alpha1/volumes?id=a29c6a14-7f3b-4c1d-9e2a-1b8c4d5e6f70`
 
 ```json
 {
-  "service_type": "storage",
-  "capacity": "100Gi",
-  "metadata": {
-    "name": "app-data"
-  },
-  "provider_hints": {
-    "kubernetes": {
-      "storage_class": "gp3-csi",
-      "volume_mode": "Filesystem",
-      "access_mode": "ReadWriteOnce"
+  "spec": {
+    "service_type": "storage",
+    "capacity": "100Gi",
+    "metadata": {
+      "name": "my-volume"
+    },
+    "provider_hints": {
+      "kubernetes": {
+        "storage_class": "gp3-csi",
+        "volume_mode": "Filesystem",
+        "access_mode": "ReadWriteOnce"
+      }
     }
   }
 }
 ```
+
+The `metadata.name` value in the body may be a catalog default; the SP
+canonicalizes it to the `id` query parameter value (`a29c6a14-...`) for the PVC.
 
 **Response:** Returns `201 Created` with status `PROVISIONING` while the PVC is
 pending binding.
@@ -315,13 +362,13 @@ pending binding.
 
 ```json
 {
-  "id": "123e4567-e89b-12d3-a456-426614174000",
-  "path": "volumes/123e4567-e89b-12d3-a456-426614174000",
+  "id": "a29c6a14-7f3b-4c1d-9e2a-1b8c4d5e6f70",
+  "path": "volumes/a29c6a14-7f3b-4c1d-9e2a-1b8c4d5e6f70",
   "spec": {
     "service_type": "storage",
     "capacity": "100Gi",
     "metadata": {
-      "name": "app-data",
+      "name": "a29c6a14-7f3b-4c1d-9e2a-1b8c4d5e6f70",
       "namespace": "production",
       "storage_class": "gp3-csi"
     },
@@ -339,7 +386,7 @@ pending binding.
 **Error Handling:**
 
 - **400 Bad Request**: Invalid request payload or missing required fields
-- **409 Conflict**: PVC with the same `metadata.name` already exists
+- **409 Conflict**: Volume with the same instance ID (PVC name) already exists
 - **422 Unprocessable Entity**: Requested StorageClass does not exist
 - **500 Internal Server Error**: Unexpected error during resource creation
 
@@ -358,8 +405,8 @@ pending binding.
 {
   "volumes": [
     {
-      "id": "123e4567-e89b-12d3-a456-426614174000",
-      "path": "volumes/123e4567-e89b-12d3-a456-426614174000",
+      "id": "app-data-vol-1",
+      "path": "volumes/app-data-vol-1",
       "spec": {
         "service_type": "storage",
         "capacity": "100Gi",
@@ -392,8 +439,8 @@ pending binding.
 
 ```json
 {
-  "id": "123e4567-e89b-12d3-a456-426614174000",
-  "path": "volumes/123e4567-e89b-12d3-a456-426614174000",
+  "id": "app-data-vol-1",
+  "path": "volumes/app-data-vol-1",
   "spec": {
     "service_type": "storage",
     "capacity": "100Gi",
@@ -421,8 +468,10 @@ pending binding.
 
 #### PATCH /api/v1alpha1/volumes/{volume_id}
 
-**Description:** Update a storage volume. v1 supports **capacity expansion**
-only.
+Not in scope for v1 (see [Non-Goals](#non-goals)). The following describes
+expected behavior when `UPDATE` is added in a future version.
+
+**Description:** Update a storage volume. Capacity expansion only.
 
 The SP validates the request before patching the PVC:
 
@@ -432,7 +481,7 @@ The SP validates the request before patching the PVC:
    request (shrinking is not supported)
 4. Patches `spec.resources.requests.storage` on the PVC
 
-**Pre-patch validation (v1):** The SP checks policy preconditions (StorageClass
+**Pre-patch validation:** The SP checks policy preconditions (StorageClass
 expansion, new size greater than current). It does **not** pre-flight backend
 free space, cloud account quotas, or Ceph pool capacity — those are not exposed
 through a portable Kubernetes API. Expansion may still fail asynchronously after
@@ -577,7 +626,7 @@ event.SetData(cloudevents.ApplicationJSON, StorageStatus{
 | PROVISIONING | PVC Phase = `Pending` (waiting for binding/provisioning) |
 | PROVISIONING | PVC Phase = `Bound` and `Resizing` or                    |
 |              | `FileSystemResizePending` condition is `True` (expansion |
-|              | in progress)                                             |
+|              | in progress; applies when `UPDATE` is implemented)       |
 | RUNNING      | PVC Phase = `Bound` and no active resize conditions      |
 | FAILED       | PVC Phase = `Lost` or unrecoverable binding/expansion    |
 |              | failure (see PVC events and conditions)                  |
