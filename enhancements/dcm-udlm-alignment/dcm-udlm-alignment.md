@@ -54,12 +54,12 @@ Align DCM (Data Center Management) Service Provider boundary with UDLM
 (Universal Data Lifecycle Model) so that UDLM becomes the common language
 between Service Providers (SPs) and the DCM control plane.
 
-**v1 scope:** `Compute.VM` (UDLM) / `service_type: vm` (DCM) / **KubeVirt SP**
+**v1 scope:** `Machine.VM` (UDLM) / `service_type: vm` (DCM) / **KubeVirt SP**
 only. This delivers request translation, UDLM-aligned outputs, and a shared SDK
 interface as a reference pattern. Other service types and SPs (OSAC, VMware,
 container, cluster) follow the same architecture in later phases.
 
-v1 means request payloads sent to KubeVirt SP follow UDLM `Compute.VM`
+v1 means request payloads sent to KubeVirt SP follow UDLM `Machine.VM`
 structure, and realized payloads follow UDLM `outputs` (IPs, hostnames, provider
 handles). A shared SDK provides UDLM types and the SP interface contract;
 KubeVirt SP implements naturalize/denaturalize as the reference implementation.
@@ -68,11 +68,11 @@ KubeVirt SP implements naturalize/denaturalize as the reference implementation.
 
 | Layer                | v1 deliverable                                                    | Out of v1 scope                                                    |
 | -------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| **UDLM type**        | `Compute.VM` only                                                 | `Compute.Container`, `Compute.Cluster`, database, storage, network |
+| **UDLM type**        | `Machine.VM` only                                                 | `Machine.Container`, `Machine.Cluster`, database, storage, network |
 | **DCM service type** | `service_type: vm` (`servicetypes/vm/spec.yaml`)                  | All other service types                                            |
 | **Service Provider** | **KubeVirt SP** (`kubevirt-sp`) — reference implementation        | OSAC SP, VMware/vSphere SP, other VM backends                      |
 | **Control plane**    | Translator + outputs for `vm` at SPRM dispatch boundary           | Translators for other service types                                |
-| **SDK**              | `Compute.VM` + `ComputeVMOutputs` + `VMServiceProvider` interface | Other UDLM type structs until next phase                           |
+| **SDK**              | `Machine.VM` + `MachineVMOutputs` + `VMServiceProvider` interface | Other UDLM type structs until next phase                           |
 
 There is no separate "VM Service Provider" component. `service_type: vm` is the
 DCM abstraction; KubeVirt SP is one concrete backend that registers against it.
@@ -95,10 +95,10 @@ consumers (CLI, UI, other services) can use without provider-specific parsing.
 
 **v1 (this effort):**
 
-- Align `service_type: vm` request payloads to UDLM `Compute.VM` at the SP
+- Align `service_type: vm` request payloads to UDLM `Machine.VM` at the SP
   dispatch boundary (translation layer)
-- Align realized VM outputs to UDLM `Compute.VM` outputs schema
-- Deliver a shared SDK with `Compute.VM` types and `VMServiceProvider` interface
+- Align realized VM outputs to UDLM `Machine.VM` outputs schema
+- Deliver a shared SDK with `Machine.VM` types and `VMServiceProvider` interface
 - Implement naturalize/denaturalize in **KubeVirt SP** as the reference SP
 
 **Long-term (post-v1):**
@@ -143,7 +143,7 @@ comparison):
 service categories, intent capture, policy — is the north star and may be less
 total work long term than maintaining a translation layer. Option B at the SP
 boundary is the pragmatic v1 path given blast radius and active developer
-velocity on DCM field names. v1 proves the pattern on `Compute.VM` / KubeVirt
+velocity on DCM field names. v1 proves the pattern on `Machine.VM` / KubeVirt
 SP; convergence to Option A across the platform remains the explicit end state.
 
 #### Why Option B -- blast radius analysis
@@ -176,7 +176,7 @@ names. Only the SP side changes.
 
 #### Story 1: SP developer receives structured request
 
-A KubeVirt SP developer receives a `Compute.VM` payload with typed fields
+A KubeVirt SP developer receives a `Machine.VM` payload with typed fields
 (`cpu.count`, `memory.size`, `networks[]`) instead of a raw `map[string]any`
 with DCM field names. The SDK provides Go structs and the `VMServiceProvider`
 interface, so the developer implements `Naturalize()` and `Denaturalize()`
@@ -193,7 +193,7 @@ structured outputs: `ip_addresses`, `hostname`, `mac_addresses`,
 A team building a VMware SP imports the shared SDK, implements the
 `VMServiceProvider` interface with vSphere-specific naturalize/denaturalize
 logic, and registers with DCM. No control plane changes needed. The SP receives
-`Compute.VM` and returns `ComputeVMOutputs` -- the same contract as every other
+`Machine.VM` and returns `MachineVMOutputs` -- the same contract as every other
 VM SP.
 
 ### Implementation Details/Notes/Constraints
@@ -215,17 +215,17 @@ VM SP.
 **Target (UDLM payload, agent-based NATS dispatch, structured outputs back):**
 
 1. Steps 1-4 are identical.
-2. DCM-to-UDLM translator converts the merged payload to a UDLM `Compute.VM`
+2. DCM-to-UDLM translator converts the merged payload to a UDLM `Machine.VM`
    payload.
 3. Control plane publishes the UDLM-shaped payload (+ `provider_hints` as a
    sidecar) to NATS.
 4. The Environment Agent receives the message and forwards it to the local SP
    (transparent relay).
-5. KubeVirt SP calls `Naturalize()` to convert `Compute.VM` to a KubeVirt
+5. KubeVirt SP calls `Naturalize()` to convert `Machine.VM` to a KubeVirt
    `VirtualMachine` CR.
 6. SP creates the VM via the KubeVirt API.
 7. SP calls `Denaturalize()` to convert VMI status to structured
-   `ComputeVMOutputs`.
+   `MachineVMOutputs`.
 8. SP hands outputs to the Environment Agent, which publishes them back to NATS.
 
 #### Architecture: Today vs Target
@@ -263,10 +263,10 @@ flowchart LR
     subgraph env [Remote Environment]
         Agent["Environment\nAgent"] --> KubevirtSP["KubeVirt SP\n(shared SDK)"]
         KubevirtSP -->|"Naturalize()"| KubeVirtAPI["KubeVirt API"]
-        KubeVirtAPI -->|"Denaturalize()"| Outputs["ComputeVMOutputs\nIPs, hostname,\nMAC, run_state"]
+        KubeVirtAPI -->|"Denaturalize()"| Outputs["MachineVMOutputs\nIPs, hostname,\nMAC, run_state"]
     end
 
-    Translator -->|"UDLM Compute.VM\n+ provider_hints\n(NATS)"| Agent
+    Translator -->|"UDLM Machine.VM\n+ provider_hints\n(NATS)"| Agent
     Outputs -->|"structured outputs\n(NATS)"| StatusConsumer["Status Consumer"]
 ```
 
@@ -274,9 +274,9 @@ flowchart LR
 the left (OPA, Placement, CatalogItems, PostgreSQL) stays in DCM format.
 Everything to the right (SPs) speaks UDLM via the shared SDK.
 
-#### What Needs to Change -- 4 Layers (v1: Compute.VM / KubeVirt SP)
+#### What Needs to Change -- 4 Layers (v1: Machine.VM / KubeVirt SP)
 
-> v1 implements all four layers for `Compute.VM` / `service_type: vm` / KubeVirt
+> v1 implements all four layers for `Machine.VM` / `service_type: vm` / KubeVirt
 > SP only. The layer model applies to other service types in later phases.
 
 **Layer 1: Schema alignment (request payload)**
@@ -302,7 +302,7 @@ UDLM defines the portable fields -- what the user wants (cpu, memory, guest_os).
 But each provider needs additional platform-specific data to create a functional
 resource. For example, KubeVirt requires a `namespace`; VMware requires a
 `datacenter`, `cluster`, and `datastore`. These fields are not in UDLM's
-`Compute.VM` because they are not portable across providers.
+`Machine.VM` because they are not portable across providers.
 
 The provider-specific data comes from three sources, merged in priority order
 (later wins):
@@ -322,7 +322,7 @@ provider-specific context to produce a functional provider-native resource
 (e.g., a KubeVirt `VirtualMachine` CR or a vSphere VM spec).
 
 In UDLM terms, provider-specific fields are declared in **Provider Classes**
-(e.g., `Compute.VM.OCPVirt` for KubeVirt, `Compute.VM.VSphere` for VMware).
+(e.g., `Machine.VM.OCPVirt` for KubeVirt, `Machine.VM.VSphere` for VMware).
 During the transition, these fields travel as `provider_hints` alongside the
 UDLM payload. Long-term, they are formally declared in the Provider Class schema
 so they are typed and validated.
@@ -344,7 +344,7 @@ type VmStatus struct {
 Target (aligned with UDLM `outputs`):
 
 ```go
-type ComputeVMOutputs struct {
+type MachineVMOutputs struct {
     IPAddresses      []string `json:"ip_addresses"`
     PrimaryIP        string   `json:"primary_ip"`
     Hostname         string   `json:"hostname"`
@@ -366,22 +366,22 @@ Actions required:
 The SDK is a shared library (e.g., evolve `dcm-project/service-provider-api`)
 that both the control plane and every SP import:
 
-- **Control plane** imports the SDK for the translator (needs `ComputeVM` as
-  target type) and the StatusConsumer (needs `ComputeVMOutputs` to parse SP
+- **Control plane** imports the SDK for the translator (needs `MachineVM` as
+  target type) and the StatusConsumer (needs `MachineVMOutputs` to parse SP
   responses).
 - **Each SP** imports the SDK to implement the `VMServiceProvider` interface
   (`Naturalize`, `Realize`, `Denaturalize`) using the shared types.
 
 ```
 dcm-project/service-provider-api/        <-- shared, both control plane and SPs import
-  pkg/types/compute_vm.go                <-- UDLM Compute.VM as Go struct
-  pkg/types/compute_vm_outputs.go        <-- UDLM outputs as Go struct
+  pkg/types/machine_vm.go                <-- UDLM Machine.VM as Go struct
+  pkg/types/machine_vm_outputs.go        <-- UDLM outputs as Go struct
   pkg/contract/interfaces.go             <-- VMServiceProvider interface
   pkg/helpers/units.go                   <-- GB<->Gi, MB<->Mi
 
 dcm-project/kubevirt-sp/                 <-- per-SP, imports shared SDK
-  pkg/naturalize.go                      <-- ComputeVM -> KubeVirt VirtualMachine CR
-  pkg/denaturalize.go                    <-- VMI status -> ComputeVMOutputs
+  pkg/naturalize.go                      <-- MachineVM -> KubeVirt VirtualMachine CR
+  pkg/denaturalize.go                    <-- VMI status -> MachineVMOutputs
 ```
 
 Both sides of the boundary speak the same types. A new SP joins by importing the
@@ -398,7 +398,7 @@ type SPError struct {
 
 **Layer 4: Migration path (KubeVirt SP as reference)**
 
-- Accept UDLM-shaped `Compute.VM` payloads
+- Accept UDLM-shaped `Machine.VM` payloads
 - Implement denaturalization: extract IP, hostname, MAC from VMI status and
   return as UDLM outputs
 - Add `networks[]` support (map to KubeVirt interfaces/networks)
@@ -414,7 +414,7 @@ declares its capability at registration:
 | Payload format | Request                    | Response                      |
 | -------------- | -------------------------- | ----------------------------- |
 | `"dcm"`        | DCM-shaped payload (as-is) | Status string                 |
-| `"udlm"`       | UDLM `Compute.VM` payload  | Structured `ComputeVMOutputs` |
+| `"udlm"`       | UDLM `Machine.VM` payload  | Structured `MachineVMOutputs` |
 
 The outputs-first sequencing creates a natural intermediate state (DCM payload
 in, structured outputs out):
@@ -428,7 +428,7 @@ The Environment Agent
 ([FLPATH-4487](https://redhat.atlassian.net/browse/FLPATH-4487), **Closed**) is
 a transparent relay -- it does not need to know whether the payload is
 DCM-shaped or UDLM-shaped. The transport foundation is in place; v1 focuses on
-payload format alignment (DCM `vm` spec → UDLM `Compute.VM`) and structured
+payload format alignment (DCM `vm` spec → UDLM `Machine.VM`) and structured
 outputs. SP-side HTTP removal
 ([FLPATH-4767](https://redhat.atlassian.net/browse/FLPATH-4767)) proceeds
 independently.
@@ -448,14 +448,14 @@ independently.
 
 ### Sequencing
 
-**v1 (Compute.VM / KubeVirt SP):**
+**v1 (Machine.VM / KubeVirt SP):**
 
 | Step | Action                                                                | Notes                                                                              |
 | ---- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| 1    | **Define VM outputs contract** aligned with UDLM `Compute.VM` outputs | Builds on cross-provider-outputs (#99); denaturalize plugs in after opaque outputs |
-| 2    | **Build SDK** with `Compute.VM` + `ComputeVMOutputs` types            | Pin to current UDLM release                                                        |
+| 1    | **Define VM outputs contract** aligned with UDLM `Machine.VM` outputs | Builds on cross-provider-outputs (#99); denaturalize plugs in after opaque outputs |
+| 2    | **Build SDK** with `Machine.VM` + `MachineVMOutputs` types            | Pin to current UDLM release                                                        |
 | 3    | **Update KubeVirt SP** — naturalize/denaturalize                      | Reference implementation for v1                                                    |
-| 4    | **Add VM translation layer** in control plane                         | `service_type: vm` DCM spec → UDLM `Compute.VM` at SPRM boundary                   |
+| 4    | **Add VM translation layer** in control plane                         | `service_type: vm` DCM spec → UDLM `Machine.VM` at SPRM boundary                   |
 
 **Post-v1:**
 
@@ -472,8 +472,8 @@ support needed at this stage.
 
 ### Testing Strategy
 
-Golden file tests for `Compute.VM`: maintain reference files (DCM input payload,
-expected UDLM output, KubeVirt VMI status, expected `ComputeVMOutputs`).
+Golden file tests for `Machine.VM`: maintain reference files (DCM input payload,
+expected UDLM output, KubeVirt VMI status, expected `MachineVMOutputs`).
 Translation layer unit tests assert input -> expected output. Integration tests
 with real SPs added as needed.
 
@@ -528,7 +528,7 @@ Deferred
 #### Rationale
 
 Option A is the target end state but not feasible as a first step given the
-blast radius. Option B provides the migration bridge for v1 (`Compute.VM` /
+blast radius. Option B provides the migration bridge for v1 (`Machine.VM` /
 KubeVirt SP). Once all SPs are UDLM-native and DCM schemas converge upstream
 (catalog, policy, intent), Option A is achieved and the translation layer is
 removed.
@@ -536,4 +536,4 @@ removed.
 ## Infrastructure Needed
 
 - Shared SDK repository (new or evolve `dcm-project/service-provider-api`)
-- Golden file test fixtures for `Compute.VM` translation (v1 scope)
+- Golden file test fixtures for `Machine.VM` translation (v1 scope)
