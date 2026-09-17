@@ -218,6 +218,8 @@ visible tombstone (`deferred=true`) or is fully purged (`deferred=false`).
 Returns `204 No Content` once the deletion is enrolled, regardless of whether
 the underlying agent publish succeeds — see
 [Service Type Instance Deletion Flow](#service-type-instance-deletion-flow).
+Error responses (`400`, `404`) use problem JSON — see
+[Error Handling](#error-handling).
 
 **GET /api/v1/health**  
 Retrieve the health status of SP Resource Manager.
@@ -538,13 +540,13 @@ The SP Resource Manager consumes response CloudEvents from the
 Agents after processing creation or deletion requests. The following table
 describes the actions taken for each response type:
 
-| CloudEvent Type                   | Action                                                                                                                                                                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `dcm.agent.creation-acknowledged` | Update instance record: status from `PENDING` to `PROVISIONING`, store `provider_name` from response                                                                                                                             |
-| `dcm.agent.deletion-acknowledged` | Finalize the deletion: non-deferred (`deferred=false`) instances are hard-deleted from the database; deferred instances are soft-completed (`deletion_status: DELETED`), keeping a tombstone visible with `show_deleted=true`    |
-| `dcm.agent.error`                 | Update instance record: status to `FAILED`, store error details. Notify Placement Manager.                                                                                                                                       |
-| `dcm.agent.request-queued`        | Update instance record: status to `QUEUED`. Report queued status to Placement Manager (PM handles timeout logic).                                                                                                                |
-| `dcm.agent.cancel-rejected`       | The agent could not cancel the creation (resource already provisioning on its SP). SPRM sends a deletion request to the old agent to remove the resource, since the re-evaluated agent is the authoritative `resource_id` owner. |
+| CloudEvent Type                   | Action                                                                                                                                                                                                                                                                                                                |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dcm.agent.creation-acknowledged` | Update instance record: status from `PENDING` to `PROVISIONING`, store `provider_name` from response                                                                                                                                                                                                                  |
+| `dcm.agent.deletion-acknowledged` | Finalize the deletion: non-deferred (`deferred=false`) instances are hard-deleted from the database; deferred instances are soft-completed (`deletion_status: DELETED`), keeping a tombstone visible with `show_deleted=true`. Notify Placement Manager via `OnResourceDeleted` so reverse-DAG deletion can continue. |
+| `dcm.agent.error`                 | Update instance record: status to `FAILED`, store error details. Notify Placement Manager.                                                                                                                                                                                                                            |
+| `dcm.agent.request-queued`        | Update instance record: status to `QUEUED`. Report queued status to Placement Manager (PM handles timeout logic).                                                                                                                                                                                                     |
+| `dcm.agent.cancel-rejected`       | The agent could not cancel the creation (resource already provisioning on its SP). SPRM sends a deletion request to the old agent to remove the resource, since the re-evaluated agent is the authoritative `resource_id` owner.                                                                                      |
 
 Note: `provider_name` in instance records is populated asynchronously. At 202
 response time, only `agent_name` is known. The `provider_name` is set when the
@@ -658,16 +660,24 @@ failure — that failure is retried by the
 surfaced to the caller. See
 [Service Type Instance Deletion Flow](#service-type-instance-deletion-flow).
 
+**Creation error codes:**
+
 - **404 Not Found**: Agent with the given `agent_name` is not registered
 - **400 Bad Request**: Invalid request schema
 - **503 Service Unavailable**: Agent is Unavailable (missed heartbeats) or
   Congested (consumer lag threshold exceeded)
 - **500 Internal Server Error**: Unexpected error in SP Resource Manager
 
+For deletion, `404` means the `instance_id` itself was not found (there is no
+agent-lookup failure mode for `DELETE`, since a delete is enrolled and retried
+regardless of agent health — see
+[Service Type Instance Deletion Flow](#service-type-instance-deletion-flow)).
+
 ### Status Consumer Flow
 
-After SPRM accepts a creation (or deletion) request and returns `202`, instance
-progresses continues asynchronously. Service Providers publish status
+After SPRM accepts a creation request and returns `202 Accepted`, the instance's
+progression to `RUNNING` or `FAILED` happens asynchronously and is tracked by
+the consumer described in this section. Service Providers publish status
 CloudEvents to the message bus whenever resource state changes (for example
 `PENDING` to `RUNNING`). SPRM runs a background status consumer that:
 
@@ -675,6 +685,14 @@ CloudEvents to the message bus whenever resource state changes (for example
 2. Updates the matching service-type instance row in the control-plane database
 3. When the new status is `RUNNING`, notifies Placement in-process
    (`OnResourceRunning`) so Placement can advance DAG orchestration
+
+Deletion follows a different, synchronous-accept path: SPRM accepts a deletion
+request with `204 No Content` (see
+[Service Type Instance Deletion Flow](#service-type-instance-deletion-flow)).
+The status consumer also receives SP-published `DELETED` events and updates the
+DB row, but Placement notification for deletion (`OnResourceDeleted`) is handled
+by the response consumer when `dcm.agent.deletion-acknowledged` arrives (see
+[Asynchronous Response Processing](#asynchronous-response-processing)).
 
 Subscription subjects, CloudEvent parsing, and idempotent DB updates are
 detailed in
@@ -709,8 +727,7 @@ sequenceDiagram
             SC->>PM: OnResourceRunning (in-process)<br/>{id, outputs}
             Note over PM: Continue DAG progression and bind<br/> CEL with outputs
         else status is DELETED
-            SC->>PM: OnResourceDeleted (in-process)<br/>{id}
-            Note over PM: Continue reverse-DAG deletion
+            Note over SC: DB already updated above.<br/>PM deletion notification is handled<br/>by the response consumer<br/>(dcm.agent.deletion-acknowledged).
         else status is FAILED
           SC->>PM: OnResourceFailed (in-process)<br/>{id}
           Note over PM: Create path only: halt DAG<br/>and start rollback
@@ -744,9 +761,13 @@ sequenceDiagram
 
 4. **Check for `DELETED` state**
 
-- When status is `DELETED`, SPRM notifies Placement via `OnResourceDeleted` so
-  reverse-DAG deletion can continue (see
-  [Placement Manager — Status-driven reverse-DAG deletion](../placement-manager/placement-manager.md#status-driven-reverse-dag-deletion)).
+- When status is `DELETED`, the status consumer updates the instance record in
+  the database. For non-deferred deletes, the response consumer may have already
+  hard-deleted the record — the update is a no-op (see step 2 unknown-instance
+  handling). Placement notification for deletion (`OnResourceDeleted`) is not
+  triggered here — it is handled by the response consumer when
+  `dcm.agent.deletion-acknowledged` arrives (see
+  [Asynchronous Response Processing](#asynchronous-response-processing)).
 
 5. **Check for `FAILED` state**
 
