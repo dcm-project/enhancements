@@ -22,9 +22,9 @@ see-also:
 ## Summary
 
 The Environment Agent monitors SP health using two mechanisms: in-process checks
-for embedded SPs (K8s Container, ACM Cluster, KubeVirt) and polling the
-`/health` endpoint for external SPs. DCM monitors Agent health via heartbeats
-and consumer lag reporting.
+for embedded SPs (K8s Container, ACM Cluster, KubeVirt, K8s Storage) and polling
+the `/health` endpoint for external SPs. DCM monitors Agent health via
+heartbeats and consumer lag reporting.
 
 ## Motivation
 

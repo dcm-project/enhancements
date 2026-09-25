@@ -33,11 +33,11 @@ ships, edge locations). In each target environment, an
 between DCM and the Service Providers (SPs) deployed in that environment.
 
 The Agent supports a hybrid SP model: it ships with embedded SP code for known
-service types (K8s Container, ACM Cluster, KubeVirt), enabled via configuration,
-and also accepts external ("bring your own") SPs that register via the Agent's
-SP Registration API (`POST /api/v1/providers`). Only one SP — embedded or
-external — may serve a given service type per agent; duplicate registrations are
-rejected with `409 Conflict`.
+service types (K8s Container, ACM Cluster, KubeVirt, K8s Storage), enabled via
+configuration, and also accepts external ("bring your own") SPs that register
+via the Agent's SP Registration API (`POST /api/v1/providers`). Only one SP —
+embedded or external — may serve a given service type per agent; duplicate
+registrations are rejected with `409 Conflict`.
 
 This document defines the registration contract for external SPs — API shape,
 idempotency semantics, and natural key behavior. Embedded SPs register
@@ -80,8 +80,8 @@ Flow is defined in the
 External Service Providers must register using the Agent's SP Registration API
 to operate within the DCM system. The Agent implements the provider registration
 endpoint (`POST /api/v1/providers`), applying the same contract defined in this
-document. Embedded SPs (K8s Container, ACM Cluster, KubeVirt) register
-internally at agent startup and do not use this endpoint.
+document. Embedded SPs (K8s Container, ACM Cluster, KubeVirt, K8s Storage)
+register internally at agent startup and do not use this endpoint.
 
 The registration phase provides the Agent with the SP endpoint, metadata and
 capabilities so it can route creation requests to the appropriate SP. The

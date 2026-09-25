@@ -28,7 +28,7 @@ see-also:
   requests from a messaging system, and routes them to the appropriate Service
   Provider.
 - **Embedded SP:** SP code shipped within the agent binary (K8s Container, ACM
-  Cluster, KubeVirt), enabled via configuration. Embedded SPs register
+  Cluster, KubeVirt, Storage), enabled via configuration. Embedded SPs register
   internally at agent startup without a REST call.
 - **External SP:** A standalone SP process that registers to the agent via the
   REST API (`POST /api/v1/providers`). Also referred to as "bring your own" SP.
@@ -42,9 +42,9 @@ between the SP and DCM: an agent would run on each environment usable by DCM and
 the agent would register the environment to DCM.
 
 The agent supports a hybrid SP model: it ships with embedded SP code for known
-service types (K8s Container, ACM Cluster, KubeVirt), enabled via configuration,
-and also accepts external ("bring your own") SPs that register via REST API.
-Only one SP — embedded or external — may serve a given service type per agent;
+service types (Container, Cluster, VM, Storage), enabled via configuration, and
+also accepts external ("bring your own") SPs that register via REST API. Only
+one SP — embedded or external — may serve a given service type per agent;
 duplicate registrations are rejected.
 
 This enhancement also proposes to change the way the creation request is
@@ -121,9 +121,12 @@ topic as competing consumers.
 The agent supports a hybrid SP model combining embedded and external SPs:
 
 - **Embedded SPs:** The agent ships with SP code for K8s Container, ACM Cluster,
-  and KubeVirt. These are enabled via configuration and register internally at
-  agent startup — no REST call is needed. The embedded SP code lives in
-  dedicated packages within the agent codebase.
+  KubeVirt, and K8s Storage. These are enabled via configuration and register
+  internally at agent startup — no REST call is needed. The embedded SP code
+  lives in dedicated packages within the agent codebase. K8s Storage registers
+  with `service_type=storage` and `endpoint=embedded://storage` (see
+  [K8s Storage SP](../k8s-storage-sp/k8s-storage-sp.md) for deployment and API
+  details).
 - **External SPs ("bring your own"):** Standalone SP processes register to the
   agent via the REST API (`POST /api/v1/providers`), following the contract
   defined in the
@@ -204,7 +207,7 @@ flowchart TD
         subgraph Agent_Process["Agent Process"]
             direction TB
             AG["**Agent**<br/>Routes creation requests to SP"]:::agent
-            EMB_SP["**Embedded SPs**<br/>K8s Container · ACM Cluster · KubeVirt<br/>(enabled via config)"]:::embedded
+            EMB_SP["**Embedded SPs**<br/>K8s Container · ACM Cluster · KubeVirt · K8s Storage<br/>(enabled via config)"]:::embedded
             EMB_SP ---|In-process| AG
         end
 
@@ -230,7 +233,8 @@ flowchart TD
 
 - The agent is spawned in an environment
 - At startup, the agent registers its configured embedded SPs internally (K8s
-  Container, ACM Cluster, KubeVirt — each enabled via configuration)
+  Container, ACM Cluster, KubeVirt, K8s Storage — each enabled via
+  configuration)
 - External SPs register to the agent via REST API; the agent rejects
   registration if the service type is already served (by an embedded or another
   external SP)
@@ -295,6 +299,16 @@ Example response (fields shown are illustrative and may not be exhaustive):
       "name": "k8s-container",
       "service_type": "container",
       "type": "embedded",
+      "endpoint": "embedded://container",
+      "status": "Ready",
+      "last_check": "2026-06-05T10:30:00Z"
+    },
+    {
+      "provider_id": "sp-storage-001",
+      "name": "storage",
+      "service_type": "storage",
+      "type": "embedded",
+      "endpoint": "embedded://storage",
       "status": "Ready",
       "last_check": "2026-06-05T10:30:00Z"
     },
@@ -446,7 +460,7 @@ sequenceDiagram
 
     Note over AG: Agent starts:<br/>register only explicitly<br/>enabled embedded SPs
 
-    AG->>AG: Register explicitly enabled<br/>embedded SPs internally<br/>(K8s Container, ACM Cluster, KubeVirt<br/>— only if enabled in config)
+    AG->>AG: Register explicitly enabled<br/>embedded SPs internally<br/>(K8s Container, ACM Cluster, KubeVirt, K8s Storage<br/>— only if enabled in config)
 
     Note over SP: External SP starts and<br/>registers to the agent
 
@@ -1221,9 +1235,9 @@ target service type (see
   embedded SPs, via polling for external SPs)
 - Requires messaging system infrastructure accessible to both DCM and all target
   environments
-- Embedding SP code (K8s Container, ACM Cluster, KubeVirt) increases agent
-  binary size and couples the agent release cycle to the embedded SPs for
-  updates
+- Embedding SP code (K8s Container, ACM Cluster, KubeVirt, K8s Storage)
+  increases agent binary size and couples the agent release cycle to the
+  embedded SPs for updates
 
 ## Alternatives
 
