@@ -22,9 +22,9 @@ see-also:
 ## Summary
 
 The Environment Agent monitors SP health using two mechanisms: in-process checks
-for embedded SPs (K8s Container, ACM Cluster, KubeVirt) and polling the
-`/health` endpoint for external SPs. DCM monitors Agent health via heartbeats
-and consumer lag reporting.
+for embedded SPs (Container, Cluster, VM, Storage) and polling the `/health`
+endpoint for external SPs. DCM monitors Agent health via heartbeats and consumer
+lag reporting.
 
 ## Motivation
 
@@ -67,8 +67,8 @@ monitors Agent health via periodic REST heartbeats and tracks consumer lag.
      - **Success Criteria:** HTTP 200 OK.
 
 2. **Agent Health Monitoring (Agent → DCM):**
-   - **Mechanism:** Agent sends `PUT /api/v1/agents/{agent_id}/heartbeat` to
-     DCM.
+   - **Mechanism:** Agent sends `PUT /api/v1alpha1/agents/{agent_id}/heartbeat`
+     to DCM.
    - **Frequency:** Every `heartbeat_interval` seconds (configurable).
    - **Failure:** If no heartbeat within configurable threshold, DCM marks agent
      as Unavailable.
@@ -114,14 +114,14 @@ full details on retry topic behavior.
 **Unavailable** (after exceeding failure threshold):
 
 1. Agent **removes** the service type from its advertised list.
-2. Sends `POST /api/v1/agents` to DCM with the updated registration.
+2. Sends `POST /api/v1alpha1/agents` to DCM with the updated registration.
 3. Drains retry topic — rejects held requests with error CloudEvents.
 4. Publishes a `service-type-unavailable` health warning CloudEvent.
 
 **Recovery:**
 
 1. Re-adds service type to advertised list if it was removed (Unavailable case)
-   and sends `POST /api/v1/agents` to DCM with the updated registration.
+   and sends `POST /api/v1alpha1/agents` to DCM with the updated registration.
 2. Processes held requests from the retry topic.
 
 ## Agent Health Monitoring
@@ -129,7 +129,7 @@ full details on retry topic behavior.
 The Agent reports its own liveness to DCM via periodic REST heartbeats. DCM
 tracks the last heartbeat timestamp for each agent.
 
-- **Endpoint:** `PUT /api/v1/agents/{agent_id}/heartbeat`
+- **Endpoint:** `PUT /api/v1alpha1/agents/{agent_id}/heartbeat`
 - **Payload:** `{timestamp, consumer_lag}`
 - **Frequency:** Every `heartbeat_interval` seconds (configurable).
 - If no heartbeat is received within a configurable threshold, DCM marks the
@@ -144,7 +144,7 @@ sequenceDiagram
     participant DB as Database
 
     loop Every {heartbeat_interval} seconds
-        AG->>DCM: PUT /api/v1/agents/{agent_id}/heartbeat<br/>{timestamp, consumer_lag}
+        AG->>DCM: PUT /api/v1alpha1/agents/{agent_id}/heartbeat<br/>{timestamp, consumer_lag}
         DCM->>DB: Update heartbeat timestamp and lag
         DCM->>DCM: Check consumer_lag against threshold
         alt consumer_lag >= consumer_lag_threshold

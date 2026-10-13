@@ -32,22 +32,23 @@ ships, edge locations). In each target environment, an
 [Agent](../environment-agent/environment-agent.md) runs as the intermediary
 between DCM and the Service Providers (SPs) deployed in that environment.
 
-The Agent supports a hybrid SP model: it ships with embedded SP code for known
-service types (K8s Container, ACM Cluster, KubeVirt), enabled via configuration,
-and also accepts external ("bring your own") SPs that register via the Agent's
-SP Registration API (`POST /api/v1/providers`). Only one SP — embedded or
+The Agent supports a hybrid SP model: it ships with embedded adapters for known
+service types (Container, Cluster, VM, Storage), enabled via configuration, and
+also accepts external ("bring your own") SPs that register via the Agent's SP
+Registration API (`POST /api/v1alpha1/providers`). Only one SP — embedded or
 external — may serve a given service type per agent; duplicate registrations are
-rejected with `409 Conflict`.
+rejected with `409 Conflict`. External registration is unauthenticated and is
+not production scope until agent AuthN/Z; v1 production uses embedded SPs.
 
 This document defines the registration contract for external SPs — API shape,
 idempotency semantics, and natural key behavior. Embedded SPs register
 internally at agent startup without a REST call and do not use this flow.
 
 The Agent, in turn, registers itself to DCM via a separate API
-(`POST /api/v1/agents`), advertising the environment and the aggregated list of
-service types it can serve. DCM's Registration Handler no longer receives SP
-registrations directly; it receives Agent registrations. The Agent Registration
-Flow is defined in the
+(`POST /api/v1alpha1/agents`), advertising the environment and the aggregated
+list of service types it can serve. DCM's Registration Handler no longer
+receives SP registrations directly; it receives Agent registrations. The Agent
+Registration Flow is defined in the
 [Environment Agent enhancement](../environment-agent/environment-agent.md#agent-registration-flow).
 
 ## Motivation
@@ -79,8 +80,8 @@ Flow is defined in the
 
 External Service Providers must register using the Agent's SP Registration API
 to operate within the DCM system. The Agent implements the provider registration
-endpoint (`POST /api/v1/providers`), applying the same contract defined in this
-document. Embedded SPs (K8s Container, ACM Cluster, KubeVirt) register
+endpoint (`POST /api/v1alpha1/providers`), applying the same contract defined in
+this document. Embedded SPs (Container, Cluster, VM, Storage) register
 internally at agent startup and do not use this endpoint.
 
 The registration phase provides the Agent with the SP endpoint, metadata and
@@ -103,7 +104,8 @@ registration. The
 [Service Provider API specification](https://github.com/Fale/dcm/blob/od/api/interoperabilityAPI.yaml)
 is under development.
 
-DCM implements `POST /api/v1/agents` for Agent registration (defined in the
+DCM implements `POST /api/v1alpha1/agents` for Agent registration (defined in
+the
 [Environment Agent enhancement](../environment-agent/environment-agent.md#post-apiv1agents--agent-registration)).
 
 #### Architectural Assumptions
@@ -158,7 +160,7 @@ flowchart BT
     end
 
     VM_Prov & Storage_Prov & Container_Prov & Pod_Prov -- 1. Register --> Handler
-    Handler -- 5. Update DCM<br/>POST /api/v1/agents --> DB
+    Handler -- 5. Update DCM<br/>POST /api/v1alpha1/agents --> DB
 ```
 
 - Admins predefine supported
@@ -178,7 +180,7 @@ flowchart BT
 - The Agent stores the SP registration in its internal registry and recomputes
   its list of supported service types
 - When the Agent's service type list changes (new type added or removed), the
-  Agent updates DCM via `POST /api/v1/agents` (see the
+  Agent updates DCM via `POST /api/v1alpha1/agents` (see the
   [Environment Agent enhancement](../environment-agent/environment-agent.md#sp-registration-to-agent)
   for the full flow)
 - When user requests a catalog offering, DCM's Control Plane matches it to a
@@ -227,7 +229,7 @@ the same registration endpoint again. The Agent will update the existing SP
 entry rather than creating a duplicate.
 
 When an SP re-registers with updated capabilities, the Agent recomputes its
-service type list and, if changed, updates DCM via `POST /api/v1/agents`.
+service type list and, if changed, updates DCM via `POST /api/v1alpha1/agents`.
 
 - SP service_type changes
 - SP restarts and re-registers using the same Agent SP Registration API endpoint
@@ -254,7 +256,7 @@ service type list and, if changed, updates DCM via `POST /api/v1/agents`.
 
 - First registration (with client-specified id):
 
-`POST /api/v1/providers?id=uuid-1234` (on the Agent)
+`POST /api/v1alpha1/providers?id=uuid-1234` (on the Agent)
 
 ```yaml
 {
@@ -288,7 +290,7 @@ Response:
 
 - First registration (with server generated id):
 
-`POST /api/v1/providers` (on the Agent)
+`POST /api/v1alpha1/providers` (on the Agent)
 
 ```yaml
 {
@@ -310,7 +312,7 @@ Response:
 
 - Re-registration (SP restarts, same endpoint):
 
-`POST /api/v1/providers` (on the Agent)
+`POST /api/v1alpha1/providers` (on the Agent)
 
 ```yaml
 {
@@ -339,12 +341,14 @@ The risks related to the Agent-based architecture (agent as single point of
 failure, unauthenticated SP registration, messaging system dependencies) are
 documented in the
 [Environment Agent enhancement](../environment-agent/environment-agent.md#risks-and-mitigations).
+Unauthenticated external registration is not production scope; v1 production
+uses embedded SPs.
 
 ### Future Improvements
 
 - HA agent replicas for high availability per environment
 - Authenticated SP registration (AuthN/AuthZ for the Agent's SP Registration
-  API)
+  API) — required before external/BYO registration is production scope
 - Dynamic cost tier updates without agent restart
 
 ## Alternatives

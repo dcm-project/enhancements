@@ -161,14 +161,17 @@ Multiple catalog items can reference the same `service_type` with different
 `vcpu.count` between 4-16 instead of 1-4, while sharing the same underlying `vm`
 ServiceType definition.
 
-| Field             | Required | Type    | Default | Description                                                                   |
-| :---------------- | :------- | :------ | :------ | :---------------------------------------------------------------------------- |
-| path              | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)                             |
-| display_name      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path                |
-| editable          | No       | boolean | false   | Whether users can modify this field                                           |
-| default           | No       | any     | -       | Default value for this field                                                  |
-| validation_schema | No       | object  | -       | JSON Schema rules (only applies if editable)                                  |
-| depends_on        | No       | object  | -       | Conditional options derived from another field (single option when read-only) |
+| Field             | Required | Type    | Default | Description                                                                                                                                                                                                                                              |
+| :---------------- | :------- | :------ | :------ | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| path              | Yes      | string  | -       | Field path in service schema (e.g., _vcpu.count_)                                                                                                                                                                                                        |
+| display_name      | No       | string  | -       | Human-readable label for UI. If not set, derived from the path                                                                                                                                                                                           |
+| editable          | No       | boolean | false   | Whether users can modify this field                                                                                                                                                                                                                      |
+| default           | No       | any     | -       | Default value for this field                                                                                                                                                                                                                             |
+| validation_schema | No\*     | object  | -       | JSON Schema rules. When set, DCM applies them to defaults and `user_values` on instance create (HTTP 4xx). Editable fields SHOULD include a schema so invalid input fails in the catalog rather than later in the SP. UI may use the same schema for UX. |
+| depends_on        | No       | object  | -       | Conditional options derived from another field (single option when read-only)                                                                                                                                                                            |
+
+\*Not required by the Catalog API (not MUST). Editable fields SHOULD include
+`validation_schema`.
 
 The `depends_on` object specifies conditional options for this field based on
 another field's value. It has:
@@ -454,13 +457,33 @@ This
 standard supports:
 
 - Numeric constraints: _minimum, maximum, multipleOf_
-- String patterns: _pattern, minLength, maxLength_
+- String constraints: _pattern, minLength, maxLength_
 - Enumerations: _enum_
 - Array constraints: _minItems, maxItems_
 - Conditional logic: _if/then/else_
 
 For the complete validation vocabulary, see the
 [JSON Schema Validation specification](https://json-schema.org/draft/2020-12/json-schema-validation).
+
+**Guidance:** `validation_schema` is not required by the Catalog API. Editable
+fields SHOULD include one. When present, catalog resolution (`SpecBuilder`)
+validates defaults and `user_values` against that schema before placement.
+Omitting it means malformed values can be accepted with HTTP 201 and only fail
+later in the service provider.
+
+**Storage `capacity`:** constraints should match the **registered storage SP**
+in the deployed environment, not a control-plane Kubernetes quantity. The
+portable storage service type does not mandate Kubernetes syntax. A Kubernetes
+adapter catalog item may use a quantity pattern as an example:
+
+```yaml
+validation_schema:
+  type: string
+  pattern: '^([1-9][0-9]*(\.[0-9]+)?|0\.[0-9]*[1-9][0-9]*)(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|K)?$'
+```
+
+See the storage service type definition and the k8s-storage-sp adapter
+enhancement.
 
 ### Data Flow
 
@@ -490,6 +513,7 @@ For the complete validation vocabulary, see the
 See [Declarative API](/enhancements/declarative-api/declarative-api.md) for CEL
 two-phase evaluation, DAG levels, and status-driven progression.
 
-Note: The `validation_schema` is used by both UI (for UX) and DCM (for
-enforcement). Users may bypass the UI (CLI, Ansible, cURL), so DCM must always
-validate.
+Note: When `validation_schema` is set, both UI (UX) and DCM (instance create)
+use it. Users may bypass the UI (CLI, Ansible, cURL). Editable fields SHOULD
+include a schema; without one, DCM does not enforce field shape at the catalog
+API, and failures may surface only asynchronously in the service provider.

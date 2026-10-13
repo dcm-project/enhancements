@@ -27,11 +27,12 @@ see-also:
   environment. It registers the environment to DCM, consumes resource operation
   requests from a messaging system, and routes them to the appropriate Service
   Provider.
-- **Embedded SP:** SP code shipped within the agent binary (K8s Container, ACM
-  Cluster, KubeVirt), enabled via configuration. Embedded SPs register
-  internally at agent startup without a REST call.
+- **Embedded SP:** SP code shipped within the agent binary (adapters for
+  Container, Cluster, VM, Storage), enabled via configuration. Embedded SPs
+  register internally at agent startup without a REST call.
 - **External SP:** A standalone SP process that registers to the agent via the
-  REST API (`POST /api/v1/providers`). Also referred to as "bring your own" SP.
+  REST API (`POST /api/v1alpha1/providers`). Also referred to as "bring your
+  own" SP.
 - **Environment:** A set of infrastructures that is ready to receive workload
   from DCM (e.g., `dev`, `staging`, `prod-eu-west-1`).
 
@@ -42,9 +43,9 @@ between the SP and DCM: an agent would run on each environment usable by DCM and
 the agent would register the environment to DCM.
 
 The agent supports a hybrid SP model: it ships with embedded SP code for known
-service types (K8s Container, ACM Cluster, KubeVirt), enabled via configuration,
-and also accepts external ("bring your own") SPs that register via REST API.
-Only one SP — embedded or external — may serve a given service type per agent;
+service types (Container, Cluster, VM, Storage), enabled via configuration, and
+also accepts external ("bring your own") SPs that register via REST API. Only
+one SP — embedded or external — may serve a given service type per agent;
 duplicate registrations are rejected.
 
 This enhancement also proposes to change the way the creation request is
@@ -120,13 +121,16 @@ topic as competing consumers.
 
 The agent supports a hybrid SP model combining embedded and external SPs:
 
-- **Embedded SPs:** The agent ships with SP code for K8s Container, ACM Cluster,
-  and KubeVirt. These are enabled via configuration and register internally at
-  agent startup — no REST call is needed. The embedded SP code lives in
-  dedicated packages within the agent codebase.
+- **Embedded SPs:** The agent ships with adapters for known service types
+  (Container, Cluster, VM, Storage). These are enabled via configuration and
+  register internally at agent startup — no REST call is needed. The embedded SP
+  code lives in dedicated packages within the agent codebase. Storage registers
+  with `service_type=storage` and `endpoint=embedded://storage`. The v1
+  reference adapter is the
+  [K8s Storage SP](../k8s-storage-sp/k8s-storage-sp.md).
 - **External SPs ("bring your own"):** Standalone SP processes register to the
-  agent via the REST API (`POST /api/v1/providers`), following the contract
-  defined in the
+  agent via the REST API (`POST /api/v1alpha1/providers`), following the
+  contract defined in the
   [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md).
 
 Only one SP — embedded or external — may serve a given service type per agent.
@@ -204,7 +208,7 @@ flowchart TD
         subgraph Agent_Process["Agent Process"]
             direction TB
             AG["**Agent**<br/>Routes creation requests to SP"]:::agent
-            EMB_SP["**Embedded SPs**<br/>K8s Container · ACM Cluster · KubeVirt<br/>(enabled via config)"]:::embedded
+            EMB_SP["**Embedded SPs**<br/>Container · Cluster · VM · Storage<br/>(enabled via config)"]:::embedded
             EMB_SP ---|In-process| AG
         end
 
@@ -229,8 +233,8 @@ flowchart TD
 #### Flow Description
 
 - The agent is spawned in an environment
-- At startup, the agent registers its configured embedded SPs internally (K8s
-  Container, ACM Cluster, KubeVirt — each enabled via configuration)
+- At startup, the agent registers its configured embedded SPs internally
+  (Container, Cluster, VM, Storage — each enabled via configuration)
 - External SPs register to the agent via REST API; the agent rejects
   registration if the service type is already served (by an embedded or another
   external SP)
@@ -253,13 +257,13 @@ flowchart TD
 
 #### Agent Endpoints
 
-| Method | Endpoint                        | Description                                                                                                   |
-| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| POST   | /api/v1/providers               | SP registration — reuses the [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md) contract |
-| GET    | /api/v1/providers               | List all registered SPs (embedded and external)                                                               |
-| GET    | /api/v1/providers/{provider_id} | Get a specific registered SP by ID                                                                            |
+| Method | Endpoint                              | Description                                                                                                   |
+| ------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| POST   | /api/v1alpha1/providers               | SP registration — reuses the [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md) contract |
+| GET    | /api/v1alpha1/providers               | List all registered SPs (embedded and external)                                                               |
+| GET    | /api/v1alpha1/providers/{provider_id} | Get a specific registered SP by ID                                                                            |
 
-##### `POST /api/v1/providers` — SP Registration (External SPs only)
+##### `POST /api/v1alpha1/providers` — SP Registration (External SPs only)
 
 Reuses the contract defined in the
 [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md)
@@ -278,7 +282,7 @@ registration with `409 Conflict`:
 
 Embedded SPs register internally at startup and do not use this endpoint.
 
-##### `GET /api/v1/providers` — List Registered SPs
+##### `GET /api/v1alpha1/providers` — List Registered SPs
 
 Returns the list of all SPs registered to the agent, including both embedded and
 external SPs. Each entry includes the provider ID, name, service type, whether
@@ -295,6 +299,16 @@ Example response (fields shown are illustrative and may not be exhaustive):
       "name": "k8s-container",
       "service_type": "container",
       "type": "embedded",
+      "endpoint": "embedded://container",
+      "status": "Ready",
+      "last_check": "2026-06-05T10:30:00Z"
+    },
+    {
+      "provider_id": "sp-storage-001",
+      "name": "storage",
+      "service_type": "storage",
+      "type": "embedded",
+      "endpoint": "embedded://storage",
       "status": "Ready",
       "last_check": "2026-06-05T10:30:00Z"
     },
@@ -310,7 +324,7 @@ Example response (fields shown are illustrative and may not be exhaustive):
 }
 ```
 
-##### `GET /api/v1/providers/{provider_id}` — Get a Specific SP
+##### `GET /api/v1alpha1/providers/{provider_id}` — Get a Specific SP
 
 Returns the details of a single registered SP identified by its provider ID,
 including its current health status. Returns `404 Not Found` if no SP with the
@@ -318,12 +332,12 @@ given ID is registered.
 
 #### DCM Endpoints
 
-| Method | Endpoint                            | Description        |
-| ------ | ----------------------------------- | ------------------ |
-| POST   | /api/v1/agents                      | Agent registration |
-| PUT    | /api/v1/agents/{agent_id}/heartbeat | Agent heartbeat    |
+| Method | Endpoint                                  | Description        |
+| ------ | ----------------------------------------- | ------------------ |
+| POST   | /api/v1alpha1/agents                      | Agent registration |
+| PUT    | /api/v1alpha1/agents/{agent_id}/heartbeat | Agent heartbeat    |
 
-##### `POST /api/v1/agents` — Agent Registration
+##### `POST /api/v1alpha1/agents` — Agent Registration
 
 Register a new agent to DCM.
 
@@ -357,7 +371,7 @@ Example:
 }
 ```
 
-##### `PUT /api/v1/agents/{agent_id}/heartbeat` — Agent Heartbeat
+##### `PUT /api/v1alpha1/agents/{agent_id}/heartbeat` — Agent Heartbeat
 
 | Field        | Type              | Required | Description                                     |
 | ------------ | ----------------- | -------- | ----------------------------------------------- |
@@ -404,8 +418,8 @@ effectively take priority on a clean agent state.
 
 #### External SP Registration
 
-External SPs register via the REST API (`POST /api/v1/providers`), following the
-contract defined in the
+External SPs register via the REST API (`POST /api/v1alpha1/providers`),
+following the contract defined in the
 [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md)
 enhancement. The agent applies the same idempotency semantics (name as natural
 key, create-or-update behavior).
@@ -423,10 +437,10 @@ registration and frees the service type slot.
 
 When the list of supported service types changes as a result of an SP
 registration (embedded or external) and the agent is already registered to DCM,
-the agent updates DCM via a `POST /api/v1/agents` request with the full updated
-registration payload. If the agent has not yet registered to DCM (i.e., this is
-the first SP registering), the agent does not notify DCM yet; instead, the SP
-registration satisfies the prerequisite for the agent to proceed with its
+the agent updates DCM via a `POST /api/v1alpha1/agents` request with the full
+updated registration payload. If the agent has not yet registered to DCM (i.e.,
+this is the first SP registering), the agent does not notify DCM yet; instead,
+the SP registration satisfies the prerequisite for the agent to proceed with its
 initial registration to DCM (see
 [Agent Registration Flow](#agent-registration-flow)).
 
@@ -446,11 +460,11 @@ sequenceDiagram
 
     Note over AG: Agent starts:<br/>register only explicitly<br/>enabled embedded SPs
 
-    AG->>AG: Register explicitly enabled<br/>embedded SPs internally<br/>(K8s Container, ACM Cluster, KubeVirt<br/>— only if enabled in config)
+    AG->>AG: Register explicitly enabled<br/>embedded SPs internally<br/>(Container, Cluster, VM, Storage<br/>— only if enabled in config)
 
     Note over SP: External SP starts and<br/>registers to the agent
 
-    SP->>AG: POST /api/v1/providers<br/>{name, service_type, endpoint}
+    SP->>AG: POST /api/v1alpha1/providers<br/>{name, service_type, endpoint}
     activate AG
 
     alt Service type already served by another SP
@@ -459,7 +473,7 @@ sequenceDiagram
         AG->>AG: Store SP registration<br/>Add service type to supported list
 
         alt Service type list changed AND agent already registered to DCM
-            AG->>DCM: POST /api/v1/agents<br/>{name, environment, service_types,<br/>resources_available, cost, topic_name}
+            AG->>DCM: POST /api/v1alpha1/agents<br/>{name, environment, service_types,<br/>resources_available, cost, topic_name}
             activate DCM
             DCM->>DB: Update agent registration
             activate DB
@@ -487,7 +501,7 @@ sequenceDiagram
    by an external SP that persisted from a prior session), the agent logs a
    warning and continues without registering that embedded SP
 2. An external SP starts and registers to the agent via
-   `POST /api/v1/providers`, providing:
+   `POST /api/v1alpha1/providers`, providing:
    - Name
    - Service type it serves
    - Endpoint (URL where the agent can reach the SP)
@@ -497,11 +511,11 @@ sequenceDiagram
    - If **available**: the agent stores the SP registration and adds the service
      type to its supported list
 4. If the service type list changed (new service type added), the agent notifies
-   the DCM Control Plane by sending `POST /api/v1/agents` with the full updated
-   agent registration (name, environment, supported service types, available
-   resources, cost, topic name); the DCM Control Plane updates the agent record
-   in the database and responds with `200 OK`. If the agent is not yet
-   registered to the DCM Control Plane, this step is deferred — the SP
+   the DCM Control Plane by sending `POST /api/v1alpha1/agents` with the full
+   updated agent registration (name, environment, supported service types,
+   available resources, cost, topic name); the DCM Control Plane updates the
+   agent record in the database and responds with `200 OK`. If the agent is not
+   yet registered to the DCM Control Plane, this step is deferred — the SP
    registration instead satisfies the prerequisite for the agent's initial
    registration (see [Agent Registration Flow](#agent-registration-flow))
 5. The agent acknowledges the SP registration
@@ -531,7 +545,7 @@ sequenceDiagram
 
     Note over AG: Prerequisite:<br/>At least 1 SP (embedded or<br/>external) must be registered<br/>and healthy<br/>(see SP Registration to Agent)
 
-    AG->>DCM: POST /api/v1/agents<br/>{name, environment, service_types,<br/>resources_available, cost, topic_name}
+    AG->>DCM: POST /api/v1alpha1/agents<br/>{name, environment, service_types,<br/>resources_available, cost, topic_name}
     activate DCM
 
     DCM->>DB: Store agent registration<br/>{name, environment, service_types,<br/>resources_available, cost, topic_name}
@@ -574,10 +588,10 @@ sequenceDiagram
 
 #### Re-Registration on Restart
 
-When the agent restarts, it uses the same `POST /api/v1/agents` endpoint with
-the same payload. The agent does not persist its `agent_id`; it relies on DCM's
-idempotent registration, which uses the agent `name` as the natural key (same
-pattern as SP registration defined in the
+When the agent restarts, it uses the same `POST /api/v1alpha1/agents` endpoint
+with the same payload. The agent does not persist its `agent_id`; it relies on
+DCM's idempotent registration, which uses the agent `name` as the natural key
+(same pattern as SP registration defined in the
 [SP Registration Flow](../sp-registration-flow/sp-registration-flow.md)): if the
 name already exists and no `agent_id` is provided (or the same `agent_id` is
 provided), DCM updates the existing entry, returns the same `agent_id`, and
@@ -616,7 +630,7 @@ sequenceDiagram
         MS->>DCM: PUSH queued response
     else Service type supported and SP is Ready
         alt SP is embedded
-            AG->>EMB: In-process call<br/>{service_type, spec}
+            AG->>EMB: In-process call<br/>{id, spec}
             activate EMB
             alt Creation fails
                 EMB-->>AG: Error
@@ -630,7 +644,7 @@ sequenceDiagram
                 Note over EMB: SP manages resource lifecycle<br/>and reports status through<br/>the existing status reporting flow
             end
         else SP is external
-            AG->>EXT: POST {sp_endpoint}/api/v1/{service_type}<br/>{spec}
+            AG->>EXT: POST {sp_endpoint}?id={resource_id}<br/>{spec}
             activate EXT
             alt Creation fails
                 EXT-->>AG: Error response
@@ -667,14 +681,31 @@ sequenceDiagram
    - The request will be processed when the SP recovers, or rejected if the SP
      becomes Unavailable (see [Retry Topic](#retry-topic))
 6. If the service type is **supported and the SP is Ready**:
-   - The agent forwards the creation request to the SP via REST API (for
-     external SPs) or in-process call (for embedded SPs)
+   - The agent forwards the creation request per the
+     [Request forwarding](#request-forwarding) contract
    - If the SP returns an **immediate error**: the agent publishes an error
      CloudEvent back to the messaging system for DCM to consume
    - If the SP **accepts** the request: the agent publishes a CloudEvent
      acknowledging the creation is in progress. The SP takes over resource
      lifecycle management and reports status changes through the existing status
      reporting flow (SP → Messaging System → DCM)
+
+#### Request forwarding
+
+Forwarding is the same for every service type. The agent does not rewrite paths
+for Kubernetes or any other backend.
+
+1. Use the registered `endpoint` as an opaque URL. Do not append
+   `/api/v1/{service_type}` or otherwise reconstruct the SP path.
+2. On create, pass the DCM instance id (AEP-122) as the `id` query parameter
+   (`POST {sp_endpoint}?id={resource_id}`). Embedded calls pass the same id
+   in-process.
+3. Preserve the AEP resource body `{ spec: ... }`. Do not flatten `spec` to the
+   top level or re-wrap the payload.
+
+Delete uses `DELETE {sp_endpoint}/{resource_id}` against that same registered
+endpoint. Platform-specific mapping (for example PVC names) happens inside the
+SP, not in the agent.
 
 #### Service Type Uniqueness
 
@@ -837,7 +868,7 @@ sequenceDiagram
                 Note over EMB: SP manages resource deletion<br/>and reports final status through<br/>the existing status reporting flow
             end
         else SP is external
-            AG->>EXT: DELETE {sp_endpoint}/api/v1/{service_type}/{resource_id}
+            AG->>EXT: DELETE {sp_endpoint}/{resource_id}
             activate EXT
             alt Deletion fails
                 EXT-->>AG: Error response
@@ -873,8 +904,10 @@ sequenceDiagram
    - The request will be processed when the SP recovers, or rejected if the SP
      becomes Unavailable (see [Retry Topic](#retry-topic))
 6. If the service type is **supported and the SP is Ready**:
-   - The agent forwards the deletion request to the SP via a REST `DELETE` call
-     (for external SPs) or in-process call (for embedded SPs)
+   - The agent forwards the deletion request per the
+     [Request forwarding](#request-forwarding) contract
+     (`DELETE {sp_endpoint}/{resource_id}` for external SPs, or the equivalent
+     in-process call for embedded SPs)
    - If the SP returns an **immediate error**: the agent publishes an error
      CloudEvent back to the messaging system for DCM to consume
    - If the SP **accepts** the request: the agent publishes a CloudEvent
@@ -918,7 +951,7 @@ sequenceDiagram
     participant DB as Database
 
     loop Every {heartbeat_interval} seconds
-        AG->>DCM: PUT /api/v1/agents/{agent_id}/heartbeat<br/>{timestamp, consumer_lag}
+        AG->>DCM: PUT /api/v1alpha1/agents/{agent_id}/heartbeat<br/>{timestamp, consumer_lag}
         activate DCM
         DCM->>DB: Update heartbeat timestamp and lag
         DCM->>DCM: Check consumer_lag against threshold
@@ -997,7 +1030,7 @@ determined by that SP's health state:
 **When the SP becomes Unavailable:**
 
 1. The agent removes the service type from its advertised list
-2. The agent sends a `POST /api/v1/agents` request to DCM with the updated
+2. The agent sends a `POST /api/v1alpha1/agents` request to DCM with the updated
    registration (service types list without the affected type)
 3. The agent drains the retry topic: all held requests for that service type are
    rejected with error CloudEvents to DCM
@@ -1008,7 +1041,7 @@ determined by that SP's health state:
 state):
 
 1. If the service type was removed (Unavailable case): the agent re-adds it to
-   its list and sends a `POST /api/v1/agents` to DCM with the updated
+   its list and sends a `POST /api/v1alpha1/agents` to DCM with the updated
    registration
 2. The agent processes held requests from the retry topic for that service type
    (see [Retry Topic](#retry-topic))
@@ -1085,7 +1118,7 @@ sequenceDiagram
         MS->>DCM: PUSH health warning
 
     else SP for service type X becomes Unavailable
-        AG->>DCM: POST /api/v1/agents<br/>{updated service_types without X}
+        AG->>DCM: POST /api/v1alpha1/agents<br/>{updated service_types without X}
         activate DCM
         DCM->>DB: Update agent registration
         DB-->>DCM: Updated
@@ -1103,7 +1136,7 @@ sequenceDiagram
         Note over AG: Re-add service type if removed.<br/>Process held requests<br/>from retry topic.
 
         opt Service type was removed (Unavailable case)
-            AG->>DCM: POST /api/v1/agents<br/>{updated service_types with X}
+            AG->>DCM: POST /api/v1alpha1/agents<br/>{updated service_types with X}
             activate DCM
             DCM->>DB: Update agent registration
             DB-->>DCM: Updated
@@ -1136,7 +1169,7 @@ sequenceDiagram
      the `dcm.agents.health` topic
 4. When the SP for a service type becomes **Unavailable**:
    - The agent removes the service type from its advertised list
-   - The agent sends a `POST /api/v1/agents` to DCM with the updated
+   - The agent sends a `POST /api/v1alpha1/agents` to DCM with the updated
      registration
    - The agent drains the retry topic: all held requests for that service type
      are rejected with error CloudEvents to DCM
@@ -1144,7 +1177,7 @@ sequenceDiagram
      to the `dcm.agents.health` topic
 5. When a previously unhealthy or unavailable SP recovers:
    - If the service type was removed (Unavailable case): the agent re-adds it to
-     its list and sends a `POST /api/v1/agents` to DCM with the updated
+     its list and sends a `POST /api/v1alpha1/agents` to DCM with the updated
      registration
    - The agent processes held requests from the retry topic for that service
      type
@@ -1194,8 +1227,17 @@ target service type (see
   registration and health checks)
 - The agent has access to local persistent storage for persisting SP
   registrations across restarts
-- For Kubernetes/OpenShift deployments: the agent's service account has RBAC
-  permissions for the `pods/status` subresource
+- For Kubernetes/OpenShift deployments: the agent's service account has RBAC for
+  the out-of-box path as follows:
+  - **Agent core (always):** `pods/status` on the agent's own pod (pod-condition
+    health surface).
+  - **Embedded storage (`AGENT_EMBEDDED_SPS` includes `storage`):** namespaced
+    PersistentVolumeClaims (create, get, list, watch, delete) in the storage
+    workload namespace, plus cluster-wide StorageClasses get/list (existence
+    check before create). Agent-core `pods/status` alone is not sufficient. See
+    [K8s Storage SP](../k8s-storage-sp/k8s-storage-sp.md) prerequisites; the
+    validated in-cluster agent deployment MUST ship these rules when storage is
+    embedded.
 
 ### Risks and Mitigations
 
@@ -1207,7 +1249,7 @@ target service type (see
 | Agent crashes after consuming message but before responding                                           | SPRM detects stale `PENDING` records via periodic sweep and re-publishes the creation CloudEvent (configurable timeout and retry count). After retries are exhausted, Placement Manager re-evaluates to a different agent. A cancel CloudEvent is sent to the old agent's cancel topic to prevent stale processing. SP idempotent creation is the final safety net (see [SP Idempotency Requirement](../sp-resource-manager/sp-resource-manager.md#sp-idempotency-requirement)). |
 | Split-brain: agent loses DCM connectivity but keeps processing                                        | On reconnection, the agent re-registers to DCM. During the split, DCM marks the agent as unavailable and stops routing new requests to its topic. In-flight messages are processed normally. Duplicate creation risk if DCM re-routes to another agent is mitigated by SP idempotent creation and the cancel topic mechanism.                                                                                                                                                    |
 | Cancel topic double-crash: agent acknowledges cancel then crashes before filtering the stale creation | Accepted risk. On next restart the deny list is empty and the stale creation may be processed. SP idempotent creation prevents duplicate resources. The re-evaluated agent's SP rejects the duplicate `resource_id`.                                                                                                                                                                                                                                                             |
-| Unauthenticated external SP registration                                                              | Deferred to AuthN/Z iteration. Network isolation is the interim mitigation.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Unauthenticated external SP registration                                                              | Out of production scope until AuthN/Z (mTLS, API tokens, or OIDC). v1 production uses embedded SPs, which register internally and do not call `POST /api/v1alpha1/providers`. Network isolation is an interim mitigation for non-production BYO registration only.                                                                                                                                                                                                               |
 | Embedded SP crash takes down the agent                                                                | Embedded SPs run in-process; a panic/crash affects the entire agent. Mitigation: embedded SP code is well-tested and isolated in dedicated packages. Process-level restart recovers state via re-registration.                                                                                                                                                                                                                                                                   |
 
 ## Drawbacks
@@ -1221,9 +1263,8 @@ target service type (see
   embedded SPs, via polling for external SPs)
 - Requires messaging system infrastructure accessible to both DCM and all target
   environments
-- Embedding SP code (K8s Container, ACM Cluster, KubeVirt) increases agent
-  binary size and couples the agent release cycle to the embedded SPs for
-  updates
+- Embedding SP adapters (Container, Cluster, VM, Storage) increases agent binary
+  size and couples the agent release cycle to the embedded SPs for updates
 
 ## Alternatives
 
@@ -1346,11 +1387,12 @@ Referenced in [Overview](#overview) and
 
 ### Authentication and Authorization for SP Registration (consolidation)
 
-External SP registration is currently unauthenticated; the interim mitigation is
-network isolation. A future iteration would introduce an authentication and
-authorization layer for the agent's REST API (e.g., mTLS, API tokens, or OIDC),
-ensuring that only authorized SPs can register. This also applies to the agent's
-status endpoint and any future administrative APIs. Referenced in
+External SP registration (`POST /api/v1alpha1/providers`) is unauthenticated.
+That path is **not production scope** until an AuthN/Z iteration (mTLS, API
+tokens, or OIDC). v1 production uses embedded SPs, which register internally at
+startup. Network isolation is only an interim mitigation for non-production BYO
+registration. The same AuthN/Z work applies to the agent's status endpoint and
+any future administrative APIs. Referenced in
 [Risks and Mitigations](#risks-and-mitigations).
 
 ### Watch/Reconcile Pattern for Creation Requests (consolidation)
