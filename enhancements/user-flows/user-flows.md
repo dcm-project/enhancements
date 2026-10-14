@@ -1159,14 +1159,17 @@ sequenceDiagram
     CM->>PM: DELETE /api/v1/resources/{resource_id}
     PM->>DB: Lookup resource (agent_name, service_type, instance_id)
 
-    PM->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}
-    SPRM->>MS: PUBLISH CloudEvent<br/>topic: {topic_name}<br/>type: dcm.request.delete<br/>{resource_id, service_type}
-    SPRM-->>PM: 202 Accepted
+    PM->>SPRM: DELETE /api/v1/service-type-instances/{instance_id}<br/>?deferred=<bool>
+    SPRM->>DB: Enroll for deletion<br/>deletion_status: SCHEDULED
+    SPRM->>MS: PUBLISH CloudEvent (best-effort)<br/>topic: {topic_name}<br/>type: dcm.request.delete<br/>{resource_id, service_type}
+    SPRM->>DB: Update instance status: DELETING
+    SPRM-->>PM: 204 No Content
+    PM-->>CM: 204 No Content
 
     MS->>AG: Deliver deletion request
     AG->>SP: DELETE {sp_endpoint}/api/v1/{service_type}/{resource_id}
     SP-->>AG: {status: DELETING}
-    AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resource_id, agent_name, topic_name,<br/>status: DELETING}
+    AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>type: dcm.agent.deletion-acknowledged<br/>{resource_id, agent_name, topic_name,<br/>status: DELETING}
 
     opt Agent queues request (SP Unhealthy)
         AG->>MS: PUBLISH CloudEvent<br/>topic: dcm.agents.responses<br/>{resource_id, status: QUEUED}
@@ -1174,21 +1177,28 @@ sequenceDiagram
         SPRM->>SPRM: Update instance: QUEUED
         SPRM->>PM: Notify: deletion QUEUED
 
-        Note over PM: Resource stays DELETING.<br/>Deletion cannot be re-routed.<br/>Agent holds the request in its<br/>retry topic for automatic resolution.
+        Note over PM: Resource stays DELETING.<br/>Deletion cannot be re-routed.<br/>Agent holds the request in its<br/>retry topic; processed automatically<br/>when the SP recovers (see<br/>Environment Agent — Retry Topic).
 
         alt SP recovers — Agent processes held deletion
             AG->>SP: DELETE {sp_endpoint}/api/v1/{service_type}/{resource_id}
             SP-->>AG: {status: DELETING}
-            AG->>MS: PUBLISH CloudEvent<br/>{resource_id, status: DELETING}
+            AG->>MS: PUBLISH CloudEvent<br/>type: dcm.agent.deletion-acknowledged<br/>{resource_id, status: DELETING}
         else SP becomes Unavailable — Agent rejects
             AG->>MS: PUBLISH CloudEvent<br/>{resource_id, error: "SP unavailable"}
             MS->>SPRM: Deliver error
-            Note over SPRM: Enqueue in cleanup queue<br/>for deferred retry.<br/>Resource stays DELETING.
+            Note over SPRM: Instance stays deletion_status: SCHEDULED.<br/>The Deletion Cleanup Scheduler retries the<br/>publish periodically until acknowledged,<br/>until the agent is found deregistered<br/>(audited give-up → deletion_status: DELETED),<br/>or until retries are exhausted<br/>(deletion_status: FAILED). PM is not<br/>notified for either of those two outcomes —<br/>the resource stays DELETING at the PM<br/>level until an operator intervenes.
         end
     end
 
-    Note over SP: SP manages deletion<br/>and reports final status
-    SP->>MS: CloudEvent {status: DELETED}
-    MS->>SPRM: Status update
-    SPRM->>DB: Update status: DELETED
+    MS->>SPRM: Deliver dcm.agent.deletion-acknowledged
+    SPRM->>DB: Finalize: hard-delete<br/>(deferred=false) or deletion_status: DELETED<br/>tombstone (deferred=true)
+    SPRM->>PM: OnResourceDeleted (in-process)
 ```
+
+See
+[SP Resource Manager — Service Type Instance Deletion Flow](../sp-resource-manager/sp-resource-manager.md#service-type-instance-deletion-flow)
+and
+[Placement Manager — Service Deletion Flow](../placement-manager/placement-manager.md#service-deletion-flow)
+for the full deletion contract, including the `deferred` query parameter, the
+Deletion Cleanup Scheduler's retry/give-up rules, and what Placement Manager
+does and does not learn about each terminal outcome.
