@@ -61,7 +61,6 @@ UDLM-shaped `vm` request lets DCM use the same field paths for both providers.
 - Change VM catalog and policy paths to UDLM fields, such as `fields.cpu.count`.
 - Update both OSAC and KubeVirt SPs to accept the same request envelope and
   naturalize `fields` to their own infrastructure.
-- Reject a VM request if no available provider supports its contract.
 - Let one VM CatalogItem define UDLM VM fields, including disk defaults and
   which values users may edit.
 - Save the final VM spec after applying user values, so retries use what the
@@ -70,8 +69,7 @@ UDLM-shaped `vm` request lets DCM use the same field paths for both providers.
   restart, or deletion is not guaranteed; boot disks must still meet the
   requested-size rule.
 - Validate the complete resolved `fields` object against the pinned UDLM class
-  schema and DCM v1 rules before dispatch. Each SP must honor the values it
-  supports or reject the request before creating a VM.
+  schema and DCM v1 rules before dispatch.
 - Map UDLM VM requests to native resources inside each SP (naturalize). Map
   observed native state to UDLM-aligned output values (denaturalize) when the
   outputs path supports them.
@@ -144,7 +142,7 @@ can set or replace the type binding. DCM's current `ServiceType.spec` is a value
 template, not a full JSON Schema validator. The new path must validate the
 **complete resolved** `fields` object against the pinned generated
 `Machine.VM.spec` schema. DCM then applies its own v1 requirements before
-dispatch. Each SP checks its supported values before creating a VM.
+dispatch. Each SP checks which values it supports.
 
 The updated `vm` ServiceType definition carries this binding (fragment of the
 proposed ServiceType API, not a complete create request):
@@ -176,13 +174,13 @@ a nonempty `disks` list must be present. Each disk must have a unique name and a
 nonzero size. Reject missing names or sizes and malformed values. The UDLM disk
 definition makes `role` optional and describes at most one `boot` role. DCM
 rejects multiple explicit boot roles, but does not require a boot role. Each SP
-must honor a supplied role or reject the request before creating a VM. If every
-disk omits `role`, both SPs use the first disk as boot. If a disk has an
-explicit non-boot role but no disk has `role: "boot"`, a provider rejects the
-request rather than silently booting from a disk marked as non-boot. Each SP
-rejects values it does not support. Rejection means an error before VM creation,
-not a substituted default. The UDLM class schema allows the top-level fields
-above to be absent, so their required presence is a DCM v1 rule.
+must honor a supplied role or reject the request. If every disk omits `role`,
+both SPs use the first disk as boot. If a disk has an explicit non-boot role but
+no disk has `role: "boot"`, a provider rejects the request rather than silently
+booting from a disk marked as non-boot. If DCM validation fails or a provider
+cannot fulfill a requested value, return an error without creating a VM; do not
+substitute values. The UDLM class schema allows the top-level fields above to be
+absent, so their required presence is a DCM v1 rule.
 
 ### Provider compatibility
 
@@ -190,17 +188,17 @@ OSAC keeps its direct control-plane registration; KubeVirt uses the Environment
 Agent. Each registration must declare support for the exact `(vm, type_ref)`
 pair. Placement and dispatch require a ready provider with that pair. A missing
 or empty version list does not match. Both SPs check `resource_type` and
-`type_ref` and reject an unsupported version before creating a VM. The single
-`vm` name does not choose a provider; placement still chooses one.
+`type_ref` and reject an unsupported version. The single `vm` name does not
+choose a provider; placement still chooses one.
 
 Matching a schema version does not prove that a provider can fulfill every value
 in that schema. DCM accepts only its v1 field subset. If placement selects an SP
-that cannot fulfill a value, it rejects the request before VM creation. DCM
-returns the error; it does not silently send that request to another SP. OSAC
-selects its template and instance type inside the SP from the requested CPU,
-memory, guest OS, and provider configuration. If there is no match or more than
-one match, OSAC returns an error without creating a VM. The common request has
-no `provider_hints` field. OSAC must implement this mapping before release.
+that cannot fulfill a value, DCM returns the provider's error without silently
+sending the request to another SP. OSAC selects its template and instance type
+inside the SP from the requested CPU, memory, guest OS, and provider
+configuration. If there is no match or more than one match, OSAC returns an
+error. The common request has no `provider_hints` field. OSAC must implement
+this mapping before release.
 
 ### Field comparison: current DCM to proposed UDLM VM
 
@@ -222,7 +220,7 @@ active VM request format.
 
 This example describes **target v1 behavior**, not values the current providers
 already support. Both SPs need to prove they can fulfill a published
-CatalogItem's values or reject unsupported requests before creating a VM.
+CatalogItem's values.
 
 The catalog author marks the disk list as not editable and lets the user change
 the VM name. That is a choice for this CatalogItem, not a UDLM requirement.
@@ -318,10 +316,9 @@ record is needed.
 
 Before release, the published CatalogItem and example must use a proven
 supported OS and disk-size combination for every provider eligible to receive
-it. Unsupported values must fail before a VM is created; no provider may
-silently substitute an OS or disk size. The implementation work below describes
-the current provider gaps. The shared `vm` request does not carry
-`provider_hints`; OSAC selects provider-specific values inside the SP.
+it. The implementation work below describes the current provider gaps. The
+shared `vm` request does not carry `provider_hints`; OSAC selects
+provider-specific values inside the SP.
 
 ### VM request and result flow
 
@@ -400,8 +397,7 @@ these values after observing the VM; they are not predicted from the request.
   provider configuration, without `provider_hints` in the shared request. Its
   current boot-disk-by-name behavior must change to honor a supplied UDLM role
   or use the first disk as boot when every role is absent. OSAC must reject
-  values it cannot fulfill and missing or ambiguous template mappings before
-  creating a VM.
+  values it cannot fulfill and missing or ambiguous template mappings.
 - Update KubeVirt SP to accept the same body and map supported `Machine.VM`
   values to KubeVirt resources. It must honor or reject any supplied disk role;
   disk position or name must not override an explicit role. Its current boot
@@ -415,7 +411,7 @@ these values after observing the VM; they are not predicted from the request.
   `type_ref` versions supported for `vm`. A missing or empty version list does
   not qualify. Placement and dispatch check the exact `(vm, type_ref)` pair and
   fail if no compatible ready provider exists. Each SP rejects an unsupported
-  `resource_type` or `type_ref` before creating a VM.
+  `resource_type` or `type_ref`.
 - Reuse the typed `output_spec` status path proposed in
   [cross-provider-outputs PR #99](https://github.com/dcm-project/enhancements/pull/99).
   Define VM output fields against the pinned UDLM `Machine.VM` names:
@@ -434,11 +430,11 @@ these values after observing the VM; they are not predicted from the request.
 | DCM changes `vm` before both SPs are ready           | Accept temporary development failures; gate release on both provider paths     |
 | Old catalog or policy paths silently miss new fields | Change all VM paths together; test a policy that must reject a request         |
 | A provider accepts a schema version it cannot handle | Match pinned `(vm, type_ref)` at readiness and dispatch; reject mismatch       |
-| A selected provider cannot fulfill a valid VM value  | Reject before VM creation; return an error without silent provider fallback    |
+| A selected provider cannot fulfill a valid VM value  | Return its error without silently choosing another provider                    |
 | No ready provider passes the capability check        | Fail the request before dispatch; never skip the check for an empty list       |
 | The VM disk list is malformed or changes on retry    | Validate complete `fields`; reuse the saved resolved request                   |
 | OSAC uses an unrelated template or disk layout       | Map UDLM VM values through provider configuration; reject unsupported values   |
-| KubeVirt ignores requested OS, size, or boot role    | Prove the actual OS and disk sizes; reject unsupported values before creation  |
+| KubeVirt ignores requested OS, size, or boot role    | Prove the actual OS and disk sizes; reject unsupported values                  |
 | KubeVirt disk data is mistaken for retained storage  | State its temporary-disk behavior; track persistent storage in a separate epic |
 | UDLM changes after implementation starts             | Pin `type_ref` and release commit; review and test each version bump           |
 | VM outputs conflict with the outputs enhancement     | Reuse its typed `output_spec` and pinned UDLM names                            |
@@ -454,9 +450,8 @@ these values after observing the VM; they are not predicted from the request.
    policy, placement, retry, and dispatch.
 3. Update both SPs against the same pinned request. OSAC maps VM values to its
    template and instance type; KubeVirt updates image and disk handling. Each
-   provider advertises `(vm, type_ref)` and rejects unsupported values before VM
-   creation. The two SP changes can proceed in parallel once the contract is
-   fixed.
+   provider advertises `(vm, type_ref)` and rejects unsupported values. The two
+   SP changes can proceed in parallel once the contract is fixed.
 4. Verify a successful `vm` order through each SP with actual OS and disk
    values, plus invalid-field, provider-unavailable, and retry cases. Release
    only after DCM and both SPs pass the contract. Output population follows the
@@ -491,6 +486,9 @@ and KubeVirt before release. Current KubeVirt tests do not prove the requested
 OS image or disk sizes, and older PVC expectations must match this enhancement's
 temporary-disk scope.
 
+For every rejected request below, check that it returns an error and leaves no
+VM or partial provider resources.
+
 - Resolve a `vm` CatalogItem with defaults and editable user values. Validate
   the complete `fields` object against the pinned UDLM schema and DCM v1 rules.
   Reject unknown fields, malformed quantities, missing CPU, memory, guest OS or
@@ -506,16 +504,15 @@ temporary-disk scope.
   return an error without silently dispatching to another provider.
 - Run the full CatalogItem to VM flow through each SP in one deployment. Verify
   each provider uses the requested OS and disk sizes or rejects unsupported
-  values before VM creation. Check OSAC template and instance-type selection
-  from VM fields and provider configuration, including missing and ambiguous
-  mappings. Check KubeVirt boot and data disks, including the realized size of
-  boot media, which has no requested-capacity field in the current
-  `ContainerDisk` implementation.
+  values. Check OSAC template and instance-type selection from VM fields and
+  provider configuration, including missing and ambiguous mappings. Check
+  KubeVirt boot and data disks, including the realized size of boot media, which
+  has no requested-capacity field in the current `ContainerDisk` implementation.
 - Check that each SP honors or rejects explicit disk roles. When every role is
   omitted, verify that each SP uses the first disk as boot. A request with an
-  explicit non-boot role and no boot role must fail without creating a VM.
-  Reject an unsupported OS, disk setting, `resource_type`, or `type_ref` without
-  silently using another value or leaving partial resources.
+  explicit non-boot role and no boot role must fail. Reject an unsupported OS,
+  disk setting, `resource_type`, or `type_ref` without silently using another
+  value.
 - Verify VM status for both providers. Test populated UDLM output fields when
   the separate outputs milestone lands. Verify KubeVirt VM deletion removes its
   temporary disks; persistence and retention tests belong to the storage epic.
