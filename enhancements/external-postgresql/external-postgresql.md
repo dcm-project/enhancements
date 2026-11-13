@@ -55,11 +55,14 @@ default.
 ## Proposal
 
 An operator chooses exactly one PostgreSQL source for a fresh installation. Both
-Helm and Compose use bundled PostgreSQL by default; disabling it requires
-the address of an external server. `EXTERNAL_DB=true` selects the external
+Helm and Compose use bundled PostgreSQL by default; disabling it requires the
+address of an external server. `EXTERNAL_DB=true` selects the external
 configuration. In external mode DCM does not deploy the bundled PostgreSQL
 service, instead it connects to the configured host, port, and database. NATS
 and optional authentication are unaffected.
+
+Compose loads a shared base file plus exactly one database file: bundled by
+default, or external when `EXTERNAL_DB=true`.
 
 The operator supplies the external database, a dedicated login, and network
 access. The database must exist **before** DCM starts. DCM runs GORM
@@ -115,6 +118,14 @@ The bundled PostgreSQL instance starts and the control plane connects to it.
   clearly on a missing external host, including when schema validation is
   skipped.
 
+- **Compose:** `compose.yaml` defines shared services and NATS readiness, but no
+  PostgreSQL service or dependency. `compose.db-bundled.yaml` adds bundled
+  PostgreSQL and its readiness dependency; `compose.db-external.yaml` sets the
+  external host, port, and database name and requires a nonempty host. Make
+  selects exactly one database file, with bundled PostgreSQL as the default.
+  Authentication remains an independent optional file. Direct Compose callers
+  and utilities must include the appropriate database file explicitly.
+
 - **Credentials:** the existing `postgres.dbSecretRef` identifies a pre-created
   Secret in the Helm release namespace in either mode. External mode uses
   `DB_USER` and `DB_PASSWORD` for the control plane (`DB_PASS` remains a
@@ -127,11 +138,11 @@ The bundled PostgreSQL instance starts and the control plane connects to it.
 
 ### Risks and Mitigations
 
-| Risk                                                                                            | Mitigation                                                                                                                    |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Selecting external mode against an empty or inaccessible database prevents DCM startup.         | Document pre-creation, network reachability, and privileges; test failure messages.                                           |
-| A Compose override removes NATS or auth readiness, or leaves a dependency on absent PostgreSQL. | Inspect merged configs and run both modes with and without auth on both Compose implementations.                              |
-| Switching an existing install starts with empty state or destroys the old volume.               | Label this release fresh-install-only; do not treat a configuration switch as migration or remove old storage during testing. |
+| Risk                                                                                            | Mitigation                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Selecting external mode against a missing or inaccessible database prevents DCM startup.        | Fail with a clear message. Document DB pre-creation and privileges.                                                                                                                                  |
+| A Compose override removes NATS or auth readiness, or leaves a dependency on absent PostgreSQL. | Move bundled PostgreSQL and its dependency to a separate file, `compose.db-bundled.yaml` . Make loads exactly one database file, so external mode needs no dependency-removal override.              |
+| Switching an existing install starts with empty state                                           | External PostgreSQL is for fresh installations only, switching the database source is not supported. Helm and Compose do not reject such a switch. Adding installation-state checks is out of scope. |
 
 ## Design Details
 
@@ -155,9 +166,10 @@ behavior changes.
   invalid port, and empty database; run the chart's schema, lint, and render
   checks.
 - Inspect and start the merged Docker Compose and podman-compose configurations
-  in bundled/external modes, both with and without auth. Confirm NATS and
-  Keycloak dependencies remain where appropriate and no PostgreSQL service or
-  dependency appears in external mode. Check utilities' default invocation.
+  in bundled/external modes, both with and without auth. Confirm each supported
+  invocation loads exactly one database file, NATS and Keycloak dependencies
+  remain where appropriate, and no PostgreSQL service or dependency appears in
+  external mode. Check utilities' default invocation includes the bundled file.
 - Start against a real external PostgreSQL database with nondefault connection
   settings. Check wrong credentials, missing database, and insufficient schema
   permissions. Test with a fresh empty database, not a live cutover.
@@ -178,8 +190,9 @@ and cut over under a separately validated migration procedure.
 
 External database mode transfers database provisioning, security, privileges,
 backups, and recovery to the operator. Compose deployment changes must also
-preserve the existing bundled default for direct callers. These costs are
-acceptable to provide a supported bring-your-own-database path.
+update direct Compose callers to include the bundled database file; the Make
+default remains unchanged. These costs are acceptable to provide a supported
+bring-your-own-database path.
 
 ## Alternatives
 
